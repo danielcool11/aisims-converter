@@ -296,7 +296,8 @@ if st.button("CONVERT", type="primary", use_container_width=True):
         # Stairs (uses boundary data from slabs for location)
         if stair_raw is not None:
             progress.progress(60, text="Phase 2: Stairs...")
-            stairs_df = convert_stairs(stair_raw, stair_boundaries)
+            walls_for_stair = elem_result['walls'] if 'walls' in elem_result else None
+            stairs_df = convert_stairs(stair_raw, stair_boundaries, nodes_df, walls_for_stair)
             outputs['stairs'] = stairs_df
             log(f"Stairs: {len(stairs_df)} stair members")
 
