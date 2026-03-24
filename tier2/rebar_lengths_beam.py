@@ -1,0 +1,931 @@
+"""
+Beam Rebar Length Calculator — Tier 2
+
+Computes bar-by-bar lengths for beam reinforcement including:
+- Main bars (TOP/BOT) with anchorage (hook/lap) based on gridline role
+- Additional bars for VARIABLE reinforcement zones
+- Stirrups with zone lengths (EXT/INT/CTR)
+- Stock length split (>12m → 2 pieces with mid-bar lap)
+- 3D coordinates for BIM rendering
+
+Logic adapted from RebarLengthsBeamCalculator.py (v8)
+Reads Tier 1 output from AISIMS converter.
+
+Input:  MembersBeam.csv, MembersColumn.csv, Sections.csv,
+        ReinforcementBeam.csv, Nodes.csv,
+        beam_development_lengths.csv, beam_lap_splice.csv
+Output: RebarLengthsBeam.csv
+"""
+
+import pandas as pd
+import numpy as np
+import re
+import math
+from pathlib import Path
+
+# ── Constants ────────────────────────────────────────────────────────────────
+
+COVER_MM = 50.0
+HOOK_EXTENSION_FACTOR = 10
+MAX_STOCK_LENGTH_MM = 12000
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _steel_grade(dia_mm):
+    """D10, D13 → 500 MPa; others → 600 MPa."""
+    return 500 if int(dia_mm) in (10, 13) else 600
+
+
+def _dia_label(d_mm):
+    return f'D{int(d_mm)}'
+
+
+def _parse_fc(material_id):
+    """Extract concrete strength from material_id: 'C35' → 35."""
+    m = re.search(r'(\d+)', str(material_id).upper())
+    return int(m.group(1)) if m else 35  # default to 35
+
+
+def _beam_direction(x_from, y_from, x_to, y_to):
+    """Determine beam direction from coordinates."""
+    dx = abs(x_to - x_from)
+    dy = abs(y_to - y_from)
+    if dy < 1 and dx > 1:
+        return 'X'
+    if dx < 1 and dy > 1:
+        return 'Y'
+    # Diagonal — use dominant direction
+    return 'X' if dx >= dy else 'Y'
+
+
+def _bar_z(z_ref, h_mm, cover_mm, position, layer, dia_mm):
+    """Calculate bar Z coordinate within beam cross-section."""
+    layer_spacing = max(25.0, float(dia_mm))
+    if position == 'TOP':
+        z_top = z_ref + h_mm / 2
+        if layer == 1:
+            return z_top - cover_mm - dia_mm / 2
+        elif layer == 2:
+            z1 = z_top - cover_mm - dia_mm / 2
+            return z1 - dia_mm - layer_spacing
+        elif layer == 3:
+            z1 = z_top - cover_mm - dia_mm / 2
+            z2 = z1 - dia_mm - layer_spacing
+            return z2 - dia_mm - layer_spacing
+    elif position == 'BOT':
+        z_bot = z_ref - h_mm / 2
+        if layer == 1:
+            return z_bot + cover_mm + dia_mm / 2
+        elif layer == 2:
+            z1 = z_bot + cover_mm + dia_mm / 2
+            return z1 + dia_mm + layer_spacing
+    return z_ref
+
+
+# ── Lookup tables ────────────────────────────────────────────────────────────
+
+class DevLapLookup:
+    """Development length and lap splice lookup."""
+
+    def __init__(self, dev_path, lap_path):
+        self.dev_df = pd.read_csv(dev_path)
+        self.lap_df = pd.read_csv(lap_path)
+        self.dev_df.columns = self.dev_df.columns.str.strip()
+        self.lap_df.columns = self.lap_df.columns.str.strip()
+
+    def get(self, fy, dia_mm, fc):
+        """
+        Returns (Ldh, Lpt_B, Lpb_B):
+            Ldh:   development length for hook
+            Lpt_B: top bar lap splice (Class B)
+            Lpb_B: bottom bar lap splice (Class B)
+        """
+        d_label = _dia_label(dia_mm)
+
+        row_dev = self.dev_df[
+            (self.dev_df['fy'] == fy) &
+            (self.dev_df['diameter'] == d_label) &
+            (self.dev_df['fc'] == fc)
+        ]
+        if row_dev.empty:
+            # Fallback: try nearest fc
+            row_dev = self.dev_df[
+                (self.dev_df['fy'] == fy) &
+                (self.dev_df['diameter'] == d_label)
+            ]
+            if row_dev.empty:
+                print(f'  [WARN] No dev length for fy={fy}, {d_label}, fc={fc}')
+                return 300, 600, 500  # safe defaults
+            # Pick closest fc
+            row_dev = row_dev.iloc[(row_dev['fc'] - fc).abs().argsort()[:1]]
+
+        Ldh = float(row_dev['Ldh'].iloc[0])
+
+        row_lap = self.lap_df[
+            (self.lap_df['fy'] == fy) &
+            (self.lap_df['diameter'] == d_label) &
+            (self.lap_df['fc'] == fc)
+        ]
+        if row_lap.empty:
+            row_lap = self.lap_df[
+                (self.lap_df['fy'] == fy) &
+                (self.lap_df['diameter'] == d_label)
+            ]
+            if row_lap.empty:
+                return Ldh, 600, 500
+            row_lap = row_lap.iloc[(row_lap['fc'] - fc).abs().argsort()[:1]]
+
+        Lpt_B = float(row_lap['Lpt_B'].iloc[0])
+        Lpb_B = float(row_lap['Lpb_B'].iloc[0])
+
+        return Ldh, Lpt_B, Lpb_B
+
+
+# ── Data adapter (reads our Tier 1 format) ───────────────────────────────────
+
+class BeamDataAdapter:
+    """Adapts our converter output to the calculator's needs."""
+
+    def __init__(self, beams_df, columns_df, sections_df, reinf_df, nodes_df):
+        self.beams_df = beams_df.copy()
+        self.columns_df = columns_df.copy()
+        self.sections_df = sections_df.copy()
+        self.reinf_df = reinf_df.copy()
+        self.nodes_df = nodes_df.copy()
+
+        self._build_lookups()
+
+    def _build_lookups(self):
+        # Section properties: section_id → {b_mm, h_mm, cover_mm, effective_depth, shape}
+        self.section_props = {}
+        for _, row in self.sections_df.iterrows():
+            sid = str(row['section_id'])
+            self.section_props[sid] = {
+                'b_mm': float(row['b_mm']) if pd.notna(row.get('b_mm')) else None,
+                'h_mm': float(row['h_mm']) if pd.notna(row.get('h_mm')) else None,
+                'effective_depth': float(row['effective_depth_mm']) if pd.notna(row.get('effective_depth_mm')) else None,
+                'cover_mm': float(row.get('cover_mm', COVER_MM)),
+                'shape': str(row.get('shape', 'RECT')).upper(),
+            }
+
+        # Node coordinates
+        self.node_coords = {}
+        for _, row in self.nodes_df.iterrows():
+            self.node_coords[str(row['node_id'])] = {
+                'x_mm': float(row['x_mm']),
+                'y_mm': float(row['y_mm']),
+                'z_mm': float(row['z_mm']),
+            }
+
+        # Column dimensions at grid points: grid → {b_mm, h_mm}
+        self.column_dims = {}
+        for _, row in self.columns_df.iterrows():
+            grid = str(row.get('grid', ''))
+            if grid and grid != 'OFF_GRID':
+                b = float(row['b_mm']) if pd.notna(row.get('b_mm')) else 0
+                h = float(row['h_mm']) if pd.notna(row.get('h_mm')) else 0
+                self.column_dims[grid] = {'b_mm': b, 'h_mm': h}
+
+        # Beam direction and line_key
+        self.beams_df['direction'] = self.beams_df.apply(
+            lambda r: _beam_direction(
+                r.get('x_from_mm', 0), r.get('y_from_mm', 0),
+                r.get('x_to_mm', 0), r.get('y_to_mm', 0)
+            ), axis=1
+        )
+
+        # Line key for grouping beams on same gridline
+        # Use coordinate clustering: beams at similar perpendicular coordinate
+        # are on the same gridline (tolerance-based, not exact match)
+        self._assign_line_keys()
+
+        # Parse reinforcement into per-member config
+        self._parse_reinforcement()
+
+    def _assign_line_keys(self, tolerance=50.0):
+        """
+        Group beams into gridlines by clustering perpendicular coordinates.
+        X-direction beams: cluster by Y coordinate
+        Y-direction beams: cluster by X coordinate
+        """
+        df = self.beams_df
+
+        # Initialize line_key as object column to hold tuples
+        line_keys = [None] * len(df)
+
+        for direction in ['X', 'Y']:
+            mask = df['direction'] == direction
+            subset = df[mask]
+            if subset.empty:
+                continue
+
+            perp_col = 'y_from_mm' if direction == 'X' else 'x_from_mm'
+
+            for level in subset['level'].unique():
+                level_mask = mask & (df['level'] == level)
+                level_subset = df[level_mask]
+                if level_subset.empty:
+                    continue
+
+                perp_values = level_subset[perp_col].values
+                unique_perps = sorted(set(float(v) for v in perp_values))
+
+                if not unique_perps:
+                    continue
+
+                # Cluster
+                clusters = []
+                current_cluster = [unique_perps[0]]
+                for val in unique_perps[1:]:
+                    if val - current_cluster[-1] <= tolerance:
+                        current_cluster.append(val)
+                    else:
+                        clusters.append(current_cluster)
+                        current_cluster = [val]
+                clusters.append(current_cluster)
+
+                val_to_cluster = {}
+                for cluster in clusters:
+                    rep = round(sum(cluster) / len(cluster), 1)
+                    for v in cluster:
+                        val_to_cluster[v] = rep
+
+                for idx in level_subset.index:
+                    perp = float(df.at[idx, perp_col])
+                    cluster_rep = val_to_cluster.get(perp, perp)
+                    pos = df.index.get_loc(idx)
+                    line_keys[pos] = (level, direction, cluster_rep)
+
+        df['line_key'] = line_keys
+
+    def _parse_reinforcement(self):
+        """Parse our flat reinforcement format into per-member rebar config.
+
+        ReinforcementBeam member_ids have level prefixes (e.g., '-1B11', '6G1')
+        while MembersBeam uses base IDs ('B11', 'G1'). We strip the prefix
+        and store configs keyed by base member_id.
+        """
+        from converters.validation import _extract_base_member_id
+
+        self.long_cfg = {}    # (base_member_id, position) → {dia, main, zones, is_uniform}
+        self.stirrup_cfg = {} # base_member_id → {zone: {dia_mm, n_legs, spacing_mm}}
+
+        for _, row in self.reinf_df.iterrows():
+            raw_mid = str(row.get('member_id', '')).strip()
+            pos = str(row.get('position', '')).strip()  # I, M, J
+
+            if not raw_mid or not pos:
+                continue
+
+            # Strip level prefix: '-1B11' → 'B11', '6G1' → 'G1', 'LB1' → 'LB1'
+            mid = _extract_base_member_id(raw_mid)
+
+            # Map I/M/J to zones: I=EXT, M=INT (or CTR), J=EXT
+            # TOP bars
+            top_total = row.get('top_total')
+            top_dia = row.get('top_dia_mm')
+            if pd.notna(top_total) and pd.notna(top_dia) and int(top_total) > 0:
+                zone = 'EXT' if pos in ('I', 'J') else 'INT'
+                key = (mid, 'TOP')
+                if key not in self.long_cfg:
+                    self.long_cfg[key] = {
+                        'dia': float(top_dia),
+                        'zones': {},
+                        'main': 0,
+                    }
+                self.long_cfg[key]['zones'][zone] = max(
+                    self.long_cfg[key]['zones'].get(zone, 0), int(top_total)
+                )
+
+            # BOT bars
+            bot_total = row.get('bot_total')
+            bot_dia = row.get('bot_dia_mm')
+            if pd.notna(bot_total) and pd.notna(bot_dia) and int(bot_total) > 0:
+                zone = 'EXT' if pos in ('I', 'J') else 'CTR'
+                key = (mid, 'BOT')
+                if key not in self.long_cfg:
+                    self.long_cfg[key] = {
+                        'dia': float(bot_dia),
+                        'zones': {},
+                        'main': 0,
+                    }
+                self.long_cfg[key]['zones'][zone] = max(
+                    self.long_cfg[key]['zones'].get(zone, 0), int(bot_total)
+                )
+
+            # Stirrups (from any position — typically same across I/M/J)
+            st_dia = row.get('stirrup_dia_mm')
+            st_legs = row.get('stirrup_legs')
+            st_spacing = row.get('stirrup_spacing_mm')
+            if pd.notna(st_dia) and pd.notna(st_spacing):
+                zone = 'EXT' if pos in ('I', 'J') else 'INT'
+                if mid not in self.stirrup_cfg:
+                    self.stirrup_cfg[mid] = {}
+                self.stirrup_cfg[mid][zone] = {
+                    'dia_mm': float(st_dia),
+                    'n_legs': int(st_legs) if pd.notna(st_legs) else 2,
+                    'spacing_mm': float(st_spacing),
+                }
+
+        # Finalize: compute 'main' count (minimum across zones) and is_uniform
+        for key, cfg in self.long_cfg.items():
+            zones = cfg['zones']
+            if zones:
+                cfg['main'] = min(zones.values())
+                cfg['num_zones'] = len(zones)
+                cfg['is_uniform'] = (len(set(zones.values())) == 1)
+            else:
+                cfg['main'] = 0
+                cfg['is_uniform'] = True
+
+    def get_column_width(self, grid, direction):
+        """Get column width at a grid point in beam direction."""
+        dims = self.column_dims.get(grid, {'b_mm': 0, 'h_mm': 0})
+        if direction == 'X':
+            return dims.get('b_mm', 0) or 0
+        return dims.get('h_mm', 0) or 0
+
+    def get_section(self, section_id):
+        return self.section_props.get(str(section_id))
+
+    def get_long_cfg(self, member_id, position):
+        return self.long_cfg.get((member_id, position.upper()))
+
+    def get_stirrup_zones(self, member_id):
+        return list(self.stirrup_cfg.get(member_id, {}).keys())
+
+    def get_stirrup_cfg(self, member_id, zone):
+        return self.stirrup_cfg.get(member_id, {}).get(zone)
+
+
+# ── Anchorage info ───────────────────────────────────────────────────────────
+
+def _add_anchorage(bar, Ldh, Lpt_B, Lpb_B):
+    """Add anchorage type and lengths to bar dict."""
+    role = bar['bar_role']
+    pos = bar['bar_position']
+
+    if role == 'MAIN_SINGLE':
+        bar.update(anchorage_start='HOOK', anchorage_end='HOOK', lap_length_mm=None)
+    elif role == 'MAIN_START':
+        bar.update(anchorage_start='HOOK', anchorage_end='LAP',
+                   lap_length_mm=Lpt_B if pos == 'TOP' else Lpb_B)
+    elif role == 'MAIN_INTERMEDIATE':
+        bar.update(anchorage_start='LAP', anchorage_end='LAP',
+                   lap_length_mm=Lpt_B if pos == 'TOP' else Lpb_B)
+    elif role == 'MAIN_END':
+        bar.update(anchorage_start='LAP', anchorage_end='HOOK',
+                   lap_length_mm=Lpt_B if pos == 'TOP' else Lpb_B)
+    elif role == 'ADD_START':
+        bar.update(anchorage_start='HOOK', anchorage_end='STRAIGHT', lap_length_mm=None)
+    elif role == 'ADD_END':
+        bar.update(anchorage_start='STRAIGHT', anchorage_end='HOOK', lap_length_mm=None)
+    elif role in ('ADD_INTERMEDIATE', 'ADD_MIDSPAN'):
+        bar.update(anchorage_start='STRAIGHT', anchorage_end='STRAIGHT', lap_length_mm=None)
+
+    bar['development_length_mm'] = Ldh
+    bar['transition_type'] = None
+    return bar
+
+
+# ── Stock length split ───────────────────────────────────────────────────────
+
+def _split_stock(bar, L_lap, direction):
+    """Split bar if >12m. Returns list of 1 or 2 bars."""
+    length = bar['length_mm']
+    if length <= MAX_STOCK_LENGTH_MM:
+        bar['split_piece'] = None
+        bar['original_length_mm'] = None
+        return [bar]
+
+    piece_len = int(round((length + L_lap) / 2))
+
+    xs = bar.get('x_start_mm', 0) or 0
+    ys = bar.get('y_start_mm', 0) or 0
+    zs = bar.get('z_start_mm', 0) or 0
+    xe = bar.get('x_end_mm', 0) or 0
+    ye = bar.get('y_end_mm', 0) or 0
+    ze = bar.get('z_end_mm', 0) or 0
+    mx, my, mz = (xs + xe) / 2, (ys + ye) / 2, (zs + ze) / 2
+
+    p1 = {**bar, 'length_mm': piece_len, 'split_piece': 1,
+          'original_length_mm': length, 'anchorage_end': 'LAP',
+          'lap_length_mm': L_lap, 'x_end_mm': mx, 'y_end_mm': my, 'z_end_mm': mz}
+    p2 = {**bar, 'length_mm': piece_len, 'split_piece': 2,
+          'original_length_mm': length, 'anchorage_start': 'LAP',
+          'lap_length_mm': L_lap, 'x_start_mm': mx, 'y_start_mm': my, 'z_start_mm': mz}
+    return [p1, p2]
+
+
+# ── ADD bar coordinates ──────────────────────────────────────────────────────
+
+def _add_bar_coords(role, length, direction, xs, ys, zs, xe, ye, ze):
+    """Calculate start/end coordinates for ADD bars."""
+    if direction == 'X':
+        if role == 'ADD_START':
+            return {'x_start_mm': xs, 'y_start_mm': ys, 'z_start_mm': zs,
+                    'x_end_mm': xs + length, 'y_end_mm': ys, 'z_end_mm': zs}
+        if role == 'ADD_END':
+            return {'x_start_mm': xe - length, 'y_start_mm': ys, 'z_start_mm': zs,
+                    'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': ze}
+        if role in ('ADD_INTERMEDIATE', 'ADD_SUPPORT_BRIDGING'):
+            return {'x_start_mm': xe - length / 2, 'y_start_mm': ys, 'z_start_mm': zs,
+                    'x_end_mm': xe + length / 2, 'y_end_mm': ye, 'z_end_mm': ze}
+        if role == 'ADD_MIDSPAN':
+            mx = (xs + xe) / 2
+            return {'x_start_mm': mx - length / 2, 'y_start_mm': ys, 'z_start_mm': zs,
+                    'x_end_mm': mx + length / 2, 'y_end_mm': ye, 'z_end_mm': ze}
+    elif direction == 'Y':
+        if role == 'ADD_START':
+            return {'x_start_mm': xs, 'y_start_mm': ys, 'z_start_mm': zs,
+                    'x_end_mm': xs, 'y_end_mm': ys + length, 'z_end_mm': zs}
+        if role == 'ADD_END':
+            return {'x_start_mm': xs, 'y_start_mm': ye - length, 'z_start_mm': zs,
+                    'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': ze}
+        if role == 'ADD_INTERMEDIATE':
+            return {'x_start_mm': xs, 'y_start_mm': ye - length / 2, 'z_start_mm': zs,
+                    'x_end_mm': xe, 'y_end_mm': ye + length / 2, 'z_end_mm': ze}
+        if role == 'ADD_MIDSPAN':
+            my = (ys + ye) / 2
+            return {'x_start_mm': xs, 'y_start_mm': my - length / 2, 'z_start_mm': zs,
+                    'x_end_mm': xe, 'y_end_mm': my + length / 2, 'z_end_mm': ze}
+    return {'x_start_mm': xs, 'y_start_mm': ys, 'z_start_mm': zs,
+            'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': ze}
+
+
+# ── Process one sub-group of same-diameter contiguous spans ──────────────────
+
+def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
+    """Process contiguous same-diameter spans. Returns list of bar dicts."""
+    results = []
+    n_sub = len(span_list)
+
+    for sub_i, info in enumerate(span_list):
+        sp = info['sp']
+        member_id = info['member_id']
+        cfg_top = info['cfg_top']
+        cfg_bot = info['cfg_bot']
+        is_uniform = info['is_uniform']
+
+        span_idx = info['index'] + 1
+        segment_id = f"{member_id}-SEG{span_idx:03d}"
+
+        grid_from = sp.get('grid_from', '')
+        grid_to = sp.get('grid_to', '')
+        l_span = float(sp['length_mm'])
+        fc = _parse_fc(sp.get('material_id', 'C35'))
+
+        # Coordinates from beam data
+        xs = sp.get('x_from_mm', 0) or 0
+        ys = sp.get('y_from_mm', 0) or 0
+        zs = sp.get('z_mm', 0) or 0
+        xe = sp.get('x_to_mm', 0) or 0
+        ye = sp.get('y_to_mm', 0) or 0
+        ze = zs  # beams are horizontal
+
+        dia_top = cfg_top['dia']
+        dia_bot = cfg_bot['dia']
+        fy = _steel_grade(dia_top)
+        Ldh, Lpt_B, Lpb_B = lookup.get(fy, dia_top, fc)
+
+        sec = adapter.get_section(sp.get('section_id', ''))
+        if sec is None:
+            # Use b_mm/h_mm from beam directly
+            b_mm = sp.get('b_mm', 300)
+            h_mm = sp.get('h_mm', 500)
+            d_eff = h_mm - COVER_MM - 11
+            cover = COVER_MM
+            shape = 'RECT'
+        else:
+            b_mm = sec['b_mm'] or sp.get('b_mm', 300)
+            h_mm = sec['h_mm'] or sp.get('h_mm', 500)
+            d_eff = sec['effective_depth'] or (h_mm - COVER_MM - 11)
+            cover = sec['cover_mm']
+            shape = sec['shape']
+
+        lext = max(d_eff, 12.0 * dia_top)
+
+        Wc1 = adapter.get_column_width(grid_from, direction)
+        Wc2 = adapter.get_column_width(grid_to, direction)
+        l_cl = l_span - 0.5 * (Wc1 + Wc2)
+
+        is_first = (sub_i == 0)
+        is_last = (sub_i == n_sub - 1)
+        is_single = (n_sub == 1)
+
+        # Bar counts
+        if is_single:
+            main_top = int(cfg_top['zones'].get('INT', cfg_top['main']))
+            main_bot = int(cfg_bot['zones'].get('CTR', cfg_bot['main']))
+        elif is_uniform:
+            main_top = int(cfg_top['main'])
+            main_bot = int(cfg_bot['main'])
+        else:
+            main_top = int(gm_top)
+            main_bot = int(gm_bot)
+
+        # Main bar role & length
+        if is_single:
+            role = 'MAIN_SINGLE'
+            Ltop = l_cl + Ldh + Ldh
+            Lbot = l_cl + Ldh + Ldh
+        elif is_first:
+            role = 'MAIN_START'
+            Ltop = l_cl + Ldh + Lpt_B
+            Lbot = l_cl + Ldh + Lpb_B
+        elif is_last:
+            role = 'MAIN_END'
+            Ltop = l_cl + Ldh
+            Lbot = l_cl + Ldh
+        else:
+            role = 'MAIN_INTERMEDIATE'
+            Ltop = l_span + Lpt_B
+            Lbot = l_span + Lpb_B
+
+        base = {
+            'segment_id': segment_id, 'level': sp.get('level', ''),
+            'direction': direction, 'line_grid': info['line_grid'],
+            'member_id': member_id, 'span_index': span_idx,
+            'start_grid': grid_from, 'end_grid': grid_to,
+            'b_mm': b_mm, 'h_mm': h_mm, 'shape': shape,
+        }
+
+        # MAIN TOP
+        z_s_top = _bar_z(zs, h_mm, cover, 'TOP', 1, dia_top)
+        z_e_top = _bar_z(ze, h_mm, cover, 'TOP', 1, dia_top)
+        mt = {**base, 'x_start_mm': xs, 'y_start_mm': ys, 'z_start_mm': z_s_top,
+              'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': z_e_top,
+              'bar_position': 'TOP', 'bar_role': role, 'bar_type': 'MAIN',
+              'dia_mm': dia_top, 'n_bars': main_top, 'length_mm': int(round(Ltop)),
+              'layer': 1, 'reinforcement_type': 'UNIFORM' if is_uniform else 'VARIABLE'}
+        mt = _add_anchorage(mt, Ldh, Lpt_B, Lpb_B)
+        for piece in _split_stock(mt, Lpt_B, direction):
+            results.append(piece)
+
+        # MAIN BOT
+        z_s_bot = _bar_z(zs, h_mm, cover, 'BOT', 1, dia_bot)
+        z_e_bot = _bar_z(ze, h_mm, cover, 'BOT', 1, dia_bot)
+        mb = {**base, 'x_start_mm': xs, 'y_start_mm': ys, 'z_start_mm': z_s_bot,
+              'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': z_e_bot,
+              'bar_position': 'BOT', 'bar_role': role, 'bar_type': 'MAIN',
+              'dia_mm': dia_bot, 'n_bars': main_bot, 'length_mm': int(round(Lbot)),
+              'layer': 1, 'reinforcement_type': 'UNIFORM' if is_uniform else 'VARIABLE'}
+        mb = _add_anchorage(mb, Ldh, Lpt_B, Lpb_B)
+        for piece in _split_stock(mb, Lpb_B, direction):
+            results.append(piece)
+
+        # ADD bars (VARIABLE only, with continuity)
+        if not is_uniform and not is_single:
+            zones_top = cfg_top.get('zones', {})
+            zones_bot = cfg_bot.get('zones', {})
+
+            add_top_ext = int(max(0, zones_top.get('EXT', gm_top) - gm_top))
+            add_top_int = int(max(0, zones_top.get('INT', gm_top) - gm_top))
+            add_bot_ctr = int(max(0, zones_bot.get('CTR', gm_bot) - gm_bot))
+
+            # Adjacent clear length
+            l_cl_next = l_cl
+            if sub_i < n_sub - 1:
+                next_sp = span_list[sub_i + 1]['sp']
+                next_Wc1 = adapter.get_column_width(next_sp.get('grid_from', ''), direction)
+                next_Wc2 = adapter.get_column_width(next_sp.get('grid_to', ''), direction)
+                l_cl_next = float(next_sp['length_mm']) - 0.5 * (next_Wc1 + next_Wc2)
+
+            # ADD_START (first span, EXT zone has more bars than main)
+            if is_first and add_top_ext > 0:
+                L = Ldh + 0.25 * l_cl + lext
+                ac = _add_bar_coords('ADD_START', L, direction, xs, ys, zs, xe, ye, ze)
+                zsa = _bar_z(ac['z_start_mm'], h_mm, cover, 'TOP', 3, dia_top)
+                zea = _bar_z(ac['z_end_mm'], h_mm, cover, 'TOP', 3, dia_top)
+                d = {**base, **ac, 'z_start_mm': zsa, 'z_end_mm': zea,
+                     'bar_position': 'TOP', 'bar_role': 'ADD_START', 'bar_type': 'ADD',
+                     'dia_mm': dia_top, 'n_bars': add_top_ext,
+                     'length_mm': int(round(L)), 'layer': 3,
+                     'reinforcement_type': 'VARIABLE'}
+                results.append(_add_anchorage(d, Ldh, Lpt_B, Lpb_B))
+
+            # ADD_INTERMEDIATE (support bridging between spans)
+            if not is_last and add_top_int > 0:
+                L = 0.25 * (l_cl + l_cl_next) + Wc2 + 2 * lext
+                ac = _add_bar_coords('ADD_INTERMEDIATE', L, direction, xs, ys, zs, xe, ye, ze)
+                zsa = _bar_z(ac['z_start_mm'], h_mm, cover, 'TOP', 2, dia_top)
+                zea = _bar_z(ac['z_end_mm'], h_mm, cover, 'TOP', 2, dia_top)
+                d = {**base, **ac, 'z_start_mm': zsa, 'z_end_mm': zea,
+                     'bar_position': 'TOP', 'bar_role': 'ADD_INTERMEDIATE', 'bar_type': 'ADD',
+                     'dia_mm': dia_top, 'n_bars': add_top_int,
+                     'length_mm': int(round(L)), 'layer': 2,
+                     'reinforcement_type': 'VARIABLE'}
+                results.append(_add_anchorage(d, Ldh, Lpt_B, Lpb_B))
+
+            # ADD_END (last span)
+            if is_last and add_top_ext > 0:
+                L = Ldh + 0.25 * l_cl + lext
+                ac = _add_bar_coords('ADD_END', L, direction, xs, ys, zs, xe, ye, ze)
+                zsa = _bar_z(ac['z_start_mm'], h_mm, cover, 'TOP', 3, dia_top)
+                zea = _bar_z(ac['z_end_mm'], h_mm, cover, 'TOP', 3, dia_top)
+                d = {**base, **ac, 'z_start_mm': zsa, 'z_end_mm': zea,
+                     'bar_position': 'TOP', 'bar_role': 'ADD_END', 'bar_type': 'ADD',
+                     'dia_mm': dia_top, 'n_bars': add_top_ext,
+                     'length_mm': int(round(L)), 'layer': 3,
+                     'reinforcement_type': 'VARIABLE'}
+                results.append(_add_anchorage(d, Ldh, Lpt_B, Lpb_B))
+
+            # ADD_MIDSPAN (bottom bars in CTR zone)
+            if add_bot_ctr > 0:
+                L = 0.5 * l_cl + 2 * lext
+                ac = _add_bar_coords('ADD_MIDSPAN', L, direction, xs, ys, zs, xe, ye, ze)
+                zsa = _bar_z(ac['z_start_mm'], h_mm, cover, 'BOT', 2, dia_bot)
+                zea = _bar_z(ac['z_end_mm'], h_mm, cover, 'BOT', 2, dia_bot)
+                d = {**base, **ac, 'z_start_mm': zsa, 'z_end_mm': zea,
+                     'bar_position': 'BOT', 'bar_role': 'ADD_MIDSPAN', 'bar_type': 'ADD',
+                     'dia_mm': dia_bot, 'n_bars': add_bot_ctr,
+                     'length_mm': int(round(L)), 'layer': 2,
+                     'reinforcement_type': 'VARIABLE'}
+                results.append(_add_anchorage(d, Ldh, Lpt_B, Lpb_B))
+
+    return results
+
+
+# ── Main bar calculator ──────────────────────────────────────────────────────
+
+def _calculate_main_bars(adapter, lookup):
+    """Calculate all main + ADD bars grouped by gridline."""
+    results = []
+    beams_df = adapter.beams_df
+    df_lines = beams_df[beams_df['direction'].isin(['X', 'Y'])].copy()
+
+    for key, grp in df_lines.groupby('line_key'):
+        if key is None:
+            continue
+        level, direction, grid_coord = key
+
+        sort_col = 'x_from_mm' if direction == 'X' else 'y_from_mm'
+        grp = grp.sort_values(sort_col)
+        spans = list(grp.to_dict('records'))
+
+        # Build span info with rebar config
+        span_info = []
+        for i, sp in enumerate(spans):
+            mid = sp['member_id']
+            cfg_top = adapter.get_long_cfg(mid, 'TOP')
+            cfg_bot = adapter.get_long_cfg(mid, 'BOT')
+            if cfg_top is None or cfg_bot is None:
+                span_info.append(None)
+                continue
+            span_info.append({
+                'sp': sp, 'member_id': mid,
+                'cfg_top': cfg_top, 'cfg_bot': cfg_bot,
+                'is_uniform': cfg_top['is_uniform'] and cfg_bot['is_uniform'],
+                'index': i, 'dia_top': cfg_top['dia'], 'dia_bot': cfg_bot['dia'],
+                'line_grid': grid_coord,
+            })
+
+        valid = [s for s in span_info if s is not None]
+        if not valid:
+            continue
+
+        # Split into contiguous same-diameter sub-groups
+        # Contiguity: beam endpoints must be close (within tolerance)
+        CONTIGUITY_TOL = 100.0  # mm — endpoint proximity tolerance
+
+        def _are_contiguous(prev_span, next_span):
+            """Check if two beams connect end-to-end."""
+            sp1 = prev_span['sp']
+            sp2 = next_span['sp']
+            # prev end should be close to next start
+            if direction == 'X':
+                return abs((sp1.get('x_to_mm', 0) or 0) - (sp2.get('x_from_mm', 0) or 0)) < CONTIGUITY_TOL
+            else:
+                return abs((sp1.get('y_to_mm', 0) or 0) - (sp2.get('y_from_mm', 0) or 0)) < CONTIGUITY_TOL
+
+        subgroups = []
+        current = []
+        for s in span_info:
+            if s is None:
+                if current:
+                    subgroups.append(current)
+                    current = []
+                continue
+            if current:
+                # Break sub-group if diameter changes OR beams don't connect
+                if (current[-1]['dia_top'] != s['dia_top'] or
+                        not _are_contiguous(current[-1], s)):
+                    subgroups.append(current)
+                    current = []
+            current.append(s)
+        if current:
+            subgroups.append(current)
+
+        # Process each sub-group
+        for subgroup in subgroups:
+            var_spans = [s for s in subgroup if not s['is_uniform']]
+            if var_spans:
+                gm_top = min(s['cfg_top']['main'] for s in var_spans)
+                gm_bot = min(s['cfg_bot']['main'] for s in var_spans)
+            else:
+                gm_top = gm_bot = 0
+
+            sub_results = _process_subgroup(
+                subgroup, gm_top, gm_bot, adapter, lookup, direction
+            )
+            results.extend(sub_results)
+
+    return results
+
+
+# ── Stirrup calculator ───────────────────────────────────────────────────────
+
+def _calculate_stirrups(adapter):
+    """Calculate stirrup bars for all beams."""
+    results = []
+
+    for _, row in adapter.beams_df.iterrows():
+        mid = row['member_id']
+        zones = adapter.get_stirrup_zones(mid)
+        if not zones:
+            continue
+
+        b_mm = row.get('b_mm', 300) or 300
+        h_mm = row.get('h_mm', 500) or 500
+        sec = adapter.get_section(row.get('section_id', ''))
+        cover = sec['cover_mm'] if sec else COVER_MM
+        shape = sec['shape'] if sec else 'RECT'
+
+        b_cl = b_mm - 2 * cover
+        h_cl = h_mm - 2 * cover
+        l_span = float(row['length_mm'])
+        direction = row['direction']
+
+        grid_from = row.get('grid_from', '')
+        grid_to = row.get('grid_to', '')
+        Wc1 = adapter.get_column_width(grid_from, direction)
+        Wc2 = adapter.get_column_width(grid_to, direction)
+        l_cl = l_span - 0.5 * (Wc1 + Wc2)
+
+        xs = row.get('x_from_mm', 0) or 0
+        ys = row.get('y_from_mm', 0) or 0
+        zs = row.get('z_mm', 0) or 0
+        xe = row.get('x_to_mm', 0) or 0
+        ye = row.get('y_to_mm', 0) or 0
+
+        span_idx = 1
+        segment_id = f"{mid}-SEG{span_idx:03d}"
+        line_grid = ys if direction == 'X' else xs
+
+        # Build zone configs (fill missing with available)
+        has_ext = 'EXT' in zones
+        has_int = 'INT' in zones
+        zone_cfgs = {}
+        if has_ext:
+            zone_cfgs['EXT'] = adapter.get_stirrup_cfg(mid, 'EXT')
+        elif has_int:
+            zone_cfgs['EXT'] = adapter.get_stirrup_cfg(mid, 'INT')
+        if has_int:
+            zone_cfgs['INT'] = adapter.get_stirrup_cfg(mid, 'INT')
+        if not zone_cfgs.get('CTR'):
+            zone_cfgs['CTR'] = zone_cfgs.get('INT', zone_cfgs.get('EXT'))
+
+        zone_lengths = {'EXT': 0.25 * l_cl, 'INT': 0.25 * l_cl, 'CTR': 0.5 * l_cl}
+
+        base = {
+            'segment_id': segment_id, 'level': row.get('level', ''),
+            'direction': direction, 'line_grid': line_grid,
+            'member_id': mid, 'span_index': span_idx,
+            'start_grid': grid_from, 'end_grid': grid_to,
+            'x_start_mm': xs, 'y_start_mm': ys, 'z_start_mm': zs,
+            'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': zs,
+            'b_mm': int(b_mm), 'h_mm': int(h_mm), 'shape': shape,
+        }
+
+        for zn, zl in zone_lengths.items():
+            cfg = zone_cfgs.get(zn)
+            if not cfg or not cfg['spacing_mm']:
+                continue
+            dia = cfg['dia_mm']
+            nl = cfg['n_legs']
+            sp_mm = cfg['spacing_mm']
+            L_st = 2 * (b_cl + h_cl) + 2 * nl * HOOK_EXTENSION_FACTOR * dia
+            n_st = int(zl / sp_mm) + 1
+
+            results.append({
+                **base,
+                'bar_position': 'STIRRUP', 'bar_role': zn, 'bar_type': 'STIRRUP',
+                'dia_mm': int(dia), 'n_bars': nl,
+                'length_mm': int(round(L_st)), 'layer': None,
+                'spacing_mm': int(sp_mm), 'zone_length_mm': int(round(zl)),
+                'quantity_pieces': n_st, 'total_length_mm': int(round(L_st * n_st)),
+                'anchorage_start': None, 'anchorage_end': None,
+                'lap_length_mm': None, 'development_length_mm': None,
+                'transition_type': None, 'reinforcement_type': None,
+                'split_piece': None, 'original_length_mm': None,
+            })
+
+    return results
+
+
+# ── Splice coordinates ───────────────────────────────────────────────────────
+
+def _compute_splice_coords(results, adapter):
+    """Add splice zone coordinates for MAIN bars with LAP anchorage."""
+    for bar in results:
+        bar.setdefault('splice_start_mm', None)
+        bar.setdefault('splice_start_end_mm', None)
+        bar.setdefault('splice_end_mm', None)
+        bar.setdefault('splice_end_end_mm', None)
+
+        if (bar.get('bar_type') or '').upper() in ('ADD', 'STIRRUP'):
+            continue
+
+        lap = bar.get('lap_length_mm') or 0
+        if lap <= 0:
+            continue
+
+        direction = bar.get('direction', 'X')
+
+        if bar.get('anchorage_start') == 'LAP' and bar.get('start_grid'):
+            col_w = adapter.get_column_width(bar['start_grid'], direction)
+            face = (bar.get('x_start_mm', 0) or 0) + col_w / 2 if direction == 'X' \
+                else (bar.get('y_start_mm', 0) or 0) + col_w / 2
+            bar['splice_start_mm'] = round(face, 1)
+            bar['splice_start_end_mm'] = round(face + lap, 1)
+
+        if bar.get('anchorage_end') == 'LAP' and bar.get('end_grid'):
+            col_w = adapter.get_column_width(bar['end_grid'], direction)
+            face = (bar.get('x_end_mm', 0) or 0) + col_w / 2 if direction == 'X' \
+                else (bar.get('y_end_mm', 0) or 0) + col_w / 2
+            bar['splice_end_mm'] = round(face, 1)
+            bar['splice_end_end_mm'] = round(face + lap, 1)
+
+
+# ── Public API ───────────────────────────────────────────────────────────────
+
+def calculate_beam_rebar_lengths(
+    beams_df: pd.DataFrame,
+    columns_df: pd.DataFrame,
+    sections_df: pd.DataFrame,
+    reinf_df: pd.DataFrame,
+    nodes_df: pd.DataFrame,
+    dev_lengths_path: str,
+    lap_splice_path: str,
+) -> pd.DataFrame:
+    """
+    Calculate beam rebar lengths from Tier 1 converter output.
+
+    Args:
+        beams_df: MembersBeam.csv
+        columns_df: MembersColumn.csv
+        sections_df: Sections.csv
+        reinf_df: ReinforcementBeam.csv
+        nodes_df: Nodes.csv
+        dev_lengths_path: path to beam_development_lengths.csv
+        lap_splice_path: path to beam_lap_splice.csv
+
+    Returns:
+        DataFrame for RebarLengthsBeam.csv
+    """
+    print('[RebarBeam] Loading lookup tables...')
+    lookup = DevLapLookup(dev_lengths_path, lap_splice_path)
+
+    print('[RebarBeam] Building data adapter...')
+    adapter = BeamDataAdapter(beams_df, columns_df, sections_df, reinf_df, nodes_df)
+    print(f'[RebarBeam] {len(adapter.long_cfg)} longitudinal configs, '
+          f'{len(adapter.stirrup_cfg)} stirrup configs')
+
+    print('[RebarBeam] Calculating main bars...')
+    main_bars = _calculate_main_bars(adapter, lookup)
+
+    print('[RebarBeam] Calculating stirrups...')
+    stirrups = _calculate_stirrups(adapter)
+
+    all_results = main_bars + stirrups
+
+    print('[RebarBeam] Computing splice coordinates...')
+    _compute_splice_coords(all_results, adapter)
+
+    # Output column order
+    column_order = [
+        'segment_id', 'level', 'direction', 'line_grid',
+        'member_id', 'span_index', 'start_grid', 'end_grid',
+        'bar_position', 'bar_role', 'bar_type',
+        'dia_mm', 'n_bars', 'length_mm', 'layer',
+        'spacing_mm', 'zone_length_mm', 'quantity_pieces', 'total_length_mm',
+        'anchorage_start', 'anchorage_end',
+        'lap_length_mm', 'development_length_mm',
+        'splice_start_mm', 'splice_start_end_mm',
+        'splice_end_mm', 'splice_end_end_mm',
+        'transition_type', 'reinforcement_type',
+        'split_piece', 'original_length_mm',
+        'x_start_mm', 'y_start_mm', 'z_start_mm',
+        'x_end_mm', 'y_end_mm', 'z_end_mm',
+        'b_mm', 'h_mm', 'shape',
+    ]
+
+    df = pd.DataFrame(all_results)
+    avail = [c for c in column_order if c in df.columns]
+    df = df[avail]
+
+    print(f'[RebarBeam] {len(main_bars)} main bar records + '
+          f'{len(stirrups)} stirrup records = {len(df)} total')
+
+    return df
