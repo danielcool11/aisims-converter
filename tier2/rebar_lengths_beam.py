@@ -86,7 +86,12 @@ def _bar_z(z_ref, h_mm, cover_mm, position, layer, dia_mm):
 # ── Lookup tables ────────────────────────────────────────────────────────────
 
 class DevLapLookup:
-    """Development length and lap splice lookup."""
+    """Unified development length and lap splice lookup.
+
+    Reads the new unified tables with member_type column:
+        development_lengths.csv: fy, diameter, fc, member_type, Ldb, Ldt, Ldh, Ldc
+        lap_splice.csv: fy, diameter, fc, member_type, Lpb, Lpt, Ldc, Lpc
+    """
 
     def __init__(self, dev_path, lap_path):
         self.dev_df = pd.read_csv(dev_path)
@@ -94,52 +99,60 @@ class DevLapLookup:
         self.dev_df.columns = self.dev_df.columns.str.strip()
         self.lap_df.columns = self.lap_df.columns.str.strip()
 
-    def get(self, fy, dia_mm, fc):
+    def get(self, fy, dia_mm, fc, member_type='BEAM_COLUMN'):
         """
-        Returns (Ldh, Lpt_B, Lpb_B):
-            Ldh:   development length for hook
-            Lpt_B: top bar lap splice (Class B)
-            Lpb_B: bottom bar lap splice (Class B)
+        Returns (Ldh, Lpt, Lpb):
+            Ldh: development length for hook
+            Lpt: top bar lap splice (Class B)
+            Lpb: bottom bar lap splice (Class B)
         """
         d_label = _dia_label(dia_mm)
 
-        row_dev = self.dev_df[
-            (self.dev_df['fy'] == fy) &
-            (self.dev_df['diameter'] == d_label) &
-            (self.dev_df['fc'] == fc)
+        # Filter by member_type
+        dev_mt = self.dev_df[self.dev_df['member_type'] == member_type] \
+            if 'member_type' in self.dev_df.columns else self.dev_df
+
+        row_dev = dev_mt[
+            (dev_mt['fy'] == fy) &
+            (dev_mt['diameter'] == d_label) &
+            (dev_mt['fc'] == fc)
         ]
         if row_dev.empty:
-            # Fallback: try nearest fc
-            row_dev = self.dev_df[
-                (self.dev_df['fy'] == fy) &
-                (self.dev_df['diameter'] == d_label)
+            row_dev = dev_mt[
+                (dev_mt['fy'] == fy) &
+                (dev_mt['diameter'] == d_label)
             ]
             if row_dev.empty:
-                print(f'  [WARN] No dev length for fy={fy}, {d_label}, fc={fc}')
+                print(f'  [WARN] No dev length for fy={fy}, {d_label}, fc={fc}, {member_type}')
                 return 300, 600, 500  # safe defaults
-            # Pick closest fc
             row_dev = row_dev.iloc[(row_dev['fc'] - fc).abs().argsort()[:1]]
 
         Ldh = float(row_dev['Ldh'].iloc[0])
 
-        row_lap = self.lap_df[
-            (self.lap_df['fy'] == fy) &
-            (self.lap_df['diameter'] == d_label) &
-            (self.lap_df['fc'] == fc)
+        lap_mt = self.lap_df[self.lap_df['member_type'] == member_type] \
+            if 'member_type' in self.lap_df.columns else self.lap_df
+
+        row_lap = lap_mt[
+            (lap_mt['fy'] == fy) &
+            (lap_mt['diameter'] == d_label) &
+            (lap_mt['fc'] == fc)
         ]
         if row_lap.empty:
-            row_lap = self.lap_df[
-                (self.lap_df['fy'] == fy) &
-                (self.lap_df['diameter'] == d_label)
+            row_lap = lap_mt[
+                (lap_mt['fy'] == fy) &
+                (lap_mt['diameter'] == d_label)
             ]
             if row_lap.empty:
                 return Ldh, 600, 500
             row_lap = row_lap.iloc[(row_lap['fc'] - fc).abs().argsort()[:1]]
 
-        Lpt_B = float(row_lap['Lpt_B'].iloc[0])
-        Lpb_B = float(row_lap['Lpb_B'].iloc[0])
+        # Support both old (Lpt_B/Lpb_B) and new (Lpt/Lpb) column names
+        lpt_col = 'Lpt' if 'Lpt' in row_lap.columns else 'Lpt_B'
+        lpb_col = 'Lpb' if 'Lpb' in row_lap.columns else 'Lpb_B'
+        Lpt = float(row_lap[lpt_col].iloc[0])
+        Lpb = float(row_lap[lpb_col].iloc[0])
 
-        return Ldh, Lpt_B, Lpb_B
+        return Ldh, Lpt, Lpb
 
 
 # ── Data adapter (reads our Tier 1 format) ───────────────────────────────────

@@ -63,7 +63,11 @@ def _is_basement(lv):
 # ── Lookup tables ────────────────────────────────────────────────────────────
 
 class ColDevLapLookup:
-    """Column development length and lap splice lookup."""
+    """Column development length and lap splice lookup.
+
+    Reads unified tables with member_type column.
+    Filters by BEAM_COLUMN member_type (beam and column share same values).
+    """
 
     def __init__(self, dev_path, lap_path):
         self.dev_df = pd.read_csv(dev_path)
@@ -71,36 +75,43 @@ class ColDevLapLookup:
         self.dev_df.columns = self.dev_df.columns.str.strip()
         self.lap_df.columns = self.lap_df.columns.str.strip()
 
-    def get(self, fy, dia_mm, fc):
+    def get(self, fy, dia_mm, fc, member_type='BEAM_COLUMN'):
         """Returns (Ldh, Lpc): hook dev length, column lap splice."""
         d_label = _dia_label(dia_mm)
 
-        row_dev = self.dev_df[
-            (self.dev_df['fy'] == fy) &
-            (self.dev_df['diameter'] == d_label) &
-            (self.dev_df['fc'] == fc)
+        # Filter by member_type
+        dev_mt = self.dev_df[self.dev_df['member_type'] == member_type] \
+            if 'member_type' in self.dev_df.columns else self.dev_df
+
+        row_dev = dev_mt[
+            (dev_mt['fy'] == fy) &
+            (dev_mt['diameter'] == d_label) &
+            (dev_mt['fc'] == fc)
         ]
         if row_dev.empty:
-            row_dev = self.dev_df[
-                (self.dev_df['fy'] == fy) &
-                (self.dev_df['diameter'] == d_label)
+            row_dev = dev_mt[
+                (dev_mt['fy'] == fy) &
+                (dev_mt['diameter'] == d_label)
             ]
             if row_dev.empty:
-                print(f'  [WARN] No col dev length for fy={fy}, {d_label}, fc={fc}')
+                print(f'  [WARN] No col dev length for fy={fy}, {d_label}, fc={fc}, {member_type}')
                 return 300, 600
             row_dev = row_dev.iloc[(row_dev['fc'] - fc).abs().argsort()[:1]]
 
         Ldh = float(row_dev['Ldh'].iloc[0])
 
-        row_lap = self.lap_df[
-            (self.lap_df['fy'] == fy) &
-            (self.lap_df['diameter'] == d_label) &
-            (self.lap_df['fc'] == fc)
+        lap_mt = self.lap_df[self.lap_df['member_type'] == member_type] \
+            if 'member_type' in self.lap_df.columns else self.lap_df
+
+        row_lap = lap_mt[
+            (lap_mt['fy'] == fy) &
+            (lap_mt['diameter'] == d_label) &
+            (lap_mt['fc'] == fc)
         ]
         if row_lap.empty:
-            row_lap = self.lap_df[
-                (self.lap_df['fy'] == fy) &
-                (self.lap_df['diameter'] == d_label)
+            row_lap = lap_mt[
+                (lap_mt['fy'] == fy) &
+                (lap_mt['diameter'] == d_label)
             ]
             if row_lap.empty:
                 return Ldh, 600
