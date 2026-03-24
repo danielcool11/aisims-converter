@@ -12,6 +12,7 @@ Output: MembersSlab.csv
 import pandas as pd
 import numpy as np
 import re
+from parsers.level_normalizer import normalize_level
 
 
 def convert_slabs(
@@ -158,7 +159,7 @@ def convert_slabs(
             'z_mm': round(centroid_z, 1),
             'Lx_mm': round(Lx, 1),
             'Ly_mm': round(Ly, 1),
-            'boundary_nodes': ','.join(node_ids),
+            'boundary_nodes': ';'.join(node_ids),
             'node_count': len(node_ids),
         }
         results.append(record)
@@ -188,7 +189,7 @@ def convert_slabs(
                 'Lx_mm': round(max(xs) - min(xs), 1),
                 'Ly_mm': round(max(ys) - min(ys), 1),
                 'level': coords[0]['level'],
-                'boundary_nodes': ','.join(node_ids),
+                'boundary_nodes': ';'.join(node_ids),
             }
 
     # Log summary

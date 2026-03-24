@@ -119,9 +119,14 @@ def convert_footings(
             Ly = max(qy) - min(qy)
             area = Lx * Ly
 
+            # Use semicolon separator to prevent Excel number interpretation
             node_ids = [str(q[0]) for q in quad]
 
             part_id = f"{foot_no}-{qi}"
+
+            # Sort quad corners: bottom-left, bottom-right, top-left, top-right
+            x_min, x_max = min(qx), max(qx)
+            y_min, y_max = min(qy), max(qy)
 
             members.append({
                 'member_id': foot_no,
@@ -136,7 +141,11 @@ def convert_footings(
                 'Lx_mm': round(Lx, 1),
                 'Ly_mm': round(Ly, 1),
                 'area_mm2': round(area, 1),
-                'boundary_nodes': ','.join(node_ids),
+                'x_min_mm': round(x_min, 1),
+                'y_min_mm': round(y_min, 1),
+                'x_max_mm': round(x_max, 1),
+                'y_max_mm': round(y_max, 1),
+                'boundary_nodes': ';'.join(node_ids),
                 'material_id': 'C35',
                 'segment_no': qi,
                 'segment_id': f"{foot_no}-SEG{qi:03d}",
