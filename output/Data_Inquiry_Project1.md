@@ -1,10 +1,6 @@
-# AISIMS Data Inquiry - Project 1 (청담동 78-5)
-# AISIMS 데이터 문의 - 프로젝트 1 (청담동 78-5)
+# AISIMS Data Inquiry - Project 청담동 78-5
+# AISIMS 데이터 문의 -  청담동 78-5 프로젝트
 
-Date: 2026-03-24
-
-We have completed the initial data conversion of the provided MIDAS Gen exports.
-During processing, we identified the following items that require clarification.
 
 제공받은 MIDAS Gen 데이터의 초기 변환을 완료했습니다.
 처리 과정에서 아래와 같은 확인이 필요한 사항을 발견했습니다.
@@ -112,7 +108,7 @@ for BIM modeling and rebar calculation are not included in the provided data.
 2. Please provide the riser height and tread depth.
 3. If these dimensions vary by floor, please specify per stair member.
 
-1. 계단 비행부의 허리 슬래브 두께를 제공해 주십시오.
+1. 계단 비행부의 슬래브 두께를 제공해 주십시오.
 2. 챌면 높이와 디딤판 깊이를 제공해 주십시오.
 3. 층별로 치수가 다른 경우, 각 계단 부재별로 명시해 주십시오.
 
@@ -122,9 +118,8 @@ for BIM modeling and rebar calculation are not included in the provided data.
 
 | # | Issue | Elements | Status |
 |---|-------|----------|--------|
-| 1 | BEAM elements referencing Thickness instead of Sections | 892, 1121, 1236, 1500 | Need section definition or reclassification |
-| 2 | TB14 missing from DesignBeam.csv | 5TB14 (Section ID 14611) | Need design output |
-| 3 | Stair dimensions missing | All 10 stairs (B3SS1 ~ RSS1) | Need waist thickness, riser height, tread depth |
+| 1 | BEAM elements referencing Thickness instead of Sections | 892, 1121, 1236, 1500 | RESOLVED - deleted from source (preparatory elements carried by slab) |
+| 2 | TB14 missing from DesignBeam.csv | 5TB14 (Section ID 14611) | RESOLVED - provided in supplementary data |
+| 3 | Stair dimensions missing | All 10 stairs (B3SS1 ~ RSS1) | RESOLVED - thickness=180mm, riser=165~180mm, tread=270mm provided |
 
-Please respond at your earliest convenience so we can finalize the data conversion.
 확인 후 회신 부탁드립니다.

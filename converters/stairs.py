@@ -51,6 +51,8 @@ def convert_stairs(
             col_map[col] = 'level_from'
         elif 'level_end' in cl:
             col_map[col] = 'level_to'
+        elif 'stair_thickness' in cl:
+            col_map[col] = 'waist_thickness_mm'
         elif 'stair_height' in cl:
             col_map[col] = 'total_height_mm'
         elif 'stair_width' in cl:
@@ -63,6 +65,10 @@ def convert_stairs(
         elif 'landing' in cl and 'right' in cl and 'transverse' not in cl and 'logitudinal' not in cl:
             if 'mm' in cl:
                 col_map[col] = 'landing_lower_mm'
+        elif cl == 'riser_height':
+            col_map[col] = 'riser_height_mm'
+        elif cl == 'tread_depth' or cl == 'tread_depth_mm':
+            col_map[col] = 'tread_depth_mm'
     stair_df = stair_df.rename(columns=col_map)
 
     # Determine wall attachment side from walls_df
@@ -91,6 +97,9 @@ def convert_stairs(
         flight_run = _safe_float(row.get('flight_run_mm'))
         landing_lower = _safe_float(row.get('landing_lower_mm'))
         landing_mid = _safe_float(row.get('landing_mid_mm'))
+        waist_thickness = _safe_float(row.get('waist_thickness_mm'))
+        riser_height = _safe_float(row.get('riser_height_mm'))
+        tread_depth = _safe_float(row.get('tread_depth_mm'))
 
         # Segment numbering
         if member_id not in segment_counter:
@@ -172,12 +181,12 @@ def convert_stairs(
             'landing_lower_mm': landing_lower,
             'landing_mid_mm': landing_mid,
 
-            # Pending design office response
-            'waist_thickness_mm': None,
-            'riser_height_mm': None,
-            'tread_depth_mm': None,
-            'num_risers': None,
-            'risers_per_flight': None,
+            # Stair detailing (from design office)
+            'waist_thickness_mm': waist_thickness,
+            'riser_height_mm': riser_height,
+            'tread_depth_mm': tread_depth,
+            'num_risers': int(round(total_height / riser_height)) if total_height and riser_height else None,
+            'risers_per_flight': int(round(total_height / riser_height / 2)) if total_height and riser_height else None,
         }
 
         # 8-point model
@@ -201,7 +210,7 @@ def convert_stairs(
             record['flight1_end_x'] = points['p5'][0]
             record['flight1_end_y'] = points['p5'][1]
             record['flight1_end_z'] = points['p5'][2]
-            record['flight1_num_risers'] = None  # pending
+            record['flight1_num_risers'] = record['risers_per_flight']
 
             # Flight 2: free-side strip, P8 → P3 (return direction)
             record['flight2_start_x'] = points['p8'][0]
@@ -210,7 +219,7 @@ def convert_stairs(
             record['flight2_end_x'] = points['p3'][0]
             record['flight2_end_y'] = points['p3'][1]
             record['flight2_end_z'] = points['p3'][2]
-            record['flight2_num_risers'] = None  # pending
+            record['flight2_num_risers'] = record['risers_per_flight']
 
             # Mid-landing
             record['landing1_start_x'] = points['p5'][0]
