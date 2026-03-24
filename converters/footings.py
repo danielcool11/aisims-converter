@@ -17,6 +17,7 @@ Output: MembersFooting.csv (only MF* entries — actual foundation members)
 import pandas as pd
 import math
 from parsers.rebar_spec import parse_bar_at_spacing, parse_stirrup
+from parsers.level_normalizer import normalize_level
 
 
 def convert_footings(
@@ -45,7 +46,7 @@ def convert_footings(
         y = float(row.iloc[2])
         z = float(row.iloc[3])
         foot_no = str(row.iloc[4]).strip()
-        level = str(row.iloc[5]).strip()
+        level = normalize_level(str(row.iloc[5]).strip())
 
         if foot_no not in boundary_data:
             boundary_data[foot_no] = {

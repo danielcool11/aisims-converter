@@ -16,7 +16,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from parsers.mgt import parse_mgt
-from converters.nodes import convert_nodes
+from converters.nodes import convert_nodes, merge_boundary_nodes
 from converters.materials import convert_materials
 from converters.sections import convert_sections
 from converters.elements import convert_elements
@@ -323,6 +323,9 @@ if st.button("CONVERT", type="primary", use_container_width=True):
         # Footings
         if foot_boundary_raw is not None and foot_reinf_raw is not None:
             progress.progress(62, text="Phase 2: Footings...")
+            # Merge footing boundary nodes into main nodes table
+            nodes_df = merge_boundary_nodes(nodes_df, foot_boundary_raw)
+            outputs['nodes'] = nodes_df  # update with merged nodes
             footings_df, reinf_footing_df = convert_footings(foot_boundary_raw, foot_reinf_raw)
             outputs['footings'] = footings_df
             outputs['reinf_footing'] = reinf_footing_df

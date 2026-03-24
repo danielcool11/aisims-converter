@@ -13,6 +13,7 @@ Output: MembersStair.csv (71 columns, 8-point model)
 
 import pandas as pd
 import math
+from parsers.level_normalizer import normalize_level
 
 
 def convert_stairs(
@@ -83,8 +84,8 @@ def convert_stairs(
         if not member_id:
             continue
 
-        level_from = str(row.get('level_from', '')).strip()
-        level_to = str(row.get('level_to', '')).strip()
+        level_from = normalize_level(str(row.get('level_from', '')).strip())
+        level_to = normalize_level(str(row.get('level_to', '')).strip())
         total_height = _safe_float(row.get('total_height_mm'))
         stair_width = _safe_float(row.get('stair_width_mm'))
         flight_run = _safe_float(row.get('flight_run_mm'))

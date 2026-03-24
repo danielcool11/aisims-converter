@@ -10,6 +10,7 @@ Output: ReinforcementSlab.csv
 
 import pandas as pd
 from parsers.rebar_spec import parse_bar_at_spacing, parse_composite_bar
+from parsers.level_normalizer import normalize_level
 
 
 def convert_reinforcement_slab(
@@ -57,7 +58,7 @@ def convert_reinforcement_slab(
         if not member_id:
             continue
 
-        position = str(row.get('position', '')).strip()
+        position = normalize_level(str(row.get('position', '')).strip())
         thickness = _safe_float(row.get('thickness_mm'))
 
         # Expand 4 directions

@@ -160,6 +160,7 @@ def convert_nodes(
             'grid': grid,
             'grid_offset_x_mm': offset_x if grid_x_label else offset_x,
             'grid_offset_y_mm': offset_y if grid_y_label else offset_y,
+            'source': 'MIDAS',
         })
 
     result_df = pd.DataFrame(results)
@@ -169,3 +170,83 @@ def convert_nodes(
     print(f'[Nodes] Levels: {sorted(set(r["level"] for r in results))}')
 
     return result_df
+
+
+def merge_boundary_nodes(
+    nodes_df: pd.DataFrame,
+    boundary_df: pd.DataFrame,
+    source_label: str = 'BOUNDARY',
+    level_positions: list = None,
+    level_tolerance: float = 100.0,
+) -> pd.DataFrame:
+    """
+    Merge engineer-defined boundary nodes (from FootBoundary, etc.)
+    into the main nodes table.
+
+    Skips nodes whose node_number already exists in nodes_df.
+
+    Args:
+        nodes_df: existing nodes DataFrame (from convert_nodes)
+        boundary_df: DataFrame with columns [NODE, X, Y, Z, ...]
+            (positional: col0=node, col1=x, col2=y, col3=z)
+        source_label: source tag for these nodes
+        level_positions: list of (level_name, z_mm) for level matching
+        level_tolerance: tolerance for Z→level matching (mm)
+
+    Returns:
+        Updated nodes_df with boundary nodes appended
+    """
+    existing_numbers = set(nodes_df['node_number'].astype(int).values)
+
+    # Build level lookup from existing nodes if not provided
+    if level_positions is None:
+        level_positions = []
+        for level in nodes_df['level'].unique():
+            z_vals = nodes_df[nodes_df['level'] == level]['z_mm']
+            if not z_vals.empty:
+                level_positions.append((level, float(z_vals.mean())))
+
+    new_rows = []
+    added = 0
+    skipped = 0
+
+    for _, row in boundary_df.iterrows():
+        node_num = int(row.iloc[0])
+        if node_num in existing_numbers:
+            skipped += 1
+            continue
+
+        x = float(row.iloc[1])
+        y = float(row.iloc[2])
+        z = float(row.iloc[3])
+
+        # Match Z to level
+        level, _ = find_nearest(z, level_positions, level_tolerance)
+        if level is None:
+            level = f'Z{int(z)}'
+
+        node_id = f'N_{level}_BND{node_num}'
+
+        new_rows.append({
+            'node_id': node_id,
+            'node_number': node_num,
+            'x_mm': x,
+            'y_mm': y,
+            'z_mm': z,
+            'level': level,
+            'grid': 'OFF_GRID',
+            'grid_offset_x_mm': None,
+            'grid_offset_y_mm': None,
+            'source': source_label,
+        })
+        existing_numbers.add(node_num)
+        added += 1
+
+    if new_rows:
+        new_df = pd.DataFrame(new_rows)
+        nodes_df = pd.concat([nodes_df, new_df], ignore_index=True)
+
+    print(f'[Nodes] Merged {added} boundary nodes ({skipped} already existed), '
+          f'total: {len(nodes_df)}')
+
+    return nodes_df

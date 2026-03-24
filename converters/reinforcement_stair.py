@@ -10,6 +10,7 @@ Output: ReinforcementStair.csv — expanded rows per rebar position
 
 import pandas as pd
 from parsers.rebar_spec import parse_bar_at_spacing, parse_composite_bar
+from parsers.level_normalizer import normalize_level
 
 
 def convert_reinforcement_stair(
@@ -70,9 +71,9 @@ def convert_reinforcement_stair(
         for col in stair_df.columns:
             cl = col.strip().lower()
             if 'level_start' in cl:
-                level_from = str(row[col]).strip()
+                level_from = normalize_level(str(row[col]).strip())
             elif 'level_end' in cl:
-                level_to = str(row[col]).strip()
+                level_to = normalize_level(str(row[col]).strip())
 
         for col_name, zone, direction, layer in rebar_mappings:
             spec_str = str(row.get(col_name, '')).strip()
