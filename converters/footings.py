@@ -95,7 +95,7 @@ def convert_footings(
         mid = str(row.get('member_id', '')).strip()
         reinf_lookup[mid] = row
 
-    # ── MembersFooting: only MF* entries ──
+    # ── MembersFooting: one row per quad (MF* entries split by quad) ──
     members = []
     for foot_no, data in boundary_data.items():
         if not foot_no.startswith('MF'):
@@ -106,46 +106,40 @@ def convert_footings(
         if reinf is not None:
             thickness = _safe_float(reinf.get('thickness_mm'))
 
-        all_nodes = data['nodes']
-        xs = [n[1] for n in all_nodes]
-        ys = [n[2] for n in all_nodes]
-        zs = [n[3] for n in all_nodes]
-
-        centroid_x = sum(xs) / len(xs)
-        centroid_y = sum(ys) / len(ys)
-        z = sum(zs) / len(zs)
-        Lx = max(xs) - min(xs)
-        Ly = max(ys) - min(ys)
-
-        # Boundary nodes as string
-        node_ids = [str(n[0]) for n in all_nodes]
-
-        # Compute area from quads
-        area = 0
-        for quad in data['quads']:
+        for qi, quad in enumerate(data['quads'], start=1):
             qx = [q[1] for q in quad]
             qy = [q[2] for q in quad]
-            # Rectangle area
-            area += (max(qx) - min(qx)) * (max(qy) - min(qy))
+            qz = [q[3] for q in quad]
 
-        members.append({
-            'member_id': foot_no,
-            'member_type': 'FOOTING',
-            'footing_type': 'MAT',
-            'level': data['level'],
-            'thickness_mm': thickness,
-            'centroid_x_mm': round(centroid_x, 1),
-            'centroid_y_mm': round(centroid_y, 1),
-            'z_mm': round(z, 1),
-            'Lx_mm': round(Lx, 1),
-            'Ly_mm': round(Ly, 1),
-            'area_mm2': round(area, 1),
-            'boundary_nodes': ','.join(node_ids),
-            'quad_count': len(data['quads']),
-            'material_id': 'C35',
-            'segment_no': 1,
-            'segment_id': f"{foot_no}-SEG001",
-        })
+            centroid_x = sum(qx) / len(qx)
+            centroid_y = sum(qy) / len(qy)
+            z = sum(qz) / len(qz)
+            Lx = max(qx) - min(qx)
+            Ly = max(qy) - min(qy)
+            area = Lx * Ly
+
+            node_ids = [str(q[0]) for q in quad]
+
+            part_id = f"{foot_no}-{qi}"
+
+            members.append({
+                'member_id': foot_no,
+                'part_id': part_id,
+                'member_type': 'FOOTING',
+                'footing_type': 'MAT',
+                'level': data['level'],
+                'thickness_mm': thickness,
+                'centroid_x_mm': round(centroid_x, 1),
+                'centroid_y_mm': round(centroid_y, 1),
+                'z_mm': round(z, 1),
+                'Lx_mm': round(Lx, 1),
+                'Ly_mm': round(Ly, 1),
+                'area_mm2': round(area, 1),
+                'boundary_nodes': ','.join(node_ids),
+                'material_id': 'C35',
+                'segment_no': qi,
+                'segment_id': f"{foot_no}-SEG{qi:03d}",
+            })
 
     members_df = pd.DataFrame(members)
 
