@@ -28,6 +28,7 @@ from converters.reinforcement_column import convert_reinforcement_column
 from converters.reinforcement_wall import convert_reinforcement_wall
 from converters.reinforcement_slab import convert_reinforcement_slab
 from converters.reinforcement_stair import convert_reinforcement_stair
+from converters.footings import convert_footings
 from converters.validation import validate_outputs, format_report
 
 
@@ -121,6 +122,8 @@ with col_b:
     slab_boundary_file = st.file_uploader("SlabBoundary.csv", type=['csv'], key='slab_boundary')
     slab_reinf_file = st.file_uploader("SlabReinforcement.csv", type=['csv'], key='slab_reinf')
     stair_reinf_file = st.file_uploader("StairReinforcement.csv", type=['csv'], key='stair_reinf')
+    foot_boundary_file = st.file_uploader("FootBoundary.csv", type=['csv'], key='foot_boundary')
+    foot_reinf_file = st.file_uploader("FootReinforcement.csv", type=['csv'], key='foot_reinf')
 
 # ══════════════════════════════════════════════════════════════
 # STEP 2: GRID DEFINITION
@@ -285,6 +288,22 @@ if st.button("CONVERT", type="primary", use_container_width=True):
         if stair_reinf_file:
             stair_raw = pd.read_csv(stair_reinf_file, encoding='utf-8-sig')
 
+        foot_boundary_raw = None
+        foot_reinf_raw = None
+        if foot_boundary_file:
+            # Try utf-8-sig first, fall back to cp949 for Korean encoded files
+            try:
+                foot_boundary_raw = pd.read_csv(foot_boundary_file, encoding='utf-8-sig')
+            except UnicodeDecodeError:
+                foot_boundary_file.seek(0)
+                foot_boundary_raw = pd.read_csv(foot_boundary_file, encoding='cp949')
+        if foot_reinf_file:
+            try:
+                foot_reinf_raw = pd.read_csv(foot_reinf_file, encoding='utf-8-sig')
+            except UnicodeDecodeError:
+                foot_reinf_file.seek(0)
+                foot_reinf_raw = pd.read_csv(foot_reinf_file, encoding='cp949')
+
         # Slabs (also extracts stair boundary data)
         stair_boundaries = {}
         if slab_boundary_raw is not None and slab_reinf_raw is not None:
@@ -300,6 +319,14 @@ if st.button("CONVERT", type="primary", use_container_width=True):
             stairs_df = convert_stairs(stair_raw, stair_boundaries, nodes_df, walls_for_stair)
             outputs['stairs'] = stairs_df
             log(f"Stairs: {len(stairs_df)} stair members")
+
+        # Footings
+        if foot_boundary_raw is not None and foot_reinf_raw is not None:
+            progress.progress(62, text="Phase 2: Footings...")
+            footings_df, reinf_footing_df = convert_footings(foot_boundary_raw, foot_reinf_raw)
+            outputs['footings'] = footings_df
+            outputs['reinf_footing'] = reinf_footing_df
+            log(f"Footings: {len(footings_df)} members, {len(reinf_footing_df)} reinforcement rows")
 
         # ── Phase 3: Reinforcement ──
         if design_beam_file:
@@ -384,6 +411,8 @@ if st.session_state.outputs:
         'design_wall': 'DesignResultsWall.csv',
         'reinf_slab': 'ReinforcementSlab.csv',
         'reinf_stair': 'ReinforcementStair.csv',
+        'footings': 'MembersFooting.csv',
+        'reinf_footing': 'ReinforcementFooting.csv',
     }
 
     # Show previews

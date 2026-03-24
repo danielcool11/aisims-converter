@@ -67,7 +67,17 @@ def parse_stirrup(spec: str) -> Optional[dict]:
     if spec == '':
         return None
 
+    # Pattern: N-D## @### (with D prefix)
     m = re.match(r'(\d+)-D(\d+)\s*@\s*(\d+)', spec)
+    if m:
+        return {
+            'legs': int(m.group(1)),
+            'dia': int(m.group(2)),
+            'spacing': int(m.group(3)),
+        }
+
+    # Pattern: N-## @### (without D prefix, e.g. "5-10@200")
+    m = re.match(r'(\d+)-(\d+)\s*@\s*(\d+)', spec)
     if m:
         return {
             'legs': int(m.group(1)),
