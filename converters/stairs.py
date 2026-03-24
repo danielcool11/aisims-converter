@@ -4,6 +4,7 @@ Stairs converter — transforms StairReinforcement.csv into MembersStair.csv.
 Input:  StairReinforcement.csv (member_id, level_start, level_end,
         Stair_Height, Stair_Width, Stair_Length,
         landing(Left/Right), rebar specs)
+        stair_boundaries (from slabs converter — boundary nodes from SlabBoundary.csv)
 Output: MembersStair.csv
 """
 
@@ -12,16 +13,22 @@ import pandas as pd
 
 def convert_stairs(
     stair_df: pd.DataFrame,
+    stair_boundaries: dict = None,
 ) -> pd.DataFrame:
     """
     Convert stair reinforcement data into standardized MembersStair.
 
     Args:
         stair_df: DataFrame from StairReinforcement.csv
+        stair_boundaries: dict from convert_slabs() with location data
+            {stair_id: {centroid_x_mm, centroid_y_mm, z_mm, Lx_mm, Ly_mm,
+                        level, boundary_nodes}}
 
     Returns:
         DataFrame for MembersStair.csv
     """
+    if stair_boundaries is None:
+        stair_boundaries = {}
 
     # Normalize column names
     col_map = {}
@@ -48,6 +55,7 @@ def convert_stairs(
     stair_df = stair_df.rename(columns=col_map)
 
     results = []
+    matched = 0
 
     for _, row in stair_df.iterrows():
         member_id = str(row.get('member_id', '')).strip()
@@ -63,13 +71,32 @@ def convert_stairs(
             'stair_length_mm': _safe_float(row.get('stair_length_mm')),
             'landing_left_mm': _safe_float(row.get('landing_left_mm')),
             'landing_right_mm': _safe_float(row.get('landing_right_mm')),
+            'centroid_x_mm': None,
+            'centroid_y_mm': None,
+            'z_mm': None,
+            'Lx_mm': None,
+            'Ly_mm': None,
+            'boundary_nodes': None,
         }
+
+        # Merge location from slab boundary
+        boundary = stair_boundaries.get(member_id)
+        if boundary:
+            record['centroid_x_mm'] = boundary['centroid_x_mm']
+            record['centroid_y_mm'] = boundary['centroid_y_mm']
+            record['z_mm'] = boundary['z_mm']
+            record['Lx_mm'] = boundary['Lx_mm']
+            record['Ly_mm'] = boundary['Ly_mm']
+            record['boundary_nodes'] = boundary['boundary_nodes']
+            matched += 1
+
         results.append(record)
 
     result_df = pd.DataFrame(results)
 
     # Log summary
-    print(f'[Stairs] {len(result_df)} stair members')
+    print(f'[Stairs] {len(result_df)} stair members, '
+          f'{matched}/{len(result_df)} matched with boundary location')
 
     return result_df
 

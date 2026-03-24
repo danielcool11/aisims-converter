@@ -273,20 +273,30 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 outputs['columns'] = elem_result['columns']
                 outputs['walls'] = elem_result['walls']
 
-        # Slabs
-        if slab_boundary_file and slab_reinf_file:
-            progress.progress(55, text="Phase 2: Slabs...")
+        # Read Part B files once (file pointer can only be read once)
+        slab_boundary_raw = None
+        slab_reinf_raw = None
+        stair_raw = None
+
+        if slab_boundary_file:
             slab_boundary_raw = pd.read_csv(slab_boundary_file, encoding='utf-8-sig')
+        if slab_reinf_file:
             slab_reinf_raw = pd.read_csv(slab_reinf_file, encoding='utf-8-sig')
-            slabs_df = convert_slabs(slab_boundary_raw, slab_reinf_raw, nodes_df)
+        if stair_reinf_file:
+            stair_raw = pd.read_csv(stair_reinf_file, encoding='utf-8-sig')
+
+        # Slabs (also extracts stair boundary data)
+        stair_boundaries = {}
+        if slab_boundary_raw is not None and slab_reinf_raw is not None:
+            progress.progress(55, text="Phase 2: Slabs...")
+            slabs_df, stair_boundaries = convert_slabs(slab_boundary_raw, slab_reinf_raw, nodes_df)
             outputs['slabs'] = slabs_df
             log(f"Slabs: {len(slabs_df)} slab members")
 
-        # Stairs
-        if stair_reinf_file:
+        # Stairs (uses boundary data from slabs for location)
+        if stair_raw is not None:
             progress.progress(60, text="Phase 2: Stairs...")
-            stair_raw = pd.read_csv(stair_reinf_file, encoding='utf-8-sig')
-            stairs_df = convert_stairs(stair_raw)
+            stairs_df = convert_stairs(stair_raw, stair_boundaries)
             outputs['stairs'] = stairs_df
             log(f"Stairs: {len(stairs_df)} stair members")
 
@@ -308,21 +318,20 @@ if st.button("CONVERT", type="primary", use_container_width=True):
         if design_wall_file:
             progress.progress(75, text="Phase 3: Wall reinforcement...")
             design_wall_raw = pd.read_csv(design_wall_file, encoding='utf-8-sig', header=None)
-            reinf_wall_df = convert_reinforcement_wall(design_wall_raw)
+            reinf_wall_df, design_wall_df = convert_reinforcement_wall(design_wall_raw)
             outputs['reinf_wall'] = reinf_wall_df
-            log(f"ReinfWall: {len(reinf_wall_df)} rows")
+            outputs['design_wall'] = design_wall_df
+            log(f"ReinfWall: {len(reinf_wall_df)} rows, DesignWall: {len(design_wall_df)} rows")
 
-        if slab_reinf_file:
+        if slab_reinf_raw is not None:
             progress.progress(80, text="Phase 3: Slab reinforcement...")
-            slab_reinf_raw2 = pd.read_csv(slab_reinf_file, encoding='utf-8-sig')
-            reinf_slab_df = convert_reinforcement_slab(slab_reinf_raw2)
+            reinf_slab_df = convert_reinforcement_slab(slab_reinf_raw)
             outputs['reinf_slab'] = reinf_slab_df
             log(f"ReinfSlab: {len(reinf_slab_df)} rows")
 
-        if stair_reinf_file:
+        if stair_raw is not None:
             progress.progress(85, text="Phase 3: Stair reinforcement...")
-            stair_raw2 = pd.read_csv(stair_reinf_file, encoding='utf-8-sig')
-            reinf_stair_df = convert_reinforcement_stair(stair_raw2)
+            reinf_stair_df = convert_reinforcement_stair(stair_raw)
             outputs['reinf_stair'] = reinf_stair_df
             log(f"ReinfStair: {len(reinf_stair_df)} rows")
 
@@ -371,6 +380,7 @@ if st.session_state.outputs:
         'reinf_beam': 'ReinforcementBeam.csv',
         'reinf_column': 'ReinforcementColumn.csv',
         'reinf_wall': 'ReinforcementWall.csv',
+        'design_wall': 'DesignResultsWall.csv',
         'reinf_slab': 'ReinforcementSlab.csv',
         'reinf_stair': 'ReinforcementStair.csv',
     }

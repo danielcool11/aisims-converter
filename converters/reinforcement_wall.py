@@ -9,7 +9,8 @@ Input:  DesignWall.csv (2-row blocks per wall element)
                H-Rebar ρ.use, ρ.min, s.max, s.use
         Row 2: Story, blank, Lw, HTw, hw, fys, ..., H-Rebar, Bar Layer,
                Pu, Rat-Pz, MF.z, Mcz, Rat-Mz, Rat-V, ...
-Output: ReinforcementWall.csv
+Output: ReinforcementWall.csv (reinforcement only)
+        DesignResultsWall.csv (geometry + design ratios)
 """
 
 import pandas as pd
@@ -33,6 +34,7 @@ def convert_reinforcement_wall(
     """
 
     results = []
+    design_results = []
     data = design_wall_df.values.tolist()
 
     # Skip header rows
@@ -90,36 +92,44 @@ def convert_reinforcement_wall(
         rat_my = _safe_float(row1[14])
         rat_v = _safe_float(row2[15]) if len(row2) > 15 else None
 
+        # Reinforcement data only (geometry → MembersWall, ratios → DesignResultsWall)
         record = {
-            'wall_id': wall_id,
             'wall_mark': wall_mark,
-            'story': story,
+            'level': story,
+            'v_bar_spec': v_rebar_str if v_rebar_str and v_rebar_str != 'nan' else None,
+            'v_dia_mm': v_rebar['dia'] if v_rebar else None,
+            'v_spacing_mm': v_rebar['spacing'] if v_rebar else None,
+            'h_bar_spec': h_rebar_str if h_rebar_str and h_rebar_str != 'nan' else None,
+            'h_dia_mm': h_rebar['dia'] if h_rebar else None,
+            'h_spacing_mm': h_rebar['spacing'] if h_rebar else None,
+            'bar_layer': bar_layer if bar_layer and bar_layer != 'nan' else None,
+            'end_rebar': end_rebar_str if end_rebar_str and 'Not Use' not in end_rebar_str else None,
+        }
+        results.append(record)
+
+        # Store design results for separate DesignResultsWall output
+        design_record = {
+            'wall_mark': wall_mark,
+            'level': story,
             'fck_MPa': fck,
             'fy_MPa': fy,
             'fys_MPa': fys,
             'lw_mm': lw_mm,
             'htw_mm': htw_mm,
             'thickness_mm': hw_mm,
-            'v_rebar_spec': v_rebar_str if v_rebar else v_rebar_str,
-            'v_rebar_dia_mm': v_rebar['dia'] if v_rebar else None,
-            'v_rebar_spacing_mm': v_rebar['spacing'] if v_rebar else None,
-            'h_rebar_spec': h_rebar_str if h_rebar else h_rebar_str,
-            'h_rebar_dia_mm': h_rebar['dia'] if h_rebar else None,
-            'h_rebar_spacing_mm': h_rebar['spacing'] if h_rebar else None,
-            'end_rebar': end_rebar_str if end_rebar_str and 'Not Use' not in end_rebar_str else None,
-            'bar_layer': bar_layer if bar_layer and bar_layer != 'nan' else None,
             'ratio_axial': rat_py,
             'ratio_moment': rat_my,
             'ratio_shear': rat_v,
         }
-        results.append(record)
+        design_results.append(design_record)
 
         i += 2
 
     result_df = pd.DataFrame(results)
+    design_df = pd.DataFrame(design_results)
     print(f'[ReinfWall] {len(result_df)} wall elements')
 
-    return result_df
+    return result_df, design_df
 
 
 def _safe_float(val):

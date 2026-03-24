@@ -18,7 +18,7 @@ def convert_slabs(
     boundary_df: pd.DataFrame,
     reinforcement_df: pd.DataFrame,
     nodes_result_df: pd.DataFrame,
-) -> pd.DataFrame:
+) -> tuple:
     """
     Convert slab boundary + reinforcement into standardized MembersSlab.
 
@@ -28,7 +28,10 @@ def convert_slabs(
         nodes_result_df: DataFrame from convert_nodes()
 
     Returns:
-        DataFrame for MembersSlab.csv
+        tuple: (slabs_df, stair_boundaries)
+            slabs_df: DataFrame for MembersSlab.csv
+            stair_boundaries: dict {stair_id: {node_nums, coords, centroid, ...}}
+                for stairs.py to look up location info
     """
 
     # Build node coordinate lookup
@@ -97,10 +100,16 @@ def convert_slabs(
         mid = str(row.get('member_id', '')).strip()
         reinf_lookup[mid] = row
 
-    # Generate slab members
+    # Generate slab members (exclude stairs — identified by 'SS' in member_id)
     results = []
+    stair_ids_skipped = []
 
     for slab_id, boundary in slab_boundaries.items():
+        # Stair entries have 'SS' in their ID (B3SS1, 1SS1, RSS1, etc.)
+        if 'SS' in slab_id.upper():
+            stair_ids_skipped.append(slab_id)
+            continue
+
         node_nums = boundary['node_nums']
 
         # Get node coordinates
@@ -156,12 +165,40 @@ def convert_slabs(
 
     result_df = pd.DataFrame(results)
 
+    # Build stair boundary data for stairs.py
+    stair_boundary_data = {}
+    for stair_id in stair_ids_skipped:
+        boundary = slab_boundaries[stair_id]
+        node_nums = boundary['node_nums']
+        coords = []
+        for nn in node_nums:
+            nd = node_lookup.get(nn)
+            if nd:
+                coords.append(nd)
+        if coords:
+            xs = [c['x_mm'] for c in coords]
+            ys = [c['y_mm'] for c in coords]
+            zs = [c['z_mm'] for c in coords]
+            node_ids = [node_lookup[nn]['node_id'] for nn in node_nums if nn in node_lookup]
+            stair_boundary_data[stair_id] = {
+                'node_nums': node_nums,
+                'centroid_x_mm': round(sum(xs) / len(xs), 1),
+                'centroid_y_mm': round(sum(ys) / len(ys), 1),
+                'z_mm': round(sum(zs) / len(zs), 1),
+                'Lx_mm': round(max(xs) - min(xs), 1),
+                'Ly_mm': round(max(ys) - min(ys), 1),
+                'level': coords[0]['level'],
+                'boundary_nodes': ','.join(node_ids),
+            }
+
     # Log summary
     print(f'[Slabs] {len(result_df)} slab members from '
           f'{len(slab_boundaries)} boundaries, '
           f'{len(reinf_lookup)} reinforcement entries')
+    if stair_ids_skipped:
+        print(f'[Slabs] {len(stair_ids_skipped)} stair entries excluded: {stair_ids_skipped}')
 
-    return result_df
+    return result_df, stair_boundary_data
 
 
 def _parse_node_list(nodes_str: str) -> list:

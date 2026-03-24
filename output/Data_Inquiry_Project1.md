@@ -70,12 +70,61 @@ but no corresponding design result appears in `DesignBeam.csv`.
 
 ---
 
+## Issue 3: Missing Stair Dimensions
+## 문의 3: 계단 치수 누락
+
+**Description / 설명:**
+
+`StairReinforcement.csv` provides stair flight width (1300mm), flight run (2970mm),
+total height, and landing lengths. However, the following dimensions required
+for BIM modeling and rebar calculation are not included in the provided data.
+
+`StairReinforcement.csv`에 계단 비행폭(1300mm), 비행 수평거리(2970mm),
+총 높이, 참 길이가 포함되어 있으나, BIM 모델링 및 철근 산출에 필요한
+아래 치수가 데이터에 포함되어 있지 않습니다.
+
+**Missing dimensions / 누락 치수:**
+
+| Dimension | Description | Description (KR) |
+|-----------|-------------|------------------|
+| Waist slab thickness (mm) | Structural slab thickness of the stair flight | 계단 경사 슬래브 두께 |
+| Riser height (mm) | Height of each step | 챌면 높이 |
+| Tread depth (mm) | Horizontal depth of each step | 디딤판 깊이 |
+
+**Stair members requiring these dimensions / 해당 계단 부재:**
+
+| member_id | level_from | level_to | total_height_mm |
+|-----------|------------|----------|-----------------|
+| B3SS1     | B4         | B3       | 4400            |
+| B2SS1     | B3         | B2       | 5950            |
+| B1SS1     | B2         | B1       | 3600            |
+| 1SS1      | B1         | 1F       | 4150            |
+| 2SS1      | 1F         | 2F       | 4500            |
+| 3SS1      | 2F         | 3F       | 4150            |
+| 4SS1      | 3F         | 4F       | 4150            |
+| 5SS1      | 4F         | 5F       | 4150            |
+| 6SS1      | 5F         | 6F       | 4150            |
+| RSS1      | 6F         | Roof     | 6200            |
+
+**Request / 요청:**
+
+1. Please provide the waist slab thickness for the stair flights.
+2. Please provide the riser height and tread depth.
+3. If these dimensions vary by floor, please specify per stair member.
+
+1. 계단 비행부의 허리 슬래브 두께를 제공해 주십시오.
+2. 챌면 높이와 디딤판 깊이를 제공해 주십시오.
+3. 층별로 치수가 다른 경우, 각 계단 부재별로 명시해 주십시오.
+
+---
+
 ## Summary Table / 요약
 
 | # | Issue | Elements | Status |
 |---|-------|----------|--------|
 | 1 | BEAM elements referencing Thickness instead of Sections | 892, 1121, 1236, 1500 | Need section definition or reclassification |
 | 2 | TB14 missing from DesignBeam.csv | 5TB14 (Section ID 14611) | Need design output |
+| 3 | Stair dimensions missing | All 10 stairs (B3SS1 ~ RSS1) | Need waist thickness, riser height, tread depth |
 
 Please respond at your earliest convenience so we can finalize the data conversion.
 확인 후 회신 부탁드립니다.
