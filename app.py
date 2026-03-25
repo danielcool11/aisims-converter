@@ -233,8 +233,11 @@ if st.button("CONVERT", type="primary", use_container_width=True):
         log(f"Materials: {len(materials_df)} materials")
 
         progress.progress(30, text="Phase 1: Sections...")
+        # Extract story names for resolving ambiguous levels (P -> PIT or PH)
+        story_names = story_raw.iloc[:, 1].dropna().astype(str).str.strip().tolist() \
+            if story_raw is not None else []
         sections_df, section_lookup, thickness_lookup = convert_sections(
-            sections_raw, thickness_raw, cover_path
+            sections_raw, thickness_raw, cover_path, story_names
         )
         outputs['sections'] = sections_df
         log(f"Sections: {len(sections_df)} sections")

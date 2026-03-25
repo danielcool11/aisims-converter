@@ -74,9 +74,9 @@ def normalize_level(level_str: str) -> str:
     if level_str in ('Roof', 'PH', 'PHR'):
         return level_str
 
-    # P -> PH (Penthouse)
+    # P -> keep as 'P' (resolved later against StoryDefinition: PIT, PH, etc.)
     if level_str == 'P':
-        return 'PH'
+        return 'P'
 
     # R -> Roof
     if level_str == 'R':
@@ -106,7 +106,9 @@ def _strip_annotation(name: str) -> str:
 def _parse_level_token(token: str) -> str:
     """Parse a single level token: number, P, R, B1, etc."""
     token = token.strip()
-    if token.upper() in ('P', 'PH'):
+    if token.upper() == 'P':
+        return 'P'  # ambiguous: PIT or PH — resolved against StoryDefinition
+    if token.upper() == 'PH':
         return 'PH'
     if token.upper() in ('R', 'ROOF'):
         return 'Roof'

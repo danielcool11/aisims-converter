@@ -31,6 +31,7 @@ def convert_sections(
     sections_df: pd.DataFrame,
     thickness_df: pd.DataFrame = None,
     cover_path: str = None,
+    story_names: list = None,
 ) -> tuple:
     """
     Convert raw MIDAS sections to standardized format.
@@ -39,6 +40,8 @@ def convert_sections(
         sections_df: DataFrame from Sections.csv
         thickness_df: DataFrame from Thickness.csv (wall thicknesses)
         cover_path: path to CoverRequirements.csv
+        story_names: list of story names from StoryDefinition (for resolving
+                     ambiguous levels like 'P' -> 'PIT' or 'PH')
 
     Returns:
         tuple: (sections_result_df, section_lookup_dict, thickness_lookup_dict)
@@ -101,6 +104,18 @@ def convert_sections(
 
         if parsed['member_type'] == 'SKIP':
             continue
+
+        # Resolve ambiguous levels (e.g., 'P' -> 'PIT' or 'PH')
+        if story_names and parsed.get('level_from') == 'P':
+            for sn in story_names:
+                if sn.upper().startswith('P') and sn.upper() not in ('PHR',):
+                    parsed['level_from'] = sn
+                    break
+        if story_names and parsed.get('level_to') == 'P':
+            for sn in story_names:
+                if sn.upper().startswith('P') and sn.upper() not in ('PHR',):
+                    parsed['level_to'] = sn
+                    break
 
         # Determine shape
         shape_raw = str(row.get('shape_raw', '')).upper()
