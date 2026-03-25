@@ -338,16 +338,18 @@ if st.button("CONVERT", type="primary", use_container_width=True):
         if design_beam_file:
             progress.progress(65, text="Phase 3: Beam reinforcement...")
             design_beam_raw = pd.read_csv(design_beam_file, encoding='utf-8-sig', header=None)
-            reinf_beam_df = convert_reinforcement_beam(design_beam_raw, section_lookup)
+            reinf_beam_df, design_beam_df = convert_reinforcement_beam(design_beam_raw, section_lookup)
             outputs['reinf_beam'] = reinf_beam_df
-            log(f"ReinfBeam: {len(reinf_beam_df)} rows")
+            outputs['design_beam'] = design_beam_df
+            log(f"ReinfBeam: {len(reinf_beam_df)} rows, DesignBeam: {len(design_beam_df)} rows")
 
         if design_col_file:
             progress.progress(70, text="Phase 3: Column reinforcement...")
             design_col_raw = pd.read_csv(design_col_file, encoding='utf-8-sig', header=None)
-            reinf_col_df = convert_reinforcement_column(design_col_raw, section_lookup)
+            reinf_col_df, design_col_df = convert_reinforcement_column(design_col_raw, section_lookup)
             outputs['reinf_column'] = reinf_col_df
-            log(f"ReinfColumn: {len(reinf_col_df)} rows")
+            outputs['design_column'] = design_col_df
+            log(f"ReinfColumn: {len(reinf_col_df)} rows, DesignColumn: {len(design_col_df)} rows")
 
         if design_wall_file:
             progress.progress(75, text="Phase 3: Wall reinforcement...")
@@ -412,7 +414,9 @@ if st.session_state.outputs:
         'slabs': 'MembersSlab.csv',
         'stairs': 'MembersStair.csv',
         'reinf_beam': 'ReinforcementBeam.csv',
+        'design_beam': 'DesignResultsBeam.csv',
         'reinf_column': 'ReinforcementColumn.csv',
+        'design_column': 'DesignResultsColumn.csv',
         'reinf_wall': 'ReinforcementWall.csv',
         'design_wall': 'DesignResultsWall.csv',
         'reinf_slab': 'ReinforcementSlab.csv',

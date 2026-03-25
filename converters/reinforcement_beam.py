@@ -37,6 +37,7 @@ def convert_reinforcement_beam(
     # 19:Stirrup, 20:Vu, 21:Shear_LCB, 22:phiVc, 23:Rat_V
 
     results = []
+    design_results = []
 
     # Read raw data — skip the 3 header rows
     data = design_beam_df.values.tolist()
@@ -104,6 +105,7 @@ def convert_reinforcement_beam(
             rat_p = _safe_float(row_data[18]) if len(row_data) > 18 else None
             rat_v = _safe_float(row_data[23]) if len(row_data) > 23 else None
 
+            # Reinforcement record (rebar only)
             record = {
                 'element_id': elem_id if pos_label == 'I' else None,
                 'member_id': member_id,
@@ -127,19 +129,49 @@ def convert_reinforcement_beam(
                 'stirrup_legs': stirrup['legs'] if stirrup else None,
                 'stirrup_dia_mm': stirrup['dia'] if stirrup else None,
                 'stirrup_spacing_mm': stirrup['spacing'] if stirrup else None,
-                'ratio_negative': rat_n,
-                'ratio_positive': rat_p,
-                'ratio_shear': rat_v,
             }
             results.append(record)
+
+            # Design results record (capacity + ratios)
+            # Negative moment: Mu(col9), phiMn(col11)
+            # Positive moment: Mu(col15), phiMn(col17)
+            # Shear: Vu(col20), phiVc(col22)
+            Mu_neg = _safe_float(row_data[9]) if len(row_data) > 9 else None
+            phiMn_neg = _safe_float(row_data[11]) if len(row_data) > 11 else None
+            Mu_pos = _safe_float(row_data[15]) if len(row_data) > 15 else None
+            phiMn_pos = _safe_float(row_data[17]) if len(row_data) > 17 else None
+            Vu = _safe_float(row_data[20]) if len(row_data) > 20 else None
+            phiVc = _safe_float(row_data[22]) if len(row_data) > 22 else None
+
+            design_record = {
+                'member_id': member_id,
+                'position': pos_label,
+                'fck_MPa': fck,
+                'fy_MPa': fy,
+                'fys_MPa': fys,
+                'top_bar_spec': neg_rebar_str if neg_rebar else None,
+                'bot_bar_spec': pos_rebar_str if pos_rebar else None,
+                'stirrup_spec': stirrup_str if stirrup else None,
+                'Mu_neg': Mu_neg,
+                'phiMn_neg': phiMn_neg,
+                'ratio_negative': rat_n,
+                'Mu_pos': Mu_pos,
+                'phiMn_pos': phiMn_pos,
+                'ratio_positive': rat_p,
+                'Vu': Vu,
+                'phiVc': phiVc,
+                'ratio_shear': rat_v,
+            }
+            design_results.append(design_record)
 
         i += 3  # next block
 
     result_df = pd.DataFrame(results)
+    design_df = pd.DataFrame(design_results)
     n_members = len(result_df) // 3 if len(result_df) > 0 else 0
     print(f'[ReinfBeam] {n_members} beams × 3 positions = {len(result_df)} rows')
 
-    return result_df
+    return result_df, design_df
 
 
 def _safe_float(val):

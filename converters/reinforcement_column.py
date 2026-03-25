@@ -31,6 +31,7 @@ def convert_reinforcement_column(
     """
 
     results = []
+    design_results = []
     data = design_col_df.values.tolist()
 
     # Skip header rows
@@ -94,6 +95,7 @@ def convert_reinforcement_column(
         rat_v_end = _safe_float(row1[17])
         rat_v_mid = _safe_float(row2[17])
 
+        # Reinforcement record (rebar only)
         record = {
             'element_id': elem_id,
             'member_id': member_id,
@@ -117,20 +119,43 @@ def convert_reinforcement_column(
             'tie_mid_legs': h_rebar_mid['legs'] if h_rebar_mid else None,
             'tie_mid_dia_mm': h_rebar_mid['dia'] if h_rebar_mid else None,
             'tie_mid_spacing_mm': h_rebar_mid['spacing'] if h_rebar_mid else None,
+        }
+        results.append(record)
+
+        # Design results record (capacity + ratios)
+        phiPn_max = _safe_float(row1[9])
+        Pu = _safe_float(row1[10])
+        Vu_end = _safe_float(row1[16])
+        Vu_mid = _safe_float(row2[16])
+
+        design_record = {
+            'member_id': member_id,
+            'fck_MPa': fck,
+            'fy_MPa': fy,
+            'fys_MPa': fys,
+            'b_mm': b_mm,
+            'h_mm': h_mm,
+            'height_mm': height_mm,
+            'main_bar_spec': v_rebar_str if v_rebar else None,
+            'phiPn_max': phiPn_max,
+            'Pu': Pu,
             'ratio_axial': rat_p,
             'ratio_moment_y': rat_my,
             'ratio_moment_z': rat_mz,
+            'Vu_end': Vu_end,
             'ratio_shear_end': rat_v_end,
+            'Vu_mid': Vu_mid,
             'ratio_shear_mid': rat_v_mid,
         }
-        results.append(record)
+        design_results.append(design_record)
 
         i += 2  # next block
 
     result_df = pd.DataFrame(results)
+    design_df = pd.DataFrame(design_results)
     print(f'[ReinfColumn] {len(result_df)} columns')
 
-    return result_df
+    return result_df, design_df
 
 
 def _safe_float(val):
