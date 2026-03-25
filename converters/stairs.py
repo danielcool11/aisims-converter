@@ -362,15 +362,23 @@ def _compute_8_point_model(
         y_min = cy - Ly / 2
         y_max = cy + Ly / 2
 
-        # Resolve actual boundary Y from nodes if available
+        # Resolve actual boundary X/Y from nodes if available
         if node_nums and nodes_df is not None:
             node_lookup = {}
             for _, r in nodes_df.iterrows():
                 node_lookup[int(r['node_number'])] = (float(r['x_mm']), float(r['y_mm']))
+            xs = [node_lookup[n][0] for n in node_nums if n in node_lookup]
             ys = [node_lookup[n][1] for n in node_nums if n in node_lookup]
             if ys:
                 y_min = min(ys)
                 y_max = max(ys)
+            # Clamp free_x to actual boundary extent (L-shaped boundaries
+            # can have Lx larger than the flight area)
+            if xs:
+                if perp_dir > 0:
+                    free_x = min(free_x, max(xs))
+                else:
+                    free_x = max(free_x, min(xs))
 
         # Lower landing: y_min to y_min + A
         A = landing_lower
@@ -401,9 +409,16 @@ def _compute_8_point_model(
             for _, r in nodes_df.iterrows():
                 node_lookup[int(r['node_number'])] = (float(r['x_mm']), float(r['y_mm']))
             xs = [node_lookup[n][0] for n in node_nums if n in node_lookup]
+            ys = [node_lookup[n][1] for n in node_nums if n in node_lookup]
             if xs:
                 x_min = min(xs)
                 x_max = max(xs)
+            # Clamp free_y to actual boundary extent
+            if ys:
+                if perp_dir > 0:
+                    free_y = min(free_y, max(ys))
+                else:
+                    free_y = max(free_y, min(ys))
 
         A = landing_lower
         C = landing_mid
