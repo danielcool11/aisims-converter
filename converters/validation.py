@@ -16,31 +16,57 @@ import re
 
 def _extract_base_member_id(name: str) -> str:
     """
-    Strip level prefix from a member_id to get the base ID.
+    Strip level prefix/suffix from a member_id to get the base ID.
 
-    '6C1'       → 'C1'
-    '-2~-1TC1'  → 'TC1'
-    '3~4B11'    → 'B11'
-    '-1G1'      → 'G1'
-    'PHRWG1'    → 'WG1' (PHR prefix = level, rest = member)
-    'LB1'       → 'LB1' (no level prefix)
+    Project 1 style (joined):
+        '6C1'           → 'C1'
+        '-2~-1TC1'      → 'TC1'
+        '3~4B11'        → 'B11'
+        '-1G1'          → 'G1'
+        'PHRWG1'        → 'WG1'
+        'LB1'           → 'LB1'
+
+    Project 2 style (space-separated, parenthetical):
+        '-1~-4 G1'      → 'G1'
+        '1 B1'          → 'B1'
+        'P G8A'         → 'G8A'
+        'TC1 (1-P)'     → 'TC1'
+        'C1 (B5-B1)'    → 'C1'
+        'P G8A (sayOK)' → 'G8A'
+        '3~R WB2~5'     → 'WB2'
     """
     if not name or not isinstance(name, str):
         return str(name)
 
     name = name.strip()
 
-    # Pattern: level_range + member — '3~4TC1', '-2~-1B11'
+    # Strip annotations like (sayOK)
+    name = re.sub(r'\s*\(say\w*\)\s*$', '', name, flags=re.IGNORECASE)
+
+    # Project 2: member_id (level_range) — 'TC1 (1-P)', 'C1 (B5-B1)'
+    m = re.match(r'^([A-Za-z]+\d+[A-Za-z]*)\s*\([^)]+\)$', name)
+    if m:
+        return m.group(1)
+
+    # Project 2: space-separated — '-1~-4 G1', '1 B1', 'P G8A', '3~R WB2~5'
+    if ' ' in name:
+        parts = name.split(None, 1)
+        member_part = parts[1].strip() if len(parts) > 1 else parts[0]
+        # Remove trailing sub-range like ~5 from WB2~5
+        member_part = re.sub(r'~\d+$', '', member_part)
+        return member_part
+
+    # Project 1: level_range + member — '3~4TC1', '-2~-1B11'
     m = re.match(r'^-?\d+~-?\d+([A-Za-z]+\d+[A-Za-z]*)$', name)
     if m:
         return m.group(1)
 
-    # Pattern: single_floor + member — '6C1', '-1G1'
+    # Project 1: single_floor + member — '6C1', '-1G1'
     m = re.match(r'^-?\d+([A-Za-z]+\d+[A-Za-z]*)$', name)
     if m:
         return m.group(1)
 
-    # Pattern: R/PH/PHR prefix + member — 'RG1', 'PHRWG1'
+    # Project 1: R/PH/PHR prefix + member — 'RG1', 'PHRWG1'
     m = re.match(r'^(?:PHR?|R)([A-Za-z]*\d+[A-Za-z]*)$', name)
     if m:
         return m.group(1)
