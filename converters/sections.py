@@ -91,6 +91,7 @@ def convert_sections(
 
     results = []
     section_lookup = {}
+    seen_section_ids: set = set()
 
     for _, row in sections_df.iterrows():
         sec_id = str(row.get('sec_id', '')).strip()
@@ -151,6 +152,20 @@ def convert_sections(
             if parsed.get('level_to'):
                 level_part += f"_{parsed['level_to']}"
         section_id = f"RC_{parsed['member_id']}{level_part}"
+
+        # Skip duplicate section_ids (e.g., "P G8A" and "P G8A (sayOK)" both → RC_G8A_PIT)
+        if section_id in seen_section_ids:
+            # Still add to lookup so member resolution works for both raw IDs
+            section_lookup[sec_id] = {
+                'section_id': section_id,
+                'member_id': parsed['member_id'],
+                'member_type': member_type,
+                'b_mm': b_mm,
+                'h_mm': h_mm,
+                'raw_name': sec_name,
+            }
+            continue
+        seen_section_ids.add(section_id)
 
         record = {
             'section_id': section_id,
