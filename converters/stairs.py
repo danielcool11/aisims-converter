@@ -196,6 +196,13 @@ def convert_stairs(
             node_nums, nodes_result_df,
         )
 
+        # Flight centerline inset: _compute_8_point_model places P-points at
+        # the boundary edges (wall_x, free_x). The frontend renders each
+        # flight centered on its start→end line, extending ±stair_width/2
+        # perpendicular. We must inset the flight line by stair_width/2 so
+        # the outer edge of each flight aligns with the boundary, not the center.
+        flight_inset = stair_width / 2 if stair_width else 0
+
         if points:
             for i in range(1, 9):
                 p = points[f'p{i}']
@@ -203,23 +210,45 @@ def convert_stairs(
                 record[f'p{i}_y'] = p[1]
                 record[f'p{i}_z'] = p[2]
 
-            # Flight 1: wall-side strip, P2 → P5
-            record['flight1_start_x'] = points['p2'][0]
-            record['flight1_start_y'] = points['p2'][1]
-            record['flight1_start_z'] = points['p2'][2]
-            record['flight1_end_x'] = points['p5'][0]
-            record['flight1_end_y'] = points['p5'][1]
-            record['flight1_end_z'] = points['p5'][2]
+            # Determine which axis to apply flight inset on
+            ws_axis = wall_side['wall_axis'] if wall_side else None
+            ws_perp = wall_side['perp_direction'] if wall_side else 1
+
+            # Flight 1: wall-side strip, P2 → P5 (inset from wall edge)
+            f1_sx, f1_sy, f1_sz = points['p2']
+            f1_ex, f1_ey, f1_ez = points['p5']
+            if ws_axis == 'X' and flight_inset:
+                # Inset from wall_x toward center
+                f1_sx += ws_perp * flight_inset
+                f1_ex += ws_perp * flight_inset
+            elif ws_axis == 'Y' and flight_inset:
+                f1_sy += ws_perp * flight_inset
+                f1_ey += ws_perp * flight_inset
+            record['flight1_start_x'] = round(f1_sx, 1)
+            record['flight1_start_y'] = round(f1_sy, 1)
+            record['flight1_start_z'] = round(f1_sz, 1)
+            record['flight1_end_x'] = round(f1_ex, 1)
+            record['flight1_end_y'] = round(f1_ey, 1)
+            record['flight1_end_z'] = round(f1_ez, 1)
             record['flight1_num_risers'] = record['risers_per_flight']
 
             # Flight 2: free-side strip, P8 → P3 (return direction, going UP)
             # P8 is at z_mid; flight2 rises to z_end (= z_start + total_height)
             z_end = z_start + total_height if z_start is not None and total_height else points['p3'][2]
-            record['flight2_start_x'] = points['p8'][0]
-            record['flight2_start_y'] = points['p8'][1]
-            record['flight2_start_z'] = points['p8'][2]
-            record['flight2_end_x'] = points['p3'][0]
-            record['flight2_end_y'] = points['p3'][1]
+            f2_sx, f2_sy, f2_sz = points['p8']
+            f2_ex, f2_ey = points['p3'][0], points['p3'][1]
+            if ws_axis == 'X' and flight_inset:
+                # Inset from free_x toward center
+                f2_sx -= ws_perp * flight_inset
+                f2_ex -= ws_perp * flight_inset
+            elif ws_axis == 'Y' and flight_inset:
+                f2_sy -= ws_perp * flight_inset
+                f2_ey -= ws_perp * flight_inset
+            record['flight2_start_x'] = round(f2_sx, 1)
+            record['flight2_start_y'] = round(f2_sy, 1)
+            record['flight2_start_z'] = round(f2_sz, 1)
+            record['flight2_end_x'] = round(f2_ex, 1)
+            record['flight2_end_y'] = round(f2_ey, 1)
             record['flight2_end_z'] = z_end
             record['flight2_num_risers'] = record['risers_per_flight']
 
