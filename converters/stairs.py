@@ -212,13 +212,15 @@ def convert_stairs(
             record['flight1_end_z'] = points['p5'][2]
             record['flight1_num_risers'] = record['risers_per_flight']
 
-            # Flight 2: free-side strip, P8 → P3 (return direction)
+            # Flight 2: free-side strip, P8 → P3 (return direction, going UP)
+            # P8 is at z_mid; flight2 rises to z_end (= z_start + total_height)
+            z_end = z_start + total_height if z_start is not None and total_height else points['p3'][2]
             record['flight2_start_x'] = points['p8'][0]
             record['flight2_start_y'] = points['p8'][1]
             record['flight2_start_z'] = points['p8'][2]
             record['flight2_end_x'] = points['p3'][0]
             record['flight2_end_y'] = points['p3'][1]
-            record['flight2_end_z'] = points['p3'][2]
+            record['flight2_end_z'] = z_end
             record['flight2_num_risers'] = record['risers_per_flight']
 
             # Mid-landing
