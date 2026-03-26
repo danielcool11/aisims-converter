@@ -55,8 +55,11 @@ def parse_stirrup(spec: str) -> Optional[dict]:
     """
     Parse stirrup specification.
 
-    "2-D10 @200"  → {legs: 2, dia: 10, spacing: 200}
-    "3-D13 @150"  → {legs: 3, dia: 13, spacing: 150}
+    "2-D10 @200"      → {legs: 2, dia: 10, spacing: 200}
+    "3-D13 @150"      → {legs: 3, dia: 13, spacing: 150}
+    "4|5-D13 @150"    → {legs: 5, dia: 13, spacing: 150}  (alternating, take max)
+    "3|5-D13 @150"    → {legs: 5, dia: 13, spacing: 150}
+    "5-10@200"        → {legs: 5, dia: 10, spacing: 200}  (no D prefix)
 
     Returns None if cannot parse.
     """
@@ -67,11 +70,31 @@ def parse_stirrup(spec: str) -> Optional[dict]:
     if spec == '':
         return None
 
+    # Pattern: N|M-D## @### (alternating leg groups, e.g. "4|5-D13 @150")
+    m = re.match(r'([\d|]+)-D(\d+)\s*@\s*(\d+)', spec)
+    if m:
+        legs_parts = [int(x) for x in m.group(1).split('|')]
+        return {
+            'legs': max(legs_parts),
+            'dia': int(m.group(2)),
+            'spacing': int(m.group(3)),
+        }
+
     # Pattern: N-D## @### (with D prefix)
     m = re.match(r'(\d+)-D(\d+)\s*@\s*(\d+)', spec)
     if m:
         return {
             'legs': int(m.group(1)),
+            'dia': int(m.group(2)),
+            'spacing': int(m.group(3)),
+        }
+
+    # Pattern: N|M-## @### (alternating, no D prefix)
+    m = re.match(r'([\d|]+)-(\d+)\s*@\s*(\d+)', spec)
+    if m:
+        legs_parts = [int(x) for x in m.group(1).split('|')]
+        return {
+            'legs': max(legs_parts),
             'dia': int(m.group(2)),
             'spacing': int(m.group(3)),
         }
