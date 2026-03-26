@@ -52,19 +52,24 @@ def convert_footings(
             boundary_data[foot_no] = {
                 'level': level,
                 'nodes': [],
-                'quads': [],
+                'parts': [],
             }
         boundary_data[foot_no]['nodes'].append((node_id, x, y, z))
 
-    # Group nodes into quads (every 4 nodes)
+    # Group nodes into parts:
+    # - If node count divisible by 4 → split into quads (P1 style: 8 nodes = 2 rectangles)
+    # - Otherwise → treat as one polygon (P2 style: 6 nodes = L-shape)
     for foot_no, data in boundary_data.items():
         nodes = data['nodes']
-        quads = []
-        for i in range(0, len(nodes), 4):
-            quad = nodes[i:i+4]
-            if len(quad) == 4:
-                quads.append(quad)
-        data['quads'] = quads
+        parts = []
+        if len(nodes) % 4 == 0 and len(nodes) >= 4:
+            # Split into quads
+            for i in range(0, len(nodes), 4):
+                parts.append(nodes[i:i+4])
+        elif len(nodes) >= 3:
+            # Treat as single polygon
+            parts.append(nodes)
+        data['parts'] = parts
 
     # Normalize reinforcement columns
     reinf_col_map = {}
@@ -96,7 +101,7 @@ def convert_footings(
         mid = str(row.get('member_id', '')).strip()
         reinf_lookup[mid] = row
 
-    # ── MembersFooting: one row per quad (MF* entries split by quad) ──
+    # ── MembersFooting: one row per part (quad or polygon) ──
     members = []
     for foot_no, data in boundary_data.items():
         if not foot_no.startswith('MF'):
@@ -107,32 +112,37 @@ def convert_footings(
         if reinf is not None:
             thickness = _safe_float(reinf.get('thickness_mm'))
 
-        for qi, quad in enumerate(data['quads'], start=1):
-            qx = [q[1] for q in quad]
-            qy = [q[2] for q in quad]
-            qz = [q[3] for q in quad]
+        for qi, part in enumerate(data['parts'], start=1):
+            px = [p[1] for p in part]
+            py = [p[2] for p in part]
+            pz = [p[3] for p in part]
 
-            centroid_x = sum(qx) / len(qx)
-            centroid_y = sum(qy) / len(qy)
-            z = sum(qz) / len(qz)
-            Lx = max(qx) - min(qx)
-            Ly = max(qy) - min(qy)
-            area = Lx * Ly
+            centroid_x = sum(px) / len(px)
+            centroid_y = sum(py) / len(py)
+            z = sum(pz) / len(pz)
 
-            # Use semicolon separator to prevent Excel number interpretation
-            node_ids = [str(q[0]) for q in quad]
+            x_min, x_max = min(px), max(px)
+            y_min, y_max = min(py), max(py)
+            Lx = x_max - x_min
+            Ly = y_max - y_min
 
+            # Area: use Shoelace formula for polygon, bounding box for quad
+            if len(part) == 4:
+                area = Lx * Ly
+            else:
+                area = _polygon_area(px, py)
+
+            node_ids = [str(p[0]) for p in part]
+            n_nodes = len(part)
+            shape = 'RECT' if n_nodes == 4 else f'POLYGON_{n_nodes}'
             part_id = f"{foot_no}-{qi}"
-
-            # Sort quad corners: bottom-left, bottom-right, top-left, top-right
-            x_min, x_max = min(qx), max(qx)
-            y_min, y_max = min(qy), max(qy)
 
             members.append({
                 'member_id': foot_no,
                 'part_id': part_id,
                 'member_type': 'FOOTING',
                 'footing_type': 'MAT',
+                'shape': shape,
                 'level': data['level'],
                 'thickness_mm': thickness,
                 'centroid_x_mm': round(centroid_x, 1),
@@ -140,7 +150,7 @@ def convert_footings(
                 'z_mm': round(z, 1),
                 'Lx_mm': round(Lx, 1),
                 'Ly_mm': round(Ly, 1),
-                'area_mm2': round(area, 1),
+                'area_mm2': round(abs(area), 1),
                 'x_min_mm': round(x_min, 1),
                 'y_min_mm': round(y_min, 1),
                 'x_max_mm': round(x_max, 1),
@@ -187,11 +197,11 @@ def convert_footings(
             zone_type = 'UNKNOWN'
             parent_mat = foot_no
 
-        # Build zone boundary string (all quad nodes)
+        # Build zone boundary string (all part nodes)
         zone_nodes = []
-        for quad in data['quads']:
-            quad_str = ';'.join([f"({q[1]},{q[2]})" for q in quad])
-            zone_nodes.append(quad_str)
+        for part in data['parts']:
+            part_str = ';'.join([f"({p[1]},{p[2]})" for p in part])
+            zone_nodes.append(part_str)
         zone_boundary = ' | '.join(zone_nodes)
 
         # Zone bounding box
@@ -264,6 +274,19 @@ def convert_footings(
           f'({base_count} base, {add_count} additional, {stir_count} stirrup)')
 
     return members_df, reinf_result_df
+
+
+def _polygon_area(xs, ys):
+    """Compute polygon area using the Shoelace formula."""
+    n = len(xs)
+    if n < 3:
+        return 0
+    area = 0
+    for i in range(n):
+        j = (i + 1) % n
+        area += xs[i] * ys[j]
+        area -= xs[j] * ys[i]
+    return area / 2
 
 
 def _safe_float(val):
