@@ -29,6 +29,7 @@ from converters.reinforcement_wall import convert_reinforcement_wall
 from converters.reinforcement_slab import convert_reinforcement_slab
 from converters.reinforcement_stair import convert_reinforcement_stair
 from converters.footings import convert_footings
+from converters.basement_walls import convert_basement_walls
 from converters.validation import validate_outputs, format_report
 
 
@@ -124,6 +125,9 @@ with col_b:
     stair_reinf_file = st.file_uploader("StairReinforcement.csv", type=['csv'], key='stair_reinf')
     foot_boundary_file = st.file_uploader("FootBoundary.csv", type=['csv'], key='foot_boundary')
     foot_reinf_file = st.file_uploader("FootReinforcement.csv", type=['csv'], key='foot_reinf')
+
+    st.subheader("Part C — Basement Walls")
+    bwall_file = st.file_uploader("Part C Excel (BasementWall)", type=['xlsx'], key='bwall')
 
 # ══════════════════════════════════════════════════════════════
 # STEP 2: GRID DEFINITION
@@ -334,6 +338,22 @@ if st.button("CONVERT", type="primary", use_container_width=True):
             outputs['reinf_footing'] = reinf_footing_df
             log(f"Footings: {len(footings_df)} members, {len(reinf_footing_df)} reinforcement rows")
 
+        # Basement walls (Part C)
+        if bwall_file:
+            progress.progress(63, text="Phase 2: Basement walls...")
+            bwall_boundary = pd.read_excel(bwall_file, sheet_name='BasementWall Boundary', header=1)
+            bwall_reinf = pd.read_excel(bwall_file, sheet_name='BasementWall Reinforcement', header=1)
+            bwall_members, bwall_reinf_df = convert_basement_walls(bwall_boundary, bwall_reinf, nodes_df)
+
+            # Append to existing walls if present
+            if 'walls' in outputs and not outputs['walls'].empty:
+                outputs['walls'] = pd.concat([outputs['walls'], bwall_members], ignore_index=True)
+            else:
+                outputs['walls'] = bwall_members
+
+            outputs['reinf_bwall'] = bwall_reinf_df
+            log(f"Basement walls: {len(bwall_members)} members, {len(bwall_reinf_df)} reinforcement rows")
+
         # ── Phase 3: Reinforcement ──
         if design_beam_file:
             progress.progress(65, text="Phase 3: Beam reinforcement...")
@@ -419,6 +439,7 @@ if st.session_state.outputs:
         'design_column': 'DesignResultsColumn.csv',
         'reinf_wall': 'ReinforcementWall.csv',
         'design_wall': 'DesignResultsWall.csv',
+        'reinf_bwall': 'ReinforcementBasementWall.csv',
         'reinf_slab': 'ReinforcementSlab.csv',
         'reinf_stair': 'ReinforcementStair.csv',
         'footings': 'MembersFooting.csv',
