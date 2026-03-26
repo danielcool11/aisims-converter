@@ -338,21 +338,15 @@ if st.button("CONVERT", type="primary", use_container_width=True):
             outputs['reinf_footing'] = reinf_footing_df
             log(f"Footings: {len(footings_df)} members, {len(reinf_footing_df)} reinforcement rows")
 
-        # Basement walls (Part C)
+        # Basement walls (Part C) — separate from standard walls
         if bwall_file:
             progress.progress(63, text="Phase 2: Basement walls...")
             bwall_boundary = pd.read_excel(bwall_file, sheet_name='BasementWall Boundary', header=1)
             bwall_reinf = pd.read_excel(bwall_file, sheet_name='BasementWall Reinforcement', header=1)
             bwall_members, bwall_reinf_df = convert_basement_walls(bwall_boundary, bwall_reinf, nodes_df)
-
-            # Append to existing walls if present
-            if 'walls' in outputs and not outputs['walls'].empty:
-                outputs['walls'] = pd.concat([outputs['walls'], bwall_members], ignore_index=True)
-            else:
-                outputs['walls'] = bwall_members
-
+            outputs['bwall_members'] = bwall_members
             outputs['reinf_bwall'] = bwall_reinf_df
-            log(f"Basement walls: {len(bwall_members)} members, {len(bwall_reinf_df)} reinforcement rows")
+            log(f"Basement walls: {len(bwall_members)} panels, {len(bwall_reinf_df)} reinforcement rows")
 
         # ── Phase 3: Reinforcement ──
         if design_beam_file:
@@ -439,6 +433,7 @@ if st.session_state.outputs:
         'design_column': 'DesignResultsColumn.csv',
         'reinf_wall': 'ReinforcementWall.csv',
         'design_wall': 'DesignResultsWall.csv',
+        'bwall_members': 'MembersBasementWall.csv',
         'reinf_bwall': 'ReinforcementBasementWall.csv',
         'reinf_slab': 'ReinforcementSlab.csv',
         'reinf_stair': 'ReinforcementStair.csv',
