@@ -294,6 +294,38 @@ def validate_outputs(outputs: dict) -> list:
                     'detail': f'All {len(covered_keys)} column design keys have design results',
                 })
 
+    # 8c. Design key coverage — walls (wall_mark matching)
+    design_wall = outputs.get('design_wall')
+    reinf_wall = outputs.get('reinf_wall')
+
+    if walls is not None and (design_wall is not None or reinf_wall is not None):
+        if not walls.empty and 'wall_mark' in walls.columns:
+            wall_marks_in_elements = set(walls['wall_mark'].dropna().unique())
+            # Get wall marks from design results or reinforcement
+            design_marks = set()
+            if design_wall is not None and not design_wall.empty and 'wall_mark' in design_wall.columns:
+                design_marks = set(design_wall['wall_mark'].unique())
+            elif reinf_wall is not None and not reinf_wall.empty and 'wall_mark' in reinf_wall.columns:
+                design_marks = set(reinf_wall['wall_mark'].unique())
+
+            if design_marks:
+                missing_marks = wall_marks_in_elements - design_marks
+                covered_marks = wall_marks_in_elements & design_marks
+                if missing_marks:
+                    n_elements = len(walls[walls['wall_mark'].isin(missing_marks)])
+                    results.append({
+                        'check': 'Design key: wall elements without design results',
+                        'status': 'WARN',
+                        'detail': f'{n_elements} wall elements ({len(missing_marks)} wall marks) '
+                                  f'have no design results: {sorted(missing_marks)[:10]}',
+                    })
+                else:
+                    results.append({
+                        'check': 'Design key: wall design results coverage',
+                        'status': 'PASS',
+                        'detail': f'All {len(covered_marks)} wall marks have design results',
+                    })
+
     # 9. Section type distribution
     if sections is not None and not sections.empty and 'member_type' in sections.columns:
         types = sections['member_type'].value_counts().to_dict()
