@@ -101,13 +101,15 @@ def convert_slabs(
         mid = str(row.get('member_id', '')).strip()
         reinf_lookup[mid] = row
 
-    # Generate slab members (exclude stairs — identified by 'SS' in member_id)
+    # Generate slab members (exclude stairs — identified by 'SS' or 'ST' in member_id)
+    # P1 uses SS suffix (B3SS1, 1SS1, RSS1)
+    # P2 uses ST suffix (B4ST1, 5ST1, RST1)
     results = []
     stair_ids_skipped = []
 
     for slab_id, boundary in slab_boundaries.items():
-        # Stair entries have 'SS' in their ID (B3SS1, 1SS1, RSS1, etc.)
-        if 'SS' in slab_id.upper():
+        slab_upper = slab_id.upper()
+        if 'SS' in slab_upper or 'ST' in slab_upper:
             stair_ids_skipped.append(slab_id)
             continue
 
