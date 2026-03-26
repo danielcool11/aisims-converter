@@ -245,7 +245,56 @@ def validate_outputs(outputs: dict) -> list:
                     'detail': f'All {len(col_base_ids)} column types have reinforcement',
                 })
 
-    # 8. Section type distribution
+    # 8. Design key coverage — every element's design_key should exist in design results
+    design_beam = outputs.get('design_beam')
+    design_column = outputs.get('design_column')
+
+    if beams is not None and design_beam is not None:
+        if not beams.empty and not design_beam.empty and 'design_key' in beams.columns:
+            beam_keys = set(beams['design_key'].dropna().unique())
+            design_keys = set(design_beam['member_id'].unique()) if 'member_id' in design_beam.columns else set()
+            missing_keys = beam_keys - design_keys
+            # Filter out empty/synthetic keys
+            missing_keys = {k for k in missing_keys if k and not k.startswith('ELEM_') and not k.startswith('LINK')}
+            covered_keys = beam_keys - missing_keys
+            if missing_keys:
+                n_elements = len(beams[beams['design_key'].isin(missing_keys)])
+                results.append({
+                    'check': 'Design key: beam elements without design results',
+                    'status': 'WARN',
+                    'detail': f'{n_elements} beam elements ({len(missing_keys)} design keys) '
+                              f'have no design results: {sorted(missing_keys)[:10]}',
+                })
+            else:
+                results.append({
+                    'check': 'Design key: beam design results coverage',
+                    'status': 'PASS',
+                    'detail': f'All {len(covered_keys)} beam design keys have design results',
+                })
+
+    if columns is not None and design_column is not None:
+        if not columns.empty and not design_column.empty and 'design_key' in columns.columns:
+            col_keys = set(columns['design_key'].dropna().unique())
+            design_keys = set(design_column['member_id'].unique()) if 'member_id' in design_column.columns else set()
+            missing_keys = col_keys - design_keys
+            missing_keys = {k for k in missing_keys if k and not k.startswith('UNK')}
+            covered_keys = col_keys - missing_keys
+            if missing_keys:
+                n_elements = len(columns[columns['design_key'].isin(missing_keys)])
+                results.append({
+                    'check': 'Design key: column elements without design results',
+                    'status': 'WARN',
+                    'detail': f'{n_elements} column elements ({len(missing_keys)} design keys) '
+                              f'have no design results: {sorted(missing_keys)}',
+                })
+            else:
+                results.append({
+                    'check': 'Design key: column design results coverage',
+                    'status': 'PASS',
+                    'detail': f'All {len(covered_keys)} column design keys have design results',
+                })
+
+    # 9. Section type distribution
     if sections is not None and not sections.empty and 'member_type' in sections.columns:
         types = sections['member_type'].value_counts().to_dict()
         unknown = types.get('UNKNOWN', 0)
