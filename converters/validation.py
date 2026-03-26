@@ -12,6 +12,7 @@ Checks:
 """
 
 import re
+import pandas as pd
 
 
 def _extract_base_member_id(name: str) -> str:
@@ -294,36 +295,53 @@ def validate_outputs(outputs: dict) -> list:
                     'detail': f'All {len(covered_keys)} column design keys have design results',
                 })
 
-    # 8c. Design key coverage — walls (wall_mark matching)
+    # 8c. Design key coverage — walls (match by wall_id, not wall_mark)
+    # Wall marks differ between sources (W204 vs wM0204), but wall_id is consistent
     design_wall = outputs.get('design_wall')
     reinf_wall = outputs.get('reinf_wall')
 
     if walls is not None and (design_wall is not None or reinf_wall is not None):
-        if not walls.empty and 'wall_mark' in walls.columns:
-            wall_marks_in_elements = set(walls['wall_mark'].dropna().unique())
-            # Get wall marks from design results or reinforcement
-            design_marks = set()
-            if design_wall is not None and not design_wall.empty and 'wall_mark' in design_wall.columns:
-                design_marks = set(design_wall['wall_mark'].unique())
-            elif reinf_wall is not None and not reinf_wall.empty and 'wall_mark' in reinf_wall.columns:
-                design_marks = set(reinf_wall['wall_mark'].unique())
+        if not walls.empty and 'wall_id' in walls.columns:
+            wall_ids_in_elements = set()
+            for v in walls['wall_id'].dropna().unique():
+                try:
+                    wall_ids_in_elements.add(int(v))
+                except (ValueError, TypeError):
+                    pass
 
-            if design_marks:
-                missing_marks = wall_marks_in_elements - design_marks
-                covered_marks = wall_marks_in_elements & design_marks
-                if missing_marks:
-                    n_elements = len(walls[walls['wall_mark'].isin(missing_marks)])
+            # Get wall_ids from design results or reinforcement
+            design_wall_ids = set()
+            source_df = design_wall if (design_wall is not None and not design_wall.empty) else reinf_wall
+            if source_df is not None and not source_df.empty:
+                id_col = 'wall_id' if 'wall_id' in source_df.columns else None
+                if id_col:
+                    for v in source_df[id_col].dropna().unique():
+                        try:
+                            design_wall_ids.add(int(v))
+                        except (ValueError, TypeError):
+                            pass
+
+            if design_wall_ids:
+                missing_ids = wall_ids_in_elements - design_wall_ids
+                covered_ids = wall_ids_in_elements & design_wall_ids
+                if missing_ids:
+                    # Get wall marks for display
+                    missing_walls = walls[walls['wall_id'].apply(
+                        lambda x: int(x) in missing_ids if pd.notna(x) else False
+                    )]
+                    n_elements = len(missing_walls)
+                    missing_marks = sorted(missing_walls['wall_mark'].unique())[:10]
                     results.append({
                         'check': 'Design key: wall elements without design results',
                         'status': 'WARN',
-                        'detail': f'{n_elements} wall elements ({len(missing_marks)} wall marks) '
-                                  f'have no design results: {sorted(missing_marks)[:10]}',
+                        'detail': f'{n_elements} wall elements ({len(missing_ids)} wall IDs) '
+                                  f'have no design results: {missing_marks}',
                     })
                 else:
                     results.append({
                         'check': 'Design key: wall design results coverage',
                         'status': 'PASS',
-                        'detail': f'All {len(covered_marks)} wall marks have design results',
+                        'detail': f'All {len(covered_ids)} wall IDs have design results',
                     })
 
     # 9. Section type distribution

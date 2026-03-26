@@ -94,6 +94,7 @@ def convert_reinforcement_wall(
 
         # Reinforcement data only (geometry → MembersWall, ratios → DesignResultsWall)
         record = {
+            'wall_id': int(wall_id) if wall_id.isdigit() else wall_id,
             'wall_mark': wall_mark,
             'level': story,
             'v_bar_spec': v_rebar_str if v_rebar_str and v_rebar_str != 'nan' else None,
@@ -109,6 +110,7 @@ def convert_reinforcement_wall(
 
         # Store design results for separate DesignResultsWall output
         design_record = {
+            'wall_id': int(wall_id) if wall_id.isdigit() else wall_id,
             'wall_mark': wall_mark,
             'level': story,
             'fck_MPa': fck,
