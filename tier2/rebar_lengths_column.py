@@ -281,9 +281,14 @@ def calculate_column_rebar_lengths(
             lv_to = str(seg['level_to'])
             h = float(seg['height_mm'])
 
+            # Use actual 3D length for rebar calculation (handles slanted columns)
+            length = float(seg['length_mm']) if 'length_mm' in seg.index and pd.notna(seg.get('length_mm')) else h
+
             # Get coordinates from node lookups or direct columns
             col_x = seg.get('x_mm', 0) or 0
             col_y = seg.get('y_mm', 0) or 0
+            col_x_top = seg.get('x_top_mm', col_x) or col_x
+            col_y_top = seg.get('y_top_mm', col_y) or col_y
 
             # Z from nodes
             nd_from = adapter.node_coords.get(str(seg.get('node_from', '')), {})
@@ -306,8 +311,11 @@ def calculate_column_rebar_lengths(
                 'level_from': lv_from,
                 'level_to': lv_to,
                 'height_mm': h,
+                'length_mm': length,
                 'col_x': col_x,
                 'col_y': col_y,
+                'col_x_top': col_x_top,
+                'col_y_top': col_y_top,
                 'z_start': z_start,
                 'z_end': z_end,
                 'b_mm': b_mm,
@@ -350,24 +358,25 @@ def calculate_column_rebar_lengths(
             is_first = (j == 0)
             is_top = (j == len(story_info) - 1)
             h = s['height_mm']
+            L = s['length_mm']  # 3D length (= height for vertical, > height for slanted)
             z_start = s['z_start']
 
             if is_top:
-                L_bar = h + Ldh
+                L_bar = L + Ldh
                 role = 'MAIN_TOP'
                 sp_start = round(z_start, 1)
                 sp_start_end = round(z_start + Lpc, 1)
                 sp_end = None
                 sp_end_end = None
             elif is_first:
-                L_bar = h + Lpc
+                L_bar = L + Lpc
                 role = 'MAIN_BOTTOM'
                 sp_start = round(z_start, 1)
                 sp_start_end = round(z_start + Lpc, 1)
                 sp_end = round(z_start + h, 1)
                 sp_end_end = round(z_start + h + Lpc, 1)
             else:
-                L_bar = h + Lpc
+                L_bar = L + Lpc
                 role = 'MAIN_INTERMEDIATE'
                 sp_start = round(z_start, 1)
                 sp_start_end = round(z_start + Lpc, 1)
@@ -387,7 +396,7 @@ def calculate_column_rebar_lengths(
                 'splice_end_mm': sp_end, 'splice_end_end_mm': sp_end_end,
                 'x_start_mm': s['col_x'], 'y_start_mm': s['col_y'],
                 'z_start_mm': round(rebar_z_start, 1),
-                'x_end_mm': s['col_x'], 'y_end_mm': s['col_y'],
+                'x_end_mm': s['col_x_top'], 'y_end_mm': s['col_y_top'],
                 'z_end_mm': round(rebar_z_end, 1),
                 'segment_id': s['segment_id'],
                 'b_mm': s['b_mm'], 'h_mm': s['h_mm'],
@@ -406,7 +415,7 @@ def calculate_column_rebar_lengths(
 
             if end_cfg and mid_cfg:
                 for s in story_info:
-                    H_clear = s['height_mm']
+                    H_clear = s['length_mm']  # Use 3D length for hoop distribution
                     b_mm = s['b_mm']
                     h_mm = s['h_mm']
                     b_clear = b_mm - 2 * COVER_MM

@@ -240,6 +240,14 @@ def _process_beam_element(elem_id, row, prop_id, node_lookup, section_lookup,
     #          section says BEAM + element is horizontal → beam
     #          section says WALL (BT) + vertical → wall-like but stays in its category
     if member_type == 'COLUMN' or (is_vert and member_type != 'BEAM'):
+        height = abs(z2 - z1)
+        length_3d = _compute_length(x1, y1, z1, x2, y2, z2)
+        # Bottom node coordinates
+        bx = x1 if z1 <= z2 else x2
+        by = y1 if z1 <= z2 else y2
+        # Top node coordinates
+        tx = x2 if z1 <= z2 else x1
+        ty = y2 if z1 <= z2 else y1
         record = {
             'element_id': elem_id,
             'member_id': member_id,
@@ -250,9 +258,12 @@ def _process_beam_element(elem_id, row, prop_id, node_lookup, section_lookup,
             'level_from': level_from,
             'level_to': level_to,
             'grid': grid_from,  # column grid = bottom node grid
-            'x_mm': x1 if z1 <= z2 else x2,
-            'y_mm': y1 if z1 <= z2 else y2,
-            'height_mm': round(abs(z2 - z1), 1),
+            'x_mm': bx,
+            'y_mm': by,
+            'x_top_mm': tx,
+            'y_top_mm': ty,
+            'height_mm': round(height, 1),
+            'length_mm': round(length_3d, 1),
             'b_mm': sec_info.get('b_mm'),
             'h_mm': sec_info.get('h_mm'),
         }
@@ -276,6 +287,8 @@ def _process_beam_element(elem_id, row, prop_id, node_lookup, section_lookup,
         }
         # walls_list.append(record)  # Uncomment if BT should be in walls
         # For now, BT goes to columns (it's modeled as a frame element)
+        bt_height = abs(z2 - z1)
+        bt_length = _compute_length(x1, y1, z1, x2, y2, z2)
         record_col = {
             'element_id': elem_id,
             'member_id': member_id,
@@ -288,7 +301,10 @@ def _process_beam_element(elem_id, row, prop_id, node_lookup, section_lookup,
             'grid': grid_from,
             'x_mm': x1 if z1 <= z2 else x2,
             'y_mm': y1 if z1 <= z2 else y2,
-            'height_mm': round(abs(z2 - z1), 1),
+            'x_top_mm': x2 if z1 <= z2 else x1,
+            'y_top_mm': y2 if z1 <= z2 else y1,
+            'height_mm': round(bt_height, 1),
+            'length_mm': round(bt_length, 1),
             'b_mm': sec_info.get('b_mm'),
             'h_mm': sec_info.get('h_mm'),
         }
