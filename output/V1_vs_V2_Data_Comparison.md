@@ -148,7 +148,7 @@ No changes. Identical columns in V1 and V2.
 
 | Change | V1 | V2 | Notes |
 |--------|----|----|-------|
-| Restructured | Isolated footing (single pad) | Mat foundation (quad/polygon parts) | V1 was isolated, V2 handles mat |
+| Restructured | Isolated footing (single pad) | Any foundation type (quad/polygon parts) | V1 was isolated only, V2 handles isolated, mat, strip |
 | Added | — | part_id, shape (RECT/POLYGON_N) | Multi-part support |
 | Added | — | x_min/y_min/x_max/y_max_mm | Bounding box for BIM rendering |
 | Added | — | area_mm2, boundary_nodes | Polygon area and nodes |
@@ -207,8 +207,8 @@ No changes. Identical columns in V1 and V2.
 
 | Change | V1 | V2 | Notes |
 |--------|----|----|-------|
-| Restructured | Isolated footing bars | Mat foundation zones (BASE/ADDITIONAL/STIRRUP) | Different foundation type |
-| Added | — | zone, zone_type, zone_x/y_min/max, zone_boundary | Zone-based reinforcement layout |
+| Restructured | Isolated footing bars only | Zone-based layout (BASE/ADDITIONAL/STIRRUP) for any foundation type | Supports isolated, mat, strip foundations |
+| Added | — | zone, zone_type, zone_x/y_min/max, zone_boundary | Zone-based reinforcement layout with bounding box |
 | Added | — | n_legs | Stirrup legs for V-zones |
 
 ### DesignResultsBeam.csv (NEW in V2)
@@ -239,7 +239,7 @@ No changes. Identical columns in V1 and V2.
 | 2 | Reinforcement structure | Normalized (1 bar per row) | Flat (all bars per member) | Matches MIDAS output, fewer joins |
 | 3 | Design results | Mixed with reinforcement | Separate files | Clean separation, different consumers |
 | 4 | Wall model | 2-node line | 4-node quad panel | Matches MIDAS element mesh |
-| 5 | Footing model | Isolated pad | Mat foundation with zones | Handles real-world mat foundations |
+| 5 | Footing model | Isolated pad only | Any foundation type with zone-based reinforcement | Handles isolated, mat, strip foundations |
 | 6 | Slanted columns | Not handled | length_mm + x_top/y_top | Correct rebar length for inclined members |
 | 7 | Level normalization | Manual | Automatic (R→Roof, P→PIT/PH, 1→1F) | Handles multiple project conventions |
 | 8 | Section name parsing | PDF OCR | Regex patterns (20+ prefixes) | Handles both joined (6C1) and space-separated (1 B1) formats |

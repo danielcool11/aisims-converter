@@ -600,8 +600,8 @@ V2: AISIMS Converter (MIDAS Gen converter, 21 files)</p>
 <tr>
 <td>Restructured</td>
 <td>Isolated footing (single pad)</td>
-<td>Mat foundation (quad/polygon parts)</td>
-<td>V1 was isolated, V2 handles mat</td>
+<td>Any foundation type (quad/polygon parts)</td>
+<td>V1 was isolated only, V2 handles isolated, mat, strip</td>
 </tr>
 <tr>
 <td>Added</td>
@@ -851,15 +851,15 @@ V2: AISIMS Converter (MIDAS Gen converter, 21 files)</p>
 <tbody>
 <tr>
 <td>Restructured</td>
-<td>Isolated footing bars</td>
-<td>Mat foundation zones (BASE/ADDITIONAL/STIRRUP)</td>
-<td>Different foundation type</td>
+<td>Isolated footing bars only</td>
+<td>Zone-based layout (BASE/ADDITIONAL/STIRRUP) for any foundation type</td>
+<td>Supports isolated, mat, strip foundations</td>
 </tr>
 <tr>
 <td>Added</td>
 <td>—</td>
 <td>zone, zone_type, zone_x/y_min/max, zone_boundary</td>
-<td>Zone-based reinforcement layout</td>
+<td>Zone-based reinforcement layout with bounding box</td>
 </tr>
 <tr>
 <td>Added</td>
@@ -958,9 +958,9 @@ V2: AISIMS Converter (MIDAS Gen converter, 21 files)</p>
 <tr>
 <td>5</td>
 <td>Footing model</td>
-<td>Isolated pad</td>
-<td>Mat foundation with zones</td>
-<td>Handles real-world mat foundations</td>
+<td>Isolated pad only</td>
+<td>Any foundation type with zone-based reinforcement</td>
+<td>Handles isolated, mat, strip foundations</td>
 </tr>
 <tr>
 <td>6</td>
