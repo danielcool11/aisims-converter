@@ -12,7 +12,7 @@ Streamlit web application with a 5-phase pipeline.
  ==========                    ==================                     ======
 
  Part A ─────┐
- (MIDAS Gen) │   Phase 1    Phase 2    Phase 2.5   Phase 3    Phase 5
+ (MIDAS Gen) │   Phase 1    Phase 2    Phase 3    Phase 4    Phase 5
              ├──► FOUND ──► MEMBERS ──► GRID ──► REINF ──► VALID ──► 21 CSVs
  Part B ─────┤   ATION      BERS       AUTO       ORCE      ATION     + Report
  (Engineer)  │                          DETECT     MENT
@@ -159,7 +159,7 @@ node_lookup ─────────────────┘              
 
 ---
 
-### Phase 2.5: Grid Auto-Detection
+### Phase 3: Grid Auto-Detection
 
 **Purpose**: Detect grid lines from column positions when no manual grid is provided.
 
@@ -188,7 +188,7 @@ Re-run convert_elements() with updated nodes → updated grid labels in Members
 
 ---
 
-### Phase 3: Reinforcement + Design Results
+### Phase 4: Reinforcement + Design Results
 
 **Purpose**: Parse MIDAS design output into reinforcement specifications and design capacity data.
 
@@ -268,7 +268,7 @@ Checks performed:
 ## Phase Dependencies
 
 ```
-Phase 1 ──────► Phase 2 ──────► Phase 2.5 ──────► Phase 3 ──────► Phase 5
+Phase 1 ──────► Phase 2 ──────► Phase 3 ──────► Phase 4 ──────► Phase 5
 (Foundation)    (Members)       (Grid Auto)        (Reinf.)        (Valid.)
     │               │               │                  │               │
     │               │               │                  │               │
@@ -285,13 +285,13 @@ Phase 1 ──────► Phase 2 ──────► Phase 2.5 ───�
 
 **Strict order:**
 1. Phase 1 must complete before Phase 2 (sections/nodes needed)
-2. Phase 2 must complete before Phase 2.5 (column positions needed)
-3. Phase 2.5 must complete before Phase 3 (grid labels in Members)
-4. Phase 3 must complete before Phase 5 (all outputs needed for validation)
+2. Phase 2 must complete before Phase 3 (column positions needed)
+3. Phase 3 must complete before Phase 4 (grid labels in Members)
+4. Phase 4 must complete before Phase 5 (all outputs needed for validation)
 
 **Independent within phase:**
 - Within Phase 2: slabs, stairs, footings, basement walls can run in parallel
-- Within Phase 3: beam, column, wall, slab, stair reinforcement can run in parallel
+- Within Phase 4: beam, column, wall, slab, stair reinforcement can run in parallel
 
 ---
 
@@ -316,13 +316,13 @@ Phase 1 ──────► Phase 2 ──────► Phase 2.5 ───�
                         │       │        ├─ elements.py                │
                         │       ▼        ├─ slabs.py                  │
                         │  ┌──────────┐  ├─ stairs.py (8-point model) │
-                        │  │Phase 2.5 │  ├─ footings.py               │
+                        │  │ Phase 3  │  ├─ footings.py               │
                         │  │ GRID     │  └─ basement_walls.py         │
                         │  └────┬─────┘                               │
                         │       │        Reinforcement:               │
                         │       ▼        ├─ reinforcement_beam.py     │
                         │  ┌──────────┐  ├─ reinforcement_column.py   │
-                        │  │ Phase 3  │  ├─ reinforcement_wall.py     │
+                        │  │ Phase 4  │  ├─ reinforcement_wall.py     │
                         │  │ REINF.   │  ├─ reinforcement_slab.py     │
                         │  └────┬─────┘  └─ reinforcement_stair.py    │
                         │       │                                     │
@@ -394,8 +394,3 @@ Shared resources:
 | Project 2 (불당동, 15 stories + 5 basements) | 9,435 | 10,476 | ~15 seconds |
 
 ---
-
-## Repository
-
-GitHub: https://github.com/danielcool11/aisims-converter
-Run: `cd D:\Redo AISIMS\converter && venv\Scripts\streamlit run app.py`

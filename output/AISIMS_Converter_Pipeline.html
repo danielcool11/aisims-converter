@@ -29,7 +29,7 @@ Streamlit web application with a 5-phase pipeline.</p>
  ==========                    ==================                     ======
 
  Part A ─────┐
- (MIDAS Gen) │   Phase 1    Phase 2    Phase 2.5   Phase 3    Phase 5
+ (MIDAS Gen) │   Phase 1    Phase 2    Phase 3    Phase 4    Phase 5
              ├──► FOUND ──► MEMBERS ──► GRID ──► REINF ──► VALID ──► 21 CSVs
  Part B ─────┤   ATION      BERS       AUTO       ORCE      ATION     + Report
  (Engineer)  │                          DETECT     MENT
@@ -246,7 +246,7 @@ node_lookup ─────────────────┘              
 - FootBoundary nodes (1001-1040 in P1) merged into main Nodes.csv
 - Tagged with <code>source=BOUNDARY</code> to distinguish from MIDAS nodes</p>
 <hr />
-<h3>Phase 2.5: Grid Auto-Detection</h3>
+<h3>Phase 3: Grid Auto-Detection</h3>
 <p><strong>Purpose</strong>: Detect grid lines from column positions when no manual grid is provided.</p>
 <pre><code>MembersColumn (x_mm, y_mm) ──► detect_grid_from_columns() ──► grid_x, grid_y
                                     │
@@ -269,7 +269,7 @@ Re-run convert_elements() with updated nodes → updated grid labels in Members
 - Manual grid entry → grid already assigned in Phase 1
 - Grid CSV upload → positions provided directly</p>
 <hr />
-<h3>Phase 3: Reinforcement + Design Results</h3>
+<h3>Phase 4: Reinforcement + Design Results</h3>
 <p><strong>Purpose</strong>: Parse MIDAS design output into reinforcement specifications and design capacity data.</p>
 <pre><code>DesignBeam.csv ──────────► convert_reinforcement_beam() ──► ReinforcementBeam.csv
 section_lookup ──────────┘                                  DesignResultsBeam.csv
@@ -335,7 +335,7 @@ Checks performed:
 - <strong>FAIL</strong>: Critical issue (e.g., no concrete materials)</p>
 <hr />
 <h2>Phase Dependencies</h2>
-<pre><code>Phase 1 ──────► Phase 2 ──────► Phase 2.5 ──────► Phase 3 ──────► Phase 5
+<pre><code>Phase 1 ──────► Phase 2 ──────► Phase 3 ──────► Phase 4 ──────► Phase 5
 (Foundation)    (Members)       (Grid Auto)        (Reinf.)        (Valid.)
     │               │               │                  │               │
     │               │               │                  │               │
@@ -351,12 +351,12 @@ Checks performed:
 </code></pre>
 <p><strong>Strict order:</strong>
 1. Phase 1 must complete before Phase 2 (sections/nodes needed)
-2. Phase 2 must complete before Phase 2.5 (column positions needed)
-3. Phase 2.5 must complete before Phase 3 (grid labels in Members)
-4. Phase 3 must complete before Phase 5 (all outputs needed for validation)</p>
+2. Phase 2 must complete before Phase 3 (column positions needed)
+3. Phase 3 must complete before Phase 4 (grid labels in Members)
+4. Phase 4 must complete before Phase 5 (all outputs needed for validation)</p>
 <p><strong>Independent within phase:</strong>
 - Within Phase 2: slabs, stairs, footings, basement walls can run in parallel
-- Within Phase 3: beam, column, wall, slab, stair reinforcement can run in parallel</p>
+- Within Phase 4: beam, column, wall, slab, stair reinforcement can run in parallel</p>
 <hr />
 <h2>Data Flow Diagram</h2>
 <pre><code>                        ┌─────────────────────────────────────────────┐
@@ -377,13 +377,13 @@ Checks performed:
                         │       │        ├─ elements.py                │
                         │       ▼        ├─ slabs.py                  │
                         │  ┌──────────┐  ├─ stairs.py (8-point model) │
-                        │  │Phase 2.5 │  ├─ footings.py               │
+                        │  │ Phase 3  │  ├─ footings.py               │
                         │  │ GRID     │  └─ basement_walls.py         │
                         │  └────┬─────┘                               │
                         │       │        Reinforcement:               │
                         │       ▼        ├─ reinforcement_beam.py     │
                         │  ┌──────────┐  ├─ reinforcement_column.py   │
-                        │  │ Phase 3  │  ├─ reinforcement_wall.py     │
+                        │  │ Phase 4  │  ├─ reinforcement_wall.py     │
                         │  │ REINF.   │  ├─ reinforcement_slab.py     │
                         │  └────┬─────┘  └─ reinforcement_stair.py    │
                         │       │                                     │
@@ -506,7 +506,4 @@ Shared resources:
 </tr>
 </tbody>
 </table>
-<hr />
-<h2>Repository</h2>
-<p>GitHub: https://github.com/danielcool11/aisims-converter
-Run: <code>cd D:\Redo AISIMS\converter &amp;&amp; venv\Scripts\streamlit run app.py</code></p></body></html>
+<hr /></body></html>
