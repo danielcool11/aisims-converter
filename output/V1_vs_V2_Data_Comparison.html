@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>V1 vs V2 Data Dictionary Comparison</title>
+<style>
+body { font-family: "Segoe UI", "Malgun Gothic", sans-serif; max-width: 1000px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #333; }
+h1 { font-size: 1.5em; color: #1a1a2e; border-bottom: 3px solid #16213e; padding-bottom: 10px; }
+h2 { font-size: 1.25em; color: #16213e; margin-top: 30px; background: #f0f2f5; padding: 8px 12px; border-left: 4px solid #0f3460; }
+h3 { font-size: 1.05em; color: #0f3460; margin-top: 20px; }
+table { border-collapse: collapse; width: 100%%; margin: 12px 0; font-size: 0.82em; }
+th, td { border: 1px solid #bdc3c7; padding: 5px 7px; text-align: left; }
+th { background-color: #16213e; color: white; }
+tr:nth-child(even) { background-color: #f5f7fa; }
+code { background: #e8ecf1; padding: 2px 4px; border-radius: 3px; font-family: Consolas, monospace; font-size: 0.88em; }
+hr { border: none; border-top: 2px solid #16213e; margin: 25px 0; }
+</style>
+</head>
+<body>
+<h1>V1 vs V2 Data Dictionary Comparison</h1>
+<h1>V1-V2 데이터 사전 비교</h1>
+<p>V1: AISIMS Data Dictionary (pdf2bim parser, 24 files)
+V2: AISIMS Converter (MIDAS Gen converter, 21 files)</p>
+<hr />
+<h2>Summary of Changes</h2>
+<table>
+<thead>
+<tr>
+<th>Aspect</th>
+<th>V1</th>
+<th>V2</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Data source</td>
+<td>PDF parsing + manual</td>
+<td>MIDAS Gen export (CSV/MGT)</td>
+<td>Reliable, no OCR errors</td>
+</tr>
+<tr>
+<td>File count</td>
+<td>24</td>
+<td>21 (18 core + 3 conditional)</td>
+<td>Merged some, removed unused</td>
+</tr>
+<tr>
+<td>Reinforcement format</td>
+<td>Normalized (1 bar per row)</td>
+<td>Flat (all bars per member in 1 row)</td>
+<td>Matches MIDAS output structure</td>
+</tr>
+<tr>
+<td>Design results</td>
+<td>Mixed into reinforcement</td>
+<td>Separate files</td>
+<td>Clean separation of concerns</td>
+</tr>
+<tr>
+<td>Coordinates</td>
+<td>Grid-based positioning</td>
+<td>Coordinate-first (grid as metadata)</td>
+<td>Works without grid labels</td>
+</tr>
+<tr>
+<td>Naming</td>
+<td>Mixed conventions</td>
+<td>PascalCase files, snake_case headers</td>
+<td>Consistent</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>File-Level Changes</h2>
+<h3>Files in V1 but NOT in V2</h3>
+<table>
+<thead>
+<tr>
+<th>V1 File</th>
+<th>Reason removed</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Connections.csv</td>
+<td>Tier 2 computed data, not a Tier 1 output</td>
+</tr>
+<tr>
+<td>RebarLengthsBeam.csv</td>
+<td>Tier 2 (built separately in tier2/ module)</td>
+</tr>
+<tr>
+<td>RebarLengthsColumn.csv</td>
+<td>Tier 2</td>
+</tr>
+<tr>
+<td>RebarLengthsSlab.csv</td>
+<td>Tier 2 (not yet built)</td>
+</tr>
+<tr>
+<td>RebarLengthsFooting.csv</td>
+<td>Tier 2 (not yet built)</td>
+</tr>
+<tr>
+<td>RebarLengthsStair.csv</td>
+<td>Tier 2 (not yet built)</td>
+</tr>
+<tr>
+<td>RebarLengthsWall.csv</td>
+<td>Tier 2 (not yet built)</td>
+</tr>
+</tbody>
+</table>
+<h3>Files in V2 but NOT in V1</h3>
+<table>
+<thead>
+<tr>
+<th>V2 File</th>
+<th>Reason added</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DesignResultsBeam.csv</td>
+<td>Split from ReinforcementBeam (design ratios separated)</td>
+</tr>
+<tr>
+<td>DesignResultsColumn.csv</td>
+<td>Split from ReinforcementColumn</td>
+</tr>
+<tr>
+<td>DesignResultsWall.csv</td>
+<td>Split from ReinforcementWall</td>
+</tr>
+<tr>
+<td>MembersBasementWall.csv</td>
+<td>New: basement/retaining walls (Part C data)</td>
+</tr>
+<tr>
+<td>ReinforcementBasementWall.csv</td>
+<td>New: basement wall rebar with zone/face detail</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Column-Level Comparison</h2>
+<h3>Nodes.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>V1</th>
+<th>V2</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Same</td>
+<td>node_id, x_mm, y_mm, z_mm, level, grid</td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>node_number</td>
+<td>MIDAS element traceability</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>grid_offset_x_mm, grid_offset_y_mm</td>
+<td>Distance from nearest grid line</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>source</td>
+<td>MIDAS or BOUNDARY (merged footing nodes)</td>
+</tr>
+</tbody>
+</table>
+<h3>Materials.csv</h3>
+<p>No changes. Identical columns in V1 and V2.</p>
+<h3>Sections.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>V1</th>
+<th>V2</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Same</td>
+<td>section_id, member_type, member_id, level_from, level_to, shape, b_mm, h_mm, diameter_mm, thickness_mm, area_m2, inertia_y_m4, inertia_z_m4, effective_depth_mm, cover_mm</td>
+<td>Same</td>
+<td></td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>material_type</td>
+<td>—</td>
+<td>Always "concrete", redundant</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>type</td>
+<td>—</td>
+<td>Ambiguous with member_type</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>source</td>
+<td>—</td>
+<td>Always same source</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>remarks</td>
+<td>—</td>
+<td>Always null</td>
+</tr>
+</tbody>
+</table>
+<h3>MembersBeam.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>V1</th>
+<th>V2</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Renamed</td>
+<td>start_node</td>
+<td>node_from</td>
+<td>Directional naming</td>
+</tr>
+<tr>
+<td>Renamed</td>
+<td>end_node</td>
+<td>node_to</td>
+<td></td>
+</tr>
+<tr>
+<td>Renamed</td>
+<td>level_start</td>
+<td>level</td>
+<td>Beams sit at one level</td>
+</tr>
+<tr>
+<td>Renamed</td>
+<td>start_grid</td>
+<td>grid_from</td>
+<td></td>
+</tr>
+<tr>
+<td>Renamed</td>
+<td>end_grid</td>
+<td>grid_to</td>
+<td></td>
+</tr>
+<tr>
+<td>Renamed</td>
+<td>type</td>
+<td>—</td>
+<td>Implicitly BEAM (file name)</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>element_id</td>
+<td>MIDAS element traceability</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>design_key</td>
+<td>Raw MIDAS section name (FK to reinforcement)</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>x_from_mm, y_from_mm, x_to_mm, y_to_mm, z_mm</td>
+<td>Coordinate-first architecture</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>b_mm, h_mm</td>
+<td>Quick reference (also in Sections)</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>level_end</td>
+<td>—</td>
+<td>Same as level for horizontal beams</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>story_group</td>
+<td>—</td>
+<td>Derivable from level</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>material_id</td>
+<td>—</td>
+<td>Derivable from section lookup</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>segment_no, segment_id</td>
+<td>—</td>
+<td>Not needed for Tier 1</td>
+</tr>
+</tbody>
+</table>
+<h3>MembersColumn.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>V1</th>
+<th>V2</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Renamed</td>
+<td>start_node</td>
+<td>node_from</td>
+<td>Bottom node</td>
+</tr>
+<tr>
+<td>Renamed</td>
+<td>end_node</td>
+<td>node_to</td>
+<td>Top node</td>
+</tr>
+<tr>
+<td>Renamed</td>
+<td>level_start</td>
+<td>level_from</td>
+<td></td>
+</tr>
+<tr>
+<td>Renamed</td>
+<td>level_end</td>
+<td>level_to</td>
+<td></td>
+</tr>
+<tr>
+<td>Renamed</td>
+<td>start_grid</td>
+<td>grid</td>
+<td>Single grid point</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>element_id</td>
+<td>MIDAS traceability</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>design_key</td>
+<td>FK to reinforcement</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>x_mm, y_mm, x_top_mm, y_top_mm</td>
+<td>Coordinates (top differs for slanted)</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>length_mm</td>
+<td>3D length (&gt;height for slanted columns)</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>b_mm, h_mm</td>
+<td>Quick reference</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>end_grid</td>
+<td>—</td>
+<td>Same as start_grid for columns</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>story_group, material_id, segment_no, segment_id</td>
+<td>—</td>
+<td>Derivable or not needed</td>
+</tr>
+</tbody>
+</table>
+<h3>MembersWall.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>V1</th>
+<th>V2</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Restructured</td>
+<td>2-node line model</td>
+<td>4-node quad panel</td>
+<td>Matches MIDAS element structure</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>element_id</td>
+<td>MIDAS traceability</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>wall_mark, wall_id</td>
+<td>Wall identification (mark = name, id = numeric)</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>centroid_x/y/z_mm</td>
+<td>Coordinate-first</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>height_mm, width_mm</td>
+<td>Panel dimensions</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>node_i, node_j, node_k, node_l</td>
+<td>4 corner nodes (quad)</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>start_node, end_node</td>
+<td>—</td>
+<td>Replaced by 4 corner nodes</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>start_grid, end_grid</td>
+<td>—</td>
+<td>Walls span between grids</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>story_group, material_id, segment_no, segment_id</td>
+<td>—</td>
+<td>Not needed</td>
+</tr>
+</tbody>
+</table>
+<h3>MembersSlab.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>V1</th>
+<th>V2</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Renamed</td>
+<td>corner_nodes</td>
+<td>boundary_nodes</td>
+<td>Polygons can have &gt;4 nodes</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>node_count</td>
+<td>Number of boundary nodes</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>type</td>
+<td>—</td>
+<td>Implicitly SLAB</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>boundary_grids</td>
+<td>—</td>
+<td>Derivable from node IDs</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>short_direction</td>
+<td>—</td>
+<td>Derivable from Lx vs Ly</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>area_mm2</td>
+<td>—</td>
+<td>Derivable from Lx * Ly</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>section_id, material_id, segment_no, segment_id</td>
+<td>—</td>
+<td>Not needed</td>
+</tr>
+</tbody>
+</table>
+<h3>MembersStair.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>V1</th>
+<th>V2</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Renamed</td>
+<td>level_start</td>
+<td>level_from</td>
+<td>Consistent naming</td>
+</tr>
+<tr>
+<td>Renamed</td>
+<td>level_end</td>
+<td>level_to</td>
+<td></td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>centroid_x/y_mm, z_mm, Lx/Ly_mm</td>
+<td>Location from slab boundary</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>boundary_nodes</td>
+<td>Stairwell boundary polygon</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>flight_run_mm, flight_slope_mm</td>
+<td>Explicit flight dimensions</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>story_group, material_id, segment_no, segment_id</td>
+<td>Kept from V1 spec</td>
+</tr>
+<tr>
+<td>Core structure</td>
+<td>Same 8-point model (p1-p8, flights, landing)</td>
+<td>Same</td>
+<td>Compatible</td>
+</tr>
+</tbody>
+</table>
+<h3>MembersFooting.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>V1</th>
+<th>V2</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Restructured</td>
+<td>Isolated footing (single pad)</td>
+<td>Mat foundation (quad/polygon parts)</td>
+<td>V1 was isolated, V2 handles mat</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>part_id, shape (RECT/POLYGON_N)</td>
+<td>Multi-part support</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>x_min/y_min/x_max/y_max_mm</td>
+<td>Bounding box for BIM rendering</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>area_mm2, boundary_nodes</td>
+<td>Polygon area and nodes</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>footing_id, grid, node_id, depth_mm</td>
+<td>—</td>
+<td>Different structure</td>
+</tr>
+</tbody>
+</table>
+<h3>ReinforcementBeam.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>V1</th>
+<th>V2</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Restructured</td>
+<td>Normalized (1 row per bar type per zone)</td>
+<td>Flat (1 row per position with all specs)</td>
+<td>Matches MIDAS 3-row block output</td>
+</tr>
+<tr>
+<td>V1 cols</td>
+<td>member_id, zone, bar_position, bar_type, dia_mm, n_bars, spacing_mm</td>
+<td>—</td>
+<td>7 cols, many rows</td>
+</tr>
+<tr>
+<td>V2 cols</td>
+<td>member_id, position, top_bar_spec, top_total/main/additional/dia, bot_bar_spec, bot_total/main/additional/dia, stirrup_spec/legs/dia/spacing</td>
+<td>—</td>
+<td>22 cols, fewer rows</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>element_id, section_id, fck/fy/fys_MPa</td>
+<td>Traceability and material context</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>bar_role</td>
+<td>Bar role identifier</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>—</td>
+<td>ratio_negative, ratio_positive, ratio_shear</td>
+<td>Moved to DesignResultsBeam</td>
+</tr>
+</tbody>
+</table>
+<h3>ReinforcementColumn.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>V1</th>
+<th>V2</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Restructured</td>
+<td>Normalized (group: main1, hoop_end, hoop_mid)</td>
+<td>Flat (1 row with main + tie_end + tie_mid)</td>
+<td>Matches MIDAS 2-row block output</td>
+</tr>
+<tr>
+<td>V1 cols</td>
+<td>member_id, group, bar_type, dia_mm, n_bars, spacing_mm, level_from, level_to</td>
+<td>—</td>
+<td>8 cols, 3 rows per column</td>
+</tr>
+<tr>
+<td>V2 cols</td>
+<td>member_id, main_bar_spec/total/count/additional/dia, tie_end_spec/legs/dia/spacing, tie_mid_spec/legs/dia/spacing</td>
+<td>—</td>
+<td>22 cols, 1 row per column</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>element_id, section_id, fck/fy/fys, b/h/height_mm</td>
+<td>Traceability and geometry</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>—</td>
+<td>ratio_axial, ratio_moment_y/z, ratio_shear_end/mid</td>
+<td>Moved to DesignResultsColumn</td>
+</tr>
+</tbody>
+</table>
+<h3>ReinforcementWall.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>V1</th>
+<th>V2</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Restructured</td>
+<td>Normalized (1 row per direction per face)</td>
+<td>Paired (V + H in same row)</td>
+<td>One row = one wall element</td>
+</tr>
+<tr>
+<td>V1 cols</td>
+<td>rebar_id, section_id, member_id, member_type, level_from, level_to, zone_id, face, direction, direction_marker, bar_size, dia_mm, spacing_mm, bar_role, remarks, layer, source</td>
+<td>—</td>
+<td>17 cols</td>
+</tr>
+<tr>
+<td>V2 cols</td>
+<td>wall_id, wall_mark, level, v_bar_spec, v_dia_mm, v_spacing_mm, h_bar_spec, h_dia_mm, h_spacing_mm, bar_layer, end_rebar</td>
+<td>—</td>
+<td>11 cols</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>wall_id</td>
+<td>Numeric FK for joining with MembersWall</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>rebar_id, section_id, member_type, zone_id, face, direction_marker, bar_role, remarks, source</td>
+<td>—</td>
+<td>Redundant or constant</td>
+</tr>
+</tbody>
+</table>
+<h3>ReinforcementSlab.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>V1</th>
+<th>V2</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Renamed</td>
+<td>location</td>
+<td>layer</td>
+<td>Top/Bot is a layer, not location</td>
+</tr>
+<tr>
+<td>Renamed</td>
+<td>dia_mm</td>
+<td>bar_dia_mm</td>
+<td>Consistent with bar_spacing_mm</td>
+</tr>
+<tr>
+<td>Renamed</td>
+<td>spacing_mm</td>
+<td>bar_spacing_mm</td>
+<td></td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>level, bar_spec</td>
+<td>Level and original spec string</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>slab_type, design_position</td>
+<td>—</td>
+<td>Derivable from member lookup</td>
+</tr>
+</tbody>
+</table>
+<h3>ReinforcementStair.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>V1</th>
+<th>V2</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Restructured</td>
+<td>Normalized with metadata</td>
+<td>Compact per zone/direction/layer</td>
+<td>Simpler</td>
+</tr>
+<tr>
+<td>V2 cols</td>
+<td>member_id, level_from, level_to, zone, direction, layer, bar_spec, bar_dia_mm, bar_spacing_mm</td>
+<td>—</td>
+<td>9 cols</td>
+</tr>
+<tr>
+<td>Dropped</td>
+<td>rebar_id, section_id, member_type, distribution_mode, bar_size, n_bars, bar_role, source</td>
+<td>—</td>
+<td>Redundant</td>
+</tr>
+</tbody>
+</table>
+<h3>ReinforcementFooting.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>V1</th>
+<th>V2</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Restructured</td>
+<td>Isolated footing bars</td>
+<td>Mat foundation zones (BASE/ADDITIONAL/STIRRUP)</td>
+<td>Different foundation type</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>zone, zone_type, zone_x/y_min/max, zone_boundary</td>
+<td>Zone-based reinforcement layout</td>
+</tr>
+<tr>
+<td>Added</td>
+<td>—</td>
+<td>n_legs</td>
+<td>Stirrup legs for V-zones</td>
+</tr>
+</tbody>
+</table>
+<h3>DesignResultsBeam.csv (NEW in V2)</h3>
+<table>
+<thead>
+<tr>
+<th>V1 (mixed in ReinforcementBeam)</th>
+<th>V2 (separate file)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Not separate</td>
+<td>member_id, position, fck/fy/fys_MPa, top/bot/stirrup_spec, Mu_neg, phiMn_neg, ratio_negative, Mu_pos, phiMn_pos, ratio_positive, Vu, phiVc, ratio_shear</td>
+</tr>
+</tbody>
+</table>
+<h3>DesignResultsColumn.csv (NEW in V2)</h3>
+<table>
+<thead>
+<tr>
+<th>V1 (mixed in ReinforcementColumn)</th>
+<th>V2 (separate file)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Not separate</td>
+<td>member_id, fck/fy/fys_MPa, b/h/height_mm, main_bar_spec, phiPn_max, Pu, ratio_axial, ratio_moment_y/z, Vu_end/mid, ratio_shear_end/mid</td>
+</tr>
+</tbody>
+</table>
+<h3>DesignResultsWall.csv (NEW in V2)</h3>
+<table>
+<thead>
+<tr>
+<th>V1 (mixed in ReinforcementWall)</th>
+<th>V2 (separate file)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Not separate</td>
+<td>wall_id, wall_mark, level, fck/fy/fys_MPa, lw/htw/thickness_mm, ratio_axial/moment/shear</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Key Design Decisions (V1 → V2)</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Decision</th>
+<th>V1 Approach</th>
+<th>V2 Approach</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Coordinate system</td>
+<td>Grid-based (X1Y1)</td>
+<td>Coordinate-first (x_mm, y_mm)</td>
+<td>Works with 0% grid coverage</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Reinforcement structure</td>
+<td>Normalized (1 bar per row)</td>
+<td>Flat (all bars per member)</td>
+<td>Matches MIDAS output, fewer joins</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Design results</td>
+<td>Mixed with reinforcement</td>
+<td>Separate files</td>
+<td>Clean separation, different consumers</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Wall model</td>
+<td>2-node line</td>
+<td>4-node quad panel</td>
+<td>Matches MIDAS element mesh</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Footing model</td>
+<td>Isolated pad</td>
+<td>Mat foundation with zones</td>
+<td>Handles real-world mat foundations</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Slanted columns</td>
+<td>Not handled</td>
+<td>length_mm + x_top/y_top</td>
+<td>Correct rebar length for inclined members</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Level normalization</td>
+<td>Manual</td>
+<td>Automatic (R→Roof, P→PIT/PH, 1→1F)</td>
+<td>Handles multiple project conventions</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Section name parsing</td>
+<td>PDF OCR</td>
+<td>Regex patterns (20+ prefixes)</td>
+<td>Handles both joined (6C1) and space-separated (1 B1) formats</td>
+</tr>
+<tr>
+<td>9</td>
+<td>FK between Members↔Reinforcement</td>
+<td>member_id (same format)</td>
+<td>design_key (raw MIDAS name) + wall_id (numeric)</td>
+<td>Handles level-prefix mismatch</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Basement walls</td>
+<td>Not supported</td>
+<td>Part C separate files</td>
+<td>Different reinforcement pattern (zone × face)</td>
+</tr>
+</tbody>
+</table></body></html>
