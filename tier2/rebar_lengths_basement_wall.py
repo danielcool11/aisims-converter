@@ -412,8 +412,23 @@ def calculate_basement_wall_rebar_lengths(
             wall_groups[wm] = []
         wall_groups[wm].append(m.to_dict())
 
+    # Filter out panels with unreliable coordinates (INFERRED/PARTIAL/MISSING)
+    skipped_panels = 0
+    for wm in list(wall_groups.keys()):
+        original = wall_groups[wm]
+        if 'node_status' in members_df.columns:
+            filtered = [p for p in original if p.get('node_status', 'OK') == 'OK']
+            skipped_panels += len(original) - len(filtered)
+            wall_groups[wm] = filtered
+        # Remove wall entirely if no panels left
+        if not wall_groups[wm]:
+            del wall_groups[wm]
+
     print(f'[RebarBWall] {len(wall_groups)} walls, {len(members_df)} panels, '
           f'{len(reinf_df)} reinforcement records')
+    if skipped_panels:
+        print(f'[RebarBWall] Skipped {skipped_panels} panels with unreliable node coordinates '
+              f'(INFERRED/PARTIAL/MISSING)')
 
     results = []
 
