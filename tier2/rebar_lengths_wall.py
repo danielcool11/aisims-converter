@@ -263,27 +263,30 @@ def calculate_wall_rebar_lengths(
 
 
 def _split_into_continuous_groups(stack, level_order):
-    """Split a wall stack into continuous groups based on level adjacency."""
+    """Split a wall stack into continuous groups based on Z continuity.
+
+    Two segments are continuous if the previous segment's top Z matches
+    the current segment's bottom Z (within tolerance).
+    """
     if len(stack) <= 1:
         return [stack]
 
-    # Sort by level
-    sorted_stack = sorted(stack, key=lambda s: level_order.get(s['level'], 999))
+    Z_TOLERANCE = 200  # mm
+
+    # Sort by Z bottom
+    sorted_stack = sorted(stack, key=lambda s: s.get('z_bottom', 0))
 
     groups = [[sorted_stack[0]]]
     for i in range(1, len(sorted_stack)):
         prev = sorted_stack[i - 1]
         curr = sorted_stack[i]
 
-        prev_order = level_order.get(prev['level'], 999)
-        curr_order = level_order.get(curr['level'], 999)
+        # Check Z continuity: prev top ≈ curr bottom
+        prev_top = prev.get('z_top', prev.get('z_bottom', 0) + prev.get('height_mm', 0))
+        curr_bottom = curr.get('z_bottom', 0)
+        z_gap = abs(curr_bottom - prev_top)
 
-        # Check: is the current level the next expected level?
-        # Adjacent levels should have order difference = 1
-        # But level_order uses -104, -103, -102, -101, 1, 2, 3...
-        # So we check if any level exists between them
-        gap = curr_order - prev_order
-        if gap <= 2:  # allow small gaps (adjacent levels)
+        if z_gap <= Z_TOLERANCE:
             groups[-1].append(curr)
         else:
             groups.append([curr])

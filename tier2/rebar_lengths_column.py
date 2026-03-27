@@ -295,9 +295,60 @@ def calculate_column_rebar_lengths(
     # Get fc from material (default C35)
     fc = 35
 
-    # Process each column stack (grouped by member_id only — grid varies for slanted columns)
-    for member_id, grp in col_df.groupby('member_id'):
-        grid = grp['grid'].iloc[0]  # use first segment's grid for reference
+    # Process each column stack
+    # Step 1: Group by grid + member_id (separates P2's multiple columns)
+    # Step 2: Merge Z-continuous stacks of same member_id across grids (P1 slanted)
+    col_df = col_df.copy()
+
+    raw_stacks = {}
+    for (grid, member_id), sub in col_df.groupby(['grid', 'member_id']):
+        sub = sub.copy()
+        sub['_lv_idx'] = sub['level_from'].apply(_level_sort_key)
+        sub = sub.sort_values('_lv_idx').reset_index(drop=True)
+        raw_stacks[(grid, member_id)] = sub
+
+    # Merge slanted column stacks: same member_id, different grids, Z-continuous
+    merged = {}
+    used = set()
+    stack_keys = sorted(raw_stacks.keys(), key=lambda k: (k[1], _level_sort_key(raw_stacks[k].iloc[0]['level_from'])))
+
+    for key in stack_keys:
+        if key in used:
+            continue
+        grid, mid = key
+        combined = raw_stacks[key].copy()
+        used.add(key)
+
+        # Try to find Z-continuous stacks of same member_id at other grids
+        changed = True
+        while changed:
+            changed = False
+            z_top = combined.iloc[-1]
+            top_z = adapter.level_z.get(str(z_top['level_to']), None)
+            if top_z is None:
+                nd = adapter.node_coords.get(str(z_top.get('node_to', '')), {})
+                top_z = nd.get('z_mm')
+
+            for other_key in stack_keys:
+                if other_key in used or other_key[1] != mid:
+                    continue
+                other = raw_stacks[other_key]
+                bot = other.iloc[0]
+                bot_z = adapter.level_z.get(str(bot['level_from']), None)
+                if bot_z is None:
+                    nd = adapter.node_coords.get(str(bot.get('node_from', '')), {})
+                    bot_z = nd.get('z_mm')
+
+                if top_z is not None and bot_z is not None and abs(bot_z - top_z) < 200:
+                    combined = pd.concat([combined, other], ignore_index=True)
+                    combined = combined.sort_values('_lv_idx').reset_index(drop=True)
+                    used.add(other_key)
+                    changed = True
+                    break
+
+        merged[(grid, mid)] = combined
+
+    for (grid, member_id), grp in merged.items():
         # Sort bottom to top
         grp = grp.copy()
         grp['_lv_idx'] = grp['level_from'].apply(_level_sort_key)
