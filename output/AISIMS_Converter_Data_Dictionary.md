@@ -3,30 +3,39 @@
 
 Generated: 2026-03-27
 
+## Naming Conventions
+
+| Element | Convention | Example |
+|---------|-----------|---------|
+| File names | PascalCase | MembersBeam.csv, ReinforcementColumn.csv |
+| Column headers | snake_case | member_id, x_from_mm, bar_spacing_mm |
+| Unit suffixes | Standard SI notation | _mm, _m2, _m4, _MPa, _kN_m3 |
+| Structural symbols | Engineering convention | Lx_mm, Mu_neg, phiMn_pos, Vu, Pu |
+
 ## File Overview
 
 ### Core Files (18 files — every project)
 
-| # | File | Source | Description | Rows (P1) |
-|---|------|--------|-------------|-----------|
-| 1 | Nodes.csv | Part A | All nodes with level, grid, coordinates | 744 |
-| 2 | Materials.csv | Part A | Concrete + rebar material properties | 4 |
-| 3 | Sections.csv | Part A | Parsed section definitions with dimensions | 197 |
-| 4 | MembersBeam.csv | Part A | Beam elements with coordinates | 558 |
-| 5 | MembersColumn.csv | Part A | Column elements with 3D length (slanted support) | 28 |
-| 6 | MembersWall.csv | Part A | Wall quad panel elements | 456 |
-| 7 | MembersSlab.csv | Part B | Slab boundary polygons | 20 |
-| 8 | MembersStair.csv | Part B | U-shaped stair 8-point geometry | 10 |
-| 9 | MembersFooting.csv | Part B | Mat foundation quads/polygons | 4 |
-| 10 | ReinforcementBeam.csv | Part A | Beam rebar per position (I/M/J) | 531 |
-| 11 | ReinforcementColumn.csv | Part A | Column main bars + ties | 13 |
-| 12 | ReinforcementWall.csv | Part A | Wall V + H bars (paired per element) | 121 |
-| 13 | ReinforcementSlab.csv | Part B | Slab rebar per direction/layer | 80 |
-| 14 | ReinforcementStair.csv | Part B | Stair rebar per zone/direction/layer | 80 |
-| 15 | ReinforcementFooting.csv | Part B | Footing base + additional + stirrup zones | 15 |
-| 16 | DesignResultsBeam.csv | Part A | Beam design capacity and ratios | 531 |
-| 17 | DesignResultsColumn.csv | Part A | Column design capacity and ratios | 13 |
-| 18 | ValidationReport.txt | System | Cross-check results | — |
+| # | File | Source | Description |
+|---|------|--------|-------------|
+| 1 | Nodes.csv | Part A | All nodes with level, grid, coordinates |
+| 2 | Materials.csv | Part A | Concrete + rebar material properties |
+| 3 | Sections.csv | Part A | Parsed section definitions with dimensions |
+| 4 | MembersBeam.csv | Part A | Beam elements with coordinates |
+| 5 | MembersColumn.csv | Part A | Column elements with 3D length (slanted support) |
+| 6 | MembersWall.csv | Part A | Wall quad panel elements |
+| 7 | MembersSlab.csv | Part B | Slab boundary polygons |
+| 8 | MembersStair.csv | Part B | U-shaped stair 8-point geometry |
+| 9 | MembersFooting.csv | Part B | Mat foundation quads/polygons |
+| 10 | ReinforcementBeam.csv | Part A | Beam rebar per position (I/M/J) |
+| 11 | ReinforcementColumn.csv | Part A | Column main bars + ties |
+| 12 | ReinforcementWall.csv | Part A | Wall V + H bars (paired per element) |
+| 13 | ReinforcementSlab.csv | Part B | Slab rebar per direction/layer |
+| 14 | ReinforcementStair.csv | Part B | Stair rebar per zone/direction/layer |
+| 15 | ReinforcementFooting.csv | Part B | Footing base + additional + stirrup zones |
+| 16 | DesignResultsBeam.csv | Part A | Beam design capacity and ratios |
+| 17 | DesignResultsColumn.csv | Part A | Column design capacity and ratios |
+| 18 | ValidationReport.txt | System | Cross-check results |
 
 ### Conditional Files (3 files — project-dependent)
 
