@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AISIMS Converter Pipeline</title>
+<style>
+body { font-family: "Segoe UI", "Malgun Gothic", sans-serif; max-width: 1000px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #333; }
+h1 { font-size: 1.5em; color: #1a1a2e; border-bottom: 3px solid #16213e; padding-bottom: 10px; }
+h2 { font-size: 1.25em; color: #16213e; margin-top: 30px; background: #f0f2f5; padding: 8px 12px; border-left: 4px solid #0f3460; }
+h3 { font-size: 1.1em; color: #0f3460; margin-top: 20px; }
+table { border-collapse: collapse; width: 100%%; margin: 12px 0; font-size: 0.85em; }
+th, td { border: 1px solid #bdc3c7; padding: 6px 8px; text-align: left; }
+th { background-color: #16213e; color: white; }
+tr:nth-child(even) { background-color: #f5f7fa; }
+code { background: #e8ecf1; padding: 2px 4px; border-radius: 3px; font-family: Consolas, monospace; font-size: 0.88em; }
+pre { background: #1a1a2e; color: #e0e0e0; padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 0.82em; }
+pre code { background: none; color: inherit; }
+hr { border: none; border-top: 2px solid #16213e; margin: 25px 0; }
+</style>
+</head>
+<body>
+<h1>AISIMS Converter Pipeline</h1>
+<h1>AISIMS 변환기 파이프라인</h1>
+<h2>Overview</h2>
+<p>The AISIMS Converter transforms raw MIDAS Gen structural analysis exports into
+standardized CSV files for the AISIMS V2 BIM Builder Engine. It runs as a
+Streamlit web application with a 5-phase pipeline.</p>
+<pre><code> INPUT DATA                    CONVERTER PIPELINE                     OUTPUT
+ ==========                    ==================                     ======
+
+ Part A ─────┐
+ (MIDAS Gen) │   Phase 1    Phase 2    Phase 2.5   Phase 3    Phase 5
+             ├──► FOUND ──► MEMBERS ──► GRID ──► REINF ──► VALID ──► 21 CSVs
+ Part B ─────┤   ATION      BERS       AUTO       ORCE      ATION     + Report
+ (Engineer)  │                          DETECT     MENT
+             │
+ Part C ─────┘
+ (Basement)
+</code></pre>
+<hr />
+<h2>Input Data Sources</h2>
+<h3>Part A — MIDAS Gen Exports (10 files)</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Content</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Nodes.csv</td>
+<td>Node coordinates (Node, X, Y, Z)</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Materials.csv</td>
+<td>Material properties (40+ columns)</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Sections.csv</td>
+<td>Section definitions (25 columns)</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Elements.csv</td>
+<td>Element connectivity (16 columns)</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>Thickness.csv</td>
+<td>Wall thickness properties</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>StoryDefinition.csv</td>
+<td>Level names and elevations</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>DesignBeam.csv</td>
+<td>Beam design results (3-row blocks)</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>DesignColumn.csv</td>
+<td>Column design results (2-row blocks)</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>DesignWall.csv</td>
+<td>Wall design results (2-row blocks)</td>
+<td>Conditional</td>
+</tr>
+<tr>
+<td>project.mgt</td>
+<td>MIDAS Gen text file (rebar grades, wall marks)</td>
+<td>Optional</td>
+</tr>
+</tbody>
+</table>
+<h3>Part B — Engineer Input Data (5 files)</h3>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Content</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SlabBoundary.csv</td>
+<td>Slab boundary polygons with node references</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>SlabReinforcement.csv</td>
+<td>Slab rebar per direction/layer</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>StairReinforcement.csv</td>
+<td>Stair geometry + rebar (with member_id)</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>FootBoundary.csv</td>
+<td>Foundation boundary nodes</td>
+<td>Yes</td>
+</tr>
+<tr>
+<td>FootReinforcement.csv</td>
+<td>Foundation rebar with zone definitions</td>
+<td>Yes</td>
+</tr>
+</tbody>
+</table>
+<h3>Part C — Basement Walls (1 Excel file, conditional)</h3>
+<table>
+<thead>
+<tr>
+<th>Sheet</th>
+<th>Content</th>
+<th>Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>BasementWall Boundary</td>
+<td>Wall panel nodes with zone dimensions</td>
+<td>If basement exists</td>
+</tr>
+<tr>
+<td>BasementWall Reinforcement</td>
+<td>Rebar per direction/face/zone</td>
+<td>If basement exists</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Pipeline Phases</h2>
+<h3>Phase 1: Foundation Data</h3>
+<p><strong>Purpose</strong>: Build the base lookup tables that all subsequent phases depend on.</p>
+<pre><code>Nodes.csv ──────────────► convert_nodes() ──────────► Nodes.csv (output)
+StoryDefinition.csv ────┘                              │
+                                                       │ node lookup
+Materials.csv ──────────► convert_materials() ─────► Materials.csv
+project.mgt ────────────┘                              │
+                                                       │ material info
+Sections.csv ───────────► convert_sections() ──────► Sections.csv
+Thickness.csv ──────────┘   │                          │
+StoryDefinition.csv ────────┘ (level resolution)       │
+                                                       ▼
+                                              section_lookup dict
+                                              thickness_lookup dict
+</code></pre>
+<p><strong>Key operations:</strong>
+- <strong>Nodes</strong>: Match Z coordinates to StoryDefinition levels (tolerance 100mm). Assign grid labels if manual grid provided.
+- <strong>Materials</strong>: Consolidate duplicate concrete grades (3x C35 → 1). Derive rebar grades from MGT file (SD400/500/600).
+- <strong>Sections</strong>: Parse section names using 20+ prefix patterns. Handle both joined (<code>6C1</code>) and space-separated (<code>1 B1</code>, <code>TC1 (1-P)</code>) conventions. Resolve ambiguous levels (<code>P</code> → PIT or PH based on StoryDefinition). Deduplicate section_ids.</p>
+<p><strong>Error handling:</strong>
+- Missing StoryDefinition → nodes get <code>Z{value}</code> as level fallback
+- Missing MGT → default SD400 rebar added
+- Unparseable section name → member_type = UNKNOWN (flagged in validation)</p>
+<hr />
+<h3>Phase 2: Members</h3>
+<p><strong>Purpose</strong>: Convert raw elements into categorized structural members.</p>
+<pre><code>Elements.csv ────────────► convert_elements() ─────► MembersBeam.csv
+section_lookup ──────────┘   │                       MembersColumn.csv
+thickness_lookup ────────────┘                       MembersWall.csv
+node_lookup ─────────────────┘
+wall_marks (MGT) ────────────┘
+
+                              ┌─ Polymorphic FK:
+                              │  BEAM type → Sections table
+                              │  WALL type → Thickness table
+                              │
+                              ├─ Orientation check:
+                              │  Vertical + COLUMN prefix → Column
+                              │  Horizontal + BEAM prefix → Beam
+                              │  Vertical + WALL/BT prefix → Wall
+                              │
+                              └─ Link beam detection:
+                                 BEAM type + Thickness property + horizontal
+                                 → labeled as ELEM_{id}
+
+SlabBoundary.csv ────────────► convert_slabs() ────► MembersSlab.csv
+SlabReinforcement.csv ───────┘   │                     │
+node_lookup ─────────────────────┘                     │ stair_boundaries
+                                  │                    ▼
+                                  ├─ Filter: SS/ST suffix → stair
+                                  └─ Remaining → slab members
+
+StairReinforcement.csv ──────► convert_stairs() ───► MembersStair.csv (73 cols)
+stair_boundaries ────────────┘   │
+node_lookup ─────────────────────┘
+walls (for wall detection) ──────┘
+                                  │
+                                  ├─ 8-point U-shaped geometry
+                                  ├─ Wall side auto-detection from core walls
+                                  ├─ Flight centerline inset (stair_width/2)
+                                  └─ Gap = boundary_Lx - 2×width
+
+FootBoundary.csv ────────────► convert_footings() ─► MembersFooting.csv
+FootReinforcement.csv ───────┘                       ReinforcementFooting.csv
+                                  │
+                                  ├─ Nodes % 4 == 0 → split into quads
+                                  ├─ Otherwise → polygon (Shoelace area)
+                                  └─ Zones: BASE / ADDITIONAL / STIRRUP
+
+BasementWall Excel ──────────► convert_basement_walls() ► MembersBasementWall.csv
+node_lookup ─────────────────┘                             ReinforcementBasementWall.csv
+                                  │
+                                  ├─ Panels: 4 nodes per quad
+                                  ├─ Zone dimensions (Left/Middle/Right × Top/Middle/Bottom)
+                                  └─ Composite bars: D13+D16@100 → 2 rows @ doubled spacing
+</code></pre>
+<p><strong>Slanted column handling:</strong>
+- Columns with different X/Y at bottom vs top → <code>length_mm &gt; height_mm</code>
+- TC1/TC2/TC3 in Project 1 shift from grid X3 (basement) to X1 (upper floors)
+- Rebar calculator uses <code>length_mm</code> for bar length, not <code>height_mm</code></p>
+<p><strong>Node merging:</strong>
+- FootBoundary nodes (1001-1040 in P1) merged into main Nodes.csv
+- Tagged with <code>source=BOUNDARY</code> to distinguish from MIDAS nodes</p>
+<hr />
+<h3>Phase 2.5: Grid Auto-Detection</h3>
+<p><strong>Purpose</strong>: Detect grid lines from column positions when no manual grid is provided.</p>
+<pre><code>MembersColumn (x_mm, y_mm) ──► detect_grid_from_columns() ──► grid_x, grid_y
+                                    │
+                                    ├─ Cluster X positions (tolerance 100mm)
+                                    ├─ Cluster Y positions (tolerance 100mm)
+                                    ├─ Min 2 columns per grid line
+                                    └─ Label: X1, X2, ... / Y1, Y2, ...
+
+grid_x, grid_y ──────────────► reassign_node_grids() ──────► Updated Nodes.csv
+Nodes.csv ───────────────────┘
+                                    │
+                                    ├─ Match each node to nearest grid intersection
+                                    ├─ Within 50mm tolerance → on-grid
+                                    ├─ Beyond tolerance → OFF_GRID
+                                    └─ Compute grid_offset_x/y_mm
+
+Re-run convert_elements() with updated nodes → updated grid labels in Members
+</code></pre>
+<p><strong>When skipped:</strong>
+- Manual grid entry → grid already assigned in Phase 1
+- Grid CSV upload → positions provided directly</p>
+<hr />
+<h3>Phase 3: Reinforcement + Design Results</h3>
+<p><strong>Purpose</strong>: Parse MIDAS design output into reinforcement specifications and design capacity data.</p>
+<pre><code>DesignBeam.csv ──────────► convert_reinforcement_beam() ──► ReinforcementBeam.csv
+section_lookup ──────────┘                                  DesignResultsBeam.csv
+                              │
+                              ├─ 3-row blocks: I (start), M (mid), J (end)
+                              ├─ Parse main bars: 6-4-D22 → total=10, main=6, add=4
+                              ├─ Parse stirrups: 3-D10 @150 → legs=3, dia=10, sp=150
+                              ├─ Pipe format: 4|5-D13 @150 → legs=5 (max)
+                              └─ Split: rebar → Reinforcement, ratios → DesignResults
+
+DesignColumn.csv ────────► convert_reinforcement_column() ► ReinforcementColumn.csv
+section_lookup ──────────┘                                  DesignResultsColumn.csv
+                              │
+                              ├─ 2-row blocks: data row + geometry row
+                              ├─ Main + tie_end + tie_mid in one row
+                              └─ Split: rebar → Reinforcement, ratios → DesignResults
+
+DesignWall.csv ──────────► convert_reinforcement_wall() ──► ReinforcementWall.csv
+                              │                             DesignResultsWall.csv
+                              ├─ 2-row blocks: design + story/geometry
+                              ├─ V + H bars paired in one row
+                              ├─ wall_id added for FK joining
+                              └─ Split: rebar → Reinforcement, ratios → DesignResults
+
+SlabReinforcement.csv ───► convert_reinforcement_slab() ──► ReinforcementSlab.csv
+                              │
+                              ├─ Each slab → 4 rows (X/Y × Top/Bot)
+                              ├─ Composite bars split into 2 rows
+                              └─ Level normalized (R→Roof, 1→1F)
+
+StairReinforcement.csv ──► convert_reinforcement_stair() ─► ReinforcementStair.csv
+                              │
+                              ├─ Each stair → 8 rows (zone × direction × layer)
+                              ├─ Zones: landing_left, landing_right, stair
+                              └─ Level normalized
+</code></pre>
+<p><strong>member_id handling:</strong>
+- Reinforcement member_ids have level prefixes: <code>-1B11</code>, <code>6G1</code>, <code>TC1 (1-P)</code>
+- Members use base IDs: <code>B11</code>, <code>G1</code>, <code>TC1</code>
+- <code>design_key</code> column in Members stores the raw name for FK joining
+- Validation uses <code>_extract_base_member_id()</code> for coverage checking</p>
+<hr />
+<h3>Phase 5: Validation</h3>
+<p><strong>Purpose</strong>: Cross-check all outputs for consistency and completeness.</p>
+<pre><code>All outputs ──────────────► validate_outputs() ────► ValidationReport.txt
+
+Checks performed:
+  1. Completeness      — all output DataFrames non-empty
+  2. Materials         — at least 1 concrete + 1 rebar
+  3. Beam geometry     — no zero-length beams
+  4. Column geometry   — no zero-height columns
+  5. Grid coverage     — % of nodes on-grid
+  6. Beam reinf coverage — base member_id matching
+  7. Column reinf coverage — base member_id matching
+  8a. Beam design key  — every element's design_key in DesignResultsBeam
+  8b. Column design key — every element's design_key in DesignResultsColumn
+  8c. Wall design key  — wall_id matching (numeric, not wall_mark)
+  9. Section types     — no UNKNOWN member_types
+</code></pre>
+<p><strong>Result categories:</strong>
+- <strong>PASS</strong>: Check passed
+- <strong>WARN</strong>: Issue detected but not blocking (e.g., low grid coverage, missing design keys for known gaps)
+- <strong>FAIL</strong>: Critical issue (e.g., no concrete materials)</p>
+<hr />
+<h2>Phase Dependencies</h2>
+<pre><code>Phase 1 ──────► Phase 2 ──────► Phase 2.5 ──────► Phase 3 ──────► Phase 5
+(Foundation)    (Members)       (Grid Auto)        (Reinf.)        (Valid.)
+    │               │               │                  │               │
+    │               │               │                  │               │
+    ▼               ▼               ▼                  ▼               ▼
+ Nodes.csv     MembersBeam    Updated Nodes      ReinfBeam       Report
+ Materials     MembersColumn  Updated Members    ReinfColumn
+ Sections      MembersWall                       ReinfWall
+ Lookups       MembersSlab                       ReinfSlab
+               MembersStair                      ReinfStair
+               MembersFooting                    ReinfFooting
+               MembersBasementWall               ReinfBasementWall
+                                                 DesignResults×3
+</code></pre>
+<p><strong>Strict order:</strong>
+1. Phase 1 must complete before Phase 2 (sections/nodes needed)
+2. Phase 2 must complete before Phase 2.5 (column positions needed)
+3. Phase 2.5 must complete before Phase 3 (grid labels in Members)
+4. Phase 3 must complete before Phase 5 (all outputs needed for validation)</p>
+<p><strong>Independent within phase:</strong>
+- Within Phase 2: slabs, stairs, footings, basement walls can run in parallel
+- Within Phase 3: beam, column, wall, slab, stair reinforcement can run in parallel</p>
+<hr />
+<h2>Data Flow Diagram</h2>
+<pre><code>                        ┌─────────────────────────────────────────────┐
+                        │           STREAMLIT APP (app.py)            │
+                        │                                             │
+  Part A ──────────────►│  ┌──────────┐                               │
+  (10 CSV + 1 MGT)      │  │ Phase 1  │ Parsers:                     │
+                        │  │ FOUND.   │ ├─ section_name.py (20+ prefixes)
+  Part B ──────────────►│  │          │ ├─ rebar_spec.py (main/stirrup/composite)
+  (5 CSV)               │  └────┬─────┘ ├─ mgt.py (rebar grades, wall marks)
+                        │       │        └─ level_normalizer.py (R→Roof, P→PIT)
+  Part C ──────────────►│       ▼                                     │
+  (1 Excel)             │  ┌──────────┐                               │
+                        │  │ Phase 2  │ Converters:                   │
+  Grid Definition ─────►│  │ MEMBERS  │ ├─ nodes.py                   │
+  (manual/auto/CSV)     │  │          │ ├─ materials.py               │
+                        │  └────┬─────┘ ├─ sections.py                │
+                        │       │        ├─ elements.py                │
+                        │       ▼        ├─ slabs.py                  │
+                        │  ┌──────────┐  ├─ stairs.py (8-point model) │
+                        │  │Phase 2.5 │  ├─ footings.py               │
+                        │  │ GRID     │  └─ basement_walls.py         │
+                        │  └────┬─────┘                               │
+                        │       │        Reinforcement:               │
+                        │       ▼        ├─ reinforcement_beam.py     │
+                        │  ┌──────────┐  ├─ reinforcement_column.py   │
+                        │  │ Phase 3  │  ├─ reinforcement_wall.py     │
+                        │  │ REINF.   │  ├─ reinforcement_slab.py     │
+                        │  └────┬─────┘  └─ reinforcement_stair.py    │
+                        │       │                                     │
+                        │       ▼        Grid:                        │
+                        │  ┌──────────┐  └─ grid_detect.py            │
+                        │  │ Phase 5  │                               │
+                        │  │ VALID.   │  Validation:                  │
+                        │  └────┬─────┘  └─ validation.py             │
+                        │       │                                     │
+                        │       ▼                                     │
+                        │  ┌──────────┐                               │
+                        │  │ OUTPUT   │──► 21 CSVs + ValidationReport │
+                        │  │ (ZIP)    │──► Download as .zip           │
+                        │  └──────────┘                               │
+                        └─────────────────────────────────────────────┘
+</code></pre>
+<hr />
+<h2>Tier 2: Rebar Length Calculators (separate module)</h2>
+<p>The Tier 2 calculators consume Tier 1 output to compute bar-by-bar lengths.
+They are NOT part of the Streamlit pipeline but run independently.</p>
+<pre><code>Tier 1 CSVs ──────────► Tier 2 Calculators ──────► RebarLengths CSVs
+
+Available:
+  tier2/rebar_lengths_beam.py    ──► RebarLengthsBeam.csv (2,801 records P1)
+  tier2/rebar_lengths_column.py  ──► RebarLengthsColumn.csv (91 records P1)
+
+Pending:
+  tier2/rebar_lengths_wall.py    ──► RebarLengthsWall.csv
+  tier2/rebar_lengths_slab.py    ──► RebarLengthsSlab.csv
+  tier2/rebar_lengths_stair.py   ──► RebarLengthsStair.csv
+  tier2/rebar_lengths_footing.py ──► RebarLengthsFooting.csv
+
+Shared resources:
+  config/development_lengths.csv  (486 rows: 3 fy × 6 fc × 3 member_types × 9 bars)
+  config/lap_splice.csv           (486 rows: same coverage)
+</code></pre>
+<hr />
+<h2>Error Recovery</h2>
+<table>
+<thead>
+<tr>
+<th>Scenario</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Missing Part A file</td>
+<td>Error: "Missing required files" — blocks conversion</td>
+</tr>
+<tr>
+<td>Missing Part B file</td>
+<td>Skipped: corresponding Members/Reinforcement not generated</td>
+</tr>
+<tr>
+<td>Missing Part C Excel</td>
+<td>Skipped: no basement wall output</td>
+</tr>
+<tr>
+<td>Missing MGT file</td>
+<td>Fallback: default SD400 rebar, no wall marks</td>
+</tr>
+<tr>
+<td>Unparseable section name</td>
+<td>member_type = UNKNOWN, flagged in validation</td>
+</tr>
+<tr>
+<td>Element references Thickness instead of Sections</td>
+<td>Auto-detect: vertical → wall, horizontal → link beam (ELEM_{id})</td>
+</tr>
+<tr>
+<td>Level "P" ambiguous</td>
+<td>Resolved against StoryDefinition (PIT or PH)</td>
+</tr>
+<tr>
+<td>Composite bars (D13+D16@100)</td>
+<td>Split into 2 rows with doubled spacing</td>
+</tr>
+<tr>
+<td>Pipe stirrups (4|5-D13@150)</td>
+<td>Take max leg count (5)</td>
+</tr>
+<tr>
+<td>File encoding issues</td>
+<td>Try utf-8-sig first, fallback to cp949</td>
+</tr>
+<tr>
+<td>Duplicate section_ids</td>
+<td>First entry kept, duplicates added to lookup only</td>
+</tr>
+<tr>
+<td>Wall mark mismatch (W204 vs wM0204)</td>
+<td>Join by wall_id (numeric), not wall_mark</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Performance</h2>
+<table>
+<thead>
+<tr>
+<th>Project</th>
+<th>Nodes</th>
+<th>Elements</th>
+<th>Processing Time</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Project 1 (청담동, 10 stories + 4 basements)</td>
+<td>744</td>
+<td>1,042</td>
+<td>~5 seconds</td>
+</tr>
+<tr>
+<td>Project 2 (불당동, 15 stories + 5 basements)</td>
+<td>9,435</td>
+<td>10,476</td>
+<td>~15 seconds</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Repository</h2>
+<p>GitHub: https://github.com/danielcool11/aisims-converter
+Run: <code>cd D:\Redo AISIMS\converter &amp;&amp; venv\Scripts\streamlit run app.py</code></p></body></html>
