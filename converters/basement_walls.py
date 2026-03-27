@@ -99,8 +99,178 @@ def convert_basement_walls(
         if node_id:
             wall_entries[key]['nodes'].append(node_id)
 
+    # ── Validate nodes: check existence and Z consistency ──
+    # Basement levels should have negative Z (below ground)
+    def _is_basement_z(z):
+        return z is not None and z <= 0
+
+    def _node_is_valid(nid):
+        """Node exists and has a basement-range Z coordinate."""
+        c = node_coords.get(nid)
+        if c is None:
+            return False
+        return _is_basement_z(c['z_mm'])
+
+    # ── Collect valid XY reference per wall_mark ──
+    # A wall keeps the same XY across levels; find it from any valid level.
+    wall_valid_xy = {}  # wall_mark → list of (x, y) from valid nodes
+    for (name, level), entry in wall_entries.items():
+        for nid in entry['nodes']:
+            if _node_is_valid(nid):
+                c = node_coords[nid]
+                wall_valid_xy.setdefault(name, []).append((c['x_mm'], c['y_mm']))
+
+    # Compute reference XY per wall (average of all valid nodes)
+    wall_ref_xy = {}
+    for wm, xys in wall_valid_xy.items():
+        avg_x = round(sum(p[0] for p in xys) / len(xys), 1)
+        avg_y = round(sum(p[1] for p in xys) / len(xys), 1)
+        wall_ref_xy[wm] = (avg_x, avg_y)
+
+    # ── Collect valid Z per wall_mark+level from valid nodes ──
+    wall_level_z = {}  # (wall_mark, level) → z from valid nodes
+    for (name, level), entry in wall_entries.items():
+        valid_zs = [node_coords[n]['z_mm'] for n in entry['nodes'] if _node_is_valid(n)]
+        if valid_zs:
+            wall_level_z[(name, level)] = round(sum(valid_zs) / len(valid_zs), 1)
+
+    # ── Infer Z for levels without valid nodes ──
+    # Strategy: stack wall panels from the bottom up using known heights.
+    # Find the lowest valid Z for any wall in the building as the base reference,
+    # then accumulate heights upward.
+    def _infer_z_for_wall(wall_mark):
+        """Compute Z centroids for all levels of a wall using height stacking.
+
+        Returns dict: level → z_mm (centroid)
+        """
+        # Collect all levels for this wall with their heights
+        wall_levels = {}
+        for (wm, lv), entry in wall_entries.items():
+            if wm == wall_mark and '~' not in lv:
+                wall_levels[lv] = entry.get('height_mm') or 0
+
+        if not wall_levels:
+            return {}
+
+        # Sort levels: B4 (deepest) → B1 (shallowest)
+        sorted_levels = sorted(wall_levels.keys(), key=_level_sort_key)
+
+        # Find bottom Z: use the lowest valid level's Z, or reference from other walls
+        bottom_z = None
+        for (wm, lv) in wall_level_z:
+            if wm == wall_mark:
+                # Use this wall's own valid Z to anchor
+                entry_h = 0
+                for (w2, l2), e2 in wall_entries.items():
+                    if w2 == wall_mark and l2 == lv:
+                        entry_h = e2.get('height_mm') or 0
+                valid_z = wall_level_z[(wm, lv)]
+                valid_bottom = valid_z - entry_h / 2
+                # Compute the base bottom by subtracting all heights below this level
+                idx = sorted_levels.index(lv) if lv in sorted_levels else -1
+                if idx >= 0:
+                    below_h = sum(wall_levels.get(sorted_levels[i], 0) for i in range(idx))
+                    bottom_z = valid_bottom - below_h
+                    break
+
+        if bottom_z is None:
+            # No valid Z for this wall — try using another wall's bottom
+            all_valid_bottoms = []
+            for (wm, lv) in wall_level_z:
+                for (w2, l2), e2 in wall_entries.items():
+                    if w2 == wm and l2 == lv:
+                        h = e2.get('height_mm') or 0
+                        all_valid_bottoms.append(wall_level_z[(wm, lv)] - h / 2)
+            if all_valid_bottoms:
+                bottom_z = min(all_valid_bottoms)
+            else:
+                return {}
+
+        # Stack upward from bottom
+        result = {}
+        current_z = bottom_z
+        for lv in sorted_levels:
+            h = wall_levels.get(lv, 0)
+            result[lv] = round(current_z + h / 2, 1)
+            current_z += h
+
+        return result
+
+    # ── Compute Z centroids via height stacking ──
+    # Node Z is unreliable (may be top/bottom of panel, not centroid, and some
+    # nodes are missing or reference wrong levels). Use height stacking instead.
+    # All per-level walls in the same building share the same basement depth.
+
+    # Find the building's base Z from any wall with all-valid nodes
+    # by checking where the lowest level's bottom sits.
+    base_z = None  # bottom of B4 (deepest level)
+    all_walls = set(name for (name, _) in wall_entries)
+
+    for wm in all_walls:
+        # Get sorted levels for this wall
+        wm_levels = {}
+        for (w, lv), e in wall_entries.items():
+            if w == wm and '~' not in lv:
+                wm_levels[lv] = e.get('height_mm') or 0
+
+        if not wm_levels:
+            continue
+
+        sorted_lvs = sorted(wm_levels.keys(), key=_level_sort_key)
+
+        # Check if this wall has nodes with a reliable centroid (4+ distinct Z values)
+        for lv in sorted_lvs:
+            entry = wall_entries[(wm, lv)]
+            node_zs = [node_coords[n]['z_mm'] for n in entry['nodes'] if n in node_coords]
+            if len(node_zs) >= 4:
+                # Has 4 nodes — likely top and bottom pairs
+                z_centroid = sum(node_zs) / len(node_zs)
+                h = wm_levels[lv]
+                panel_bottom = z_centroid - h / 2
+                # Walk down to the base
+                idx = sorted_lvs.index(lv)
+                below_h = sum(wm_levels.get(sorted_lvs[i], 0) for i in range(idx))
+                candidate_base = panel_bottom - below_h
+                if base_z is None or candidate_base < base_z:
+                    base_z = candidate_base
+                break
+
+    # Compute Z centroid for each wall×level via stacking from base_z
+    wall_z_map = {}  # (wall_mark, level) → z_centroid
+    for wm in all_walls:
+        wm_levels = {}
+        for (w, lv), e in wall_entries.items():
+            if w == wm and '~' not in lv:
+                wm_levels[lv] = e.get('height_mm') or 0
+
+        sorted_lvs = sorted(wm_levels.keys(), key=_level_sort_key)
+        total_h = sum(wm_levels.get(lv, 0) for lv in sorted_lvs)
+
+        if base_z is not None:
+            current_z = base_z
+        else:
+            # Fallback: assume bottom at -total_h
+            current_z = -total_h
+
+        for lv in sorted_lvs:
+            h = wm_levels.get(lv, 0)
+            wall_z_map[(wm, lv)] = round(current_z + h / 2, 1)
+            current_z += h
+
+        # Full-height walls: centroid at mid-height of total
+        for (w, lv), e in wall_entries.items():
+            if w == wm and '~' in lv:
+                h = e.get('height_mm') or total_h
+                if base_z is not None:
+                    wall_z_map[(wm, lv)] = round(base_z + h / 2, 1)
+                else:
+                    wall_z_map[(wm, lv)] = round(-h / 2, 1)
+
     # ── Build MembersBasementWall: one row per quad panel ──
     members = []
+    inferred_count = 0
+    missing_count = 0
+
     for (name, level), entry in wall_entries.items():
         nodes = entry['nodes']
 
@@ -112,19 +282,53 @@ def convert_basement_walls(
         else:
             continue
 
-        for pi, panel_nodes in enumerate(panels, start=1):
-            # Get coordinates from nodes
-            coords = [node_coords.get(n) for n in panel_nodes if n in node_coords]
+        # Z from height stacking (reliable for all panels)
+        z_mm = wall_z_map.get((name, level))
 
-            if coords:
-                xs = [c['x_mm'] for c in coords]
-                ys = [c['y_mm'] for c in coords]
-                zs = [c['z_mm'] for c in coords]
+        for pi, panel_nodes in enumerate(panels, start=1):
+            # Classify each node for XY positioning
+            valid_coords = []
+            invalid_nodes = []
+            for nid in panel_nodes:
+                if _node_is_valid(nid):
+                    valid_coords.append(node_coords[nid])
+                else:
+                    invalid_nodes.append(nid)
+
+            all_valid = len(invalid_nodes) == 0
+            has_some_valid = len(valid_coords) > 0
+
+            if all_valid:
+                xs = [c['x_mm'] for c in valid_coords]
+                ys = [c['y_mm'] for c in valid_coords]
                 centroid_x = round(sum(xs) / len(xs), 1)
                 centroid_y = round(sum(ys) / len(ys), 1)
-                z_mm = round(sum(zs) / len(zs), 1)
+                node_status = 'OK'
+            elif has_some_valid:
+                xs = [c['x_mm'] for c in valid_coords]
+                ys = [c['y_mm'] for c in valid_coords]
+                centroid_x = round(sum(xs) / len(xs), 1)
+                centroid_y = round(sum(ys) / len(ys), 1)
+                node_status = 'PARTIAL'
+                inferred_count += 1
             else:
-                centroid_x = centroid_y = z_mm = None
+                # No valid nodes — infer XY from other levels of same wall
+                ref_xy = wall_ref_xy.get(name)
+                if ref_xy:
+                    centroid_x = ref_xy[0]
+                    centroid_y = ref_xy[1]
+                    node_status = 'INFERRED'
+                    inferred_count += 1
+                else:
+                    centroid_x = centroid_y = None
+                    node_status = 'MISSING'
+                    missing_count += 1
+
+            # Convert node IDs: valid → converted ID, invalid → MISSING_xxx
+            def _convert_nid(nid):
+                if nid in raw_to_converted and _node_is_valid(nid):
+                    return raw_to_converted[nid]
+                return f'MISSING_{nid}'
 
             members.append({
                 'wall_mark': name,
@@ -140,14 +344,19 @@ def convert_basement_walls(
                 'zone_height_top_mm': entry['zone_height_top_mm'],
                 'zone_height_middle_mm': entry['zone_height_middle_mm'],
                 'zone_height_bottom_mm': entry['zone_height_bottom_mm'],
-                'node_i': raw_to_converted.get(panel_nodes[0], panel_nodes[0]) if len(panel_nodes) > 0 else None,
-                'node_j': raw_to_converted.get(panel_nodes[1], panel_nodes[1]) if len(panel_nodes) > 1 else None,
-                'node_k': raw_to_converted.get(panel_nodes[2], panel_nodes[2]) if len(panel_nodes) > 2 else None,
-                'node_l': raw_to_converted.get(panel_nodes[3], panel_nodes[3]) if len(panel_nodes) > 3 else None,
+                'node_i': _convert_nid(panel_nodes[0]) if len(panel_nodes) > 0 else None,
+                'node_j': _convert_nid(panel_nodes[1]) if len(panel_nodes) > 1 else None,
+                'node_k': _convert_nid(panel_nodes[2]) if len(panel_nodes) > 2 else None,
+                'node_l': _convert_nid(panel_nodes[3]) if len(panel_nodes) > 3 else None,
                 'centroid_x_mm': centroid_x,
                 'centroid_y_mm': centroid_y,
                 'z_mm': z_mm,
+                'node_status': node_status,
             })
+
+    if inferred_count or missing_count:
+        print(f'[BasementWall] Node warnings: {inferred_count} inferred, '
+              f'{missing_count} missing')
 
     # ── Parse reinforcement ──
     rcols = reinforcement_df.columns.tolist()
@@ -286,6 +495,15 @@ def convert_basement_walls(
           f'({composite_count} composite bars split)')
 
     return members_df, reinf_result_df
+
+
+def _level_sort_key(level):
+    """Sort key for basement levels: B4=-104, B3=-103, B2=-102, B1=-101."""
+    s = str(level).strip().upper()
+    m = re.match(r'B(\d+)', s)
+    if m:
+        return -100 - int(m.group(1))
+    return 0
 
 
 def _safe_float(val):
