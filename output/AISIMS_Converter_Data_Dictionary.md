@@ -406,13 +406,14 @@ Generated: 2026-03-27
 | zone_height_top_mm | float | mm | Top zone height |
 | zone_height_middle_mm | float | mm | Middle zone height |
 | zone_height_bottom_mm | float | mm | Bottom zone height |
-| node_i | int | — | Corner node 1 |
-| node_j | int | — | Corner node 2 |
-| node_k | int | — | Corner node 3 |
-| node_l | int | — | Corner node 4 |
-| centroid_x_mm | float | mm | Panel centroid X |
-| centroid_y_mm | float | mm | Panel centroid Y |
-| z_mm | float | mm | Panel elevation |
+| node_i | string | — | Corner node 1 (converted ID, or MISSING_xxx if invalid) |
+| node_j | string | — | Corner node 2 (converted ID, or MISSING_xxx if invalid) |
+| node_k | string | — | Corner node 3 (converted ID, or MISSING_xxx if invalid) |
+| node_l | string | — | Corner node 4 (converted ID, or MISSING_xxx if invalid) |
+| centroid_x_mm | float | mm | Panel centroid X (inferred from valid nodes if needed) |
+| centroid_y_mm | float | mm | Panel centroid Y (inferred from valid nodes if needed) |
+| z_mm | float | mm | Panel elevation (computed via height stacking) |
+| node_status | string | — | OK / PARTIAL / INFERRED / MISSING — coordinate reliability |
 
 ### 21. ReinforcementBasementWall.csv (Conditional)
 
