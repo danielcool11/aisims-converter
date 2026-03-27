@@ -514,4 +514,8 @@ def calculate_slab_rebar_lengths(
         if mismatches:
             print(f'[RebarSlab] {int(mismatches)} thickness mismatches detected')
 
+    # Add total_length_mm
+    if not df.empty and 'total_length_mm' not in df.columns:
+        df['total_length_mm'] = (df['length_mm'] * df['n_bars']).astype(int)
+
     return df

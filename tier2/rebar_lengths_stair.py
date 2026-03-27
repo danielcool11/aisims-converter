@@ -329,4 +329,10 @@ def calculate_stair_rebar_lengths(
         zones = df['zone'].value_counts().to_dict()
         print(f'[RebarStair] Zones: {zones}')
 
+    # Add split columns for schema consistency (stairs don't exceed 12m)
+    if not df.empty:
+        for col in ('split_piece', 'split_total', 'original_length_mm'):
+            if col not in df.columns:
+                df[col] = None
+
     return df

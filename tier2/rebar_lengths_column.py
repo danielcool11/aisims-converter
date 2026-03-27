@@ -595,4 +595,10 @@ def calculate_column_rebar_lengths(
     print(f'[RebarColumn] {main_count} main bar records + '
           f'{hoop_count} hoop records = {len(df)} total')
 
+    # Add split columns for schema consistency (columns don't exceed 12m)
+    if not df.empty:
+        for col in ('split_piece', 'split_total', 'original_length_mm'):
+            if col not in df.columns:
+                df[col] = None
+
     return df
