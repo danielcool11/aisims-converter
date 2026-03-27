@@ -5,6 +5,7 @@ Computes bar-by-bar lengths for standard wall reinforcement:
 - Vertical bars with continuity-aware stacking (DOWEL/BOTTOM/INTERMEDIATE/TOP)
 - Horizontal bars with U-bar at free edges, hook at connections
 - Double layer support (both faces)
+- Stock length split for bars exceeding 12m
 
 Continuity logic:
   Group by wall_id → sort by level → detect gaps
@@ -23,6 +24,7 @@ import numpy as np
 import math
 import re
 import os
+from tier2.stock_split import split_bar
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -399,7 +401,7 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
             mesh_v['mesh_origin_y_mm'] = round(seg['y_min'] + cover, 1)
             mesh_v['mesh_terminus_y_mm'] = round(seg['y_min'] + cover, 1)
 
-        results.append({
+        v_record = {
             'wall_id': wid, 'wall_mark': wall_mark, 'level': level,
             'direction': 'VERTICAL', 'bar_role': role,
             'dia_mm': v_dia, 'spacing_mm': v_spacing,
@@ -411,7 +413,9 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
             'splice_end_mm': sp_end, 'splice_end_end_mm': sp_end_end,
             'cover_mm': cover,
             **mesh_v,
-        })
+        }
+        for piece in split_bar(v_record, Lpc_v):
+            results.append(piece)
 
         # ── HORIZONTAL BARS ──
 
@@ -456,7 +460,7 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
                     'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
                 }
 
-            results.append({
+            h_record = {
                 'wall_id': wid, 'wall_mark': wall_mark, 'level': level,
                 'direction': 'HORIZONTAL', 'bar_role': 'U_BAR',
                 'dia_mm': h_dia, 'spacing_mm': h_spacing,
@@ -468,7 +472,9 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
                 'splice_end_mm': None, 'splice_end_end_mm': None,
                 'cover_mm': cover,
                 **mesh_h,
-            })
+            }
+            for piece in split_bar(h_record, Ldh_h):
+                results.append(piece)
 
 
 def _emit_dowel(results, wid, wall_mark, level, dia, width, spacing,

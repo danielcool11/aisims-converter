@@ -8,6 +8,7 @@ Computes bar-by-bar lengths for slab reinforcement including:
 - Beam width lookup at slab edges for clear span
 - Z-coordinate positioning within slab thickness
 - Mesh coordinates for BIM visualization
+- Stock length split for bars exceeding 12m
 
 Logic adapted from RebarLengthsSlabCalculator.py (V3)
 Uses coordinate-based adjacency instead of grid-based.
@@ -22,6 +23,7 @@ import numpy as np
 import re
 import math
 from pathlib import Path
+from tier2.stock_split import split_bar
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -457,7 +459,7 @@ def calculate_slab_rebar_lengths(
                     mesh_terminus_x = mesh_origin_x
                     mesh_dist_axis = 'X'
 
-                results.append({
+                bar_record = {
                     'member_id': mid,
                     'level': level,
                     'slab_type': slab.get('slab_type', ''),
@@ -494,7 +496,11 @@ def calculate_slab_rebar_lengths(
                     'mesh_terminus_y_mm': round(mesh_terminus_y, 1),
                     'mesh_terminus_z_mm': round(z_bar, 1),
                     'mesh_distribution_axis': mesh_dist_axis,
-                })
+                }
+
+                # Stock length split (>12m → multiple pieces with lap)
+                for piece in split_bar(bar_record, Llap):
+                    results.append(piece)
 
     df = pd.DataFrame(results)
 

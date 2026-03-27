@@ -38,15 +38,18 @@ def convert_basement_walls(
         tuple: (members_df, reinforcement_df)
     """
 
-    # ── Node coordinate lookup ──
+    # ── Node coordinate lookup + raw-to-converted ID mapping ──
     node_coords = {}
+    raw_to_converted = {}
     if nodes_df is not None:
         for _, row in nodes_df.iterrows():
-            node_coords[int(row['node_number'])] = {
+            raw_num = int(row['node_number'])
+            node_coords[raw_num] = {
                 'x_mm': float(row['x_mm']),
                 'y_mm': float(row['y_mm']),
                 'z_mm': float(row['z_mm']),
             }
+            raw_to_converted[raw_num] = str(row['node_id'])
 
     # ── Parse boundary ──
     bcols = boundary_df.columns.tolist()
@@ -80,6 +83,19 @@ def convert_basement_walls(
                 'zone_height_bottom_mm': _safe_float(row.get('bottom_mm')),
                 'nodes': [],
             }
+        else:
+            # Fill in any missing zone dimensions from subsequent rows
+            entry = wall_entries[key]
+            for src, dst in [('left_mm', 'zone_width_left_mm'),
+                             ('middle_mm', 'zone_width_middle_mm'),
+                             ('right_mm', 'zone_width_right_mm'),
+                             ('top_mm', 'zone_height_top_mm'),
+                             ('middle2_mm', 'zone_height_middle_mm'),
+                             ('bottom_mm', 'zone_height_bottom_mm')]:
+                if entry[dst] is None:
+                    val = _safe_float(row.get(src))
+                    if val is not None:
+                        entry[dst] = val
         if node_id:
             wall_entries[key]['nodes'].append(node_id)
 
@@ -124,10 +140,10 @@ def convert_basement_walls(
                 'zone_height_top_mm': entry['zone_height_top_mm'],
                 'zone_height_middle_mm': entry['zone_height_middle_mm'],
                 'zone_height_bottom_mm': entry['zone_height_bottom_mm'],
-                'node_i': panel_nodes[0] if len(panel_nodes) > 0 else None,
-                'node_j': panel_nodes[1] if len(panel_nodes) > 1 else None,
-                'node_k': panel_nodes[2] if len(panel_nodes) > 2 else None,
-                'node_l': panel_nodes[3] if len(panel_nodes) > 3 else None,
+                'node_i': raw_to_converted.get(panel_nodes[0], panel_nodes[0]) if len(panel_nodes) > 0 else None,
+                'node_j': raw_to_converted.get(panel_nodes[1], panel_nodes[1]) if len(panel_nodes) > 1 else None,
+                'node_k': raw_to_converted.get(panel_nodes[2], panel_nodes[2]) if len(panel_nodes) > 2 else None,
+                'node_l': raw_to_converted.get(panel_nodes[3], panel_nodes[3]) if len(panel_nodes) > 3 else None,
                 'centroid_x_mm': centroid_x,
                 'centroid_y_mm': centroid_y,
                 'z_mm': z_mm,
