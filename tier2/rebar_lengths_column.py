@@ -60,6 +60,35 @@ def _is_basement(lv):
     return str(lv).upper().startswith('B') if lv else False
 
 
+def _split_continuous_groups(story_info):
+    """Split story_info into continuous groups based on Z continuity.
+
+    Two segments are continuous if the previous segment's top Z matches
+    the current segment's bottom Z (within tolerance).
+    """
+    if len(story_info) <= 1:
+        return [story_info]
+
+    Z_TOLERANCE = 200  # mm — allow small gap for slab thickness
+
+    groups = [[story_info[0]]]
+    for i in range(1, len(story_info)):
+        prev = story_info[i - 1]
+        curr = story_info[i]
+
+        # Check Z continuity: prev top ≈ curr bottom
+        prev_top = prev['z_start'] + prev['height_mm']
+        curr_bottom = curr['z_start']
+        z_gap = abs(curr_bottom - prev_top)
+
+        if z_gap <= Z_TOLERANCE:
+            groups[-1].append(curr)
+        else:
+            groups.append([curr])
+
+    return groups
+
+
 # ── Lookup tables ────────────────────────────────────────────────────────────
 
 class ColDevLapLookup:
@@ -157,14 +186,23 @@ class ColumnDataAdapter:
             else:
                 self.section_generic[mid] = (b, h, shape)
 
-        # Node coordinates
+        # Node coordinates — index by node_id for lookup
+        # Build from ALL available node_ids (handles both raw and grid-reassigned)
         self.node_coords = {}
         for _, row in self.nodes_df.iterrows():
-            self.node_coords[str(row['node_id'])] = {
+            coords = {
                 'x_mm': float(row['x_mm']),
                 'y_mm': float(row['y_mm']),
                 'z_mm': float(row['z_mm']),
             }
+            self.node_coords[str(row['node_id'])] = coords
+
+        # Also build level → Z lookup from nodes (for fallback)
+        self.level_z = {}
+        for level in self.nodes_df['level'].unique():
+            z_vals = self.nodes_df[self.nodes_df['level'] == level]['z_mm']
+            if not z_vals.empty:
+                self.level_z[str(level)] = float(z_vals.mean())
 
         # Parse reinforcement — strip level prefix from member_id
         self.main_cfg = {}    # base_member_id → {dia, n_bars}
@@ -257,8 +295,9 @@ def calculate_column_rebar_lengths(
     # Get fc from material (default C35)
     fc = 35
 
-    # Process each column stack (grouped by grid + member_id)
-    for (grid, member_id), grp in col_df.groupby(['grid', 'member_id']):
+    # Process each column stack (grouped by member_id only — grid varies for slanted columns)
+    for member_id, grp in col_df.groupby('member_id'):
+        grid = grp['grid'].iloc[0]  # use first segment's grid for reference
         # Sort bottom to top
         grp = grp.copy()
         grp['_lv_idx'] = grp['level_from'].apply(_level_sort_key)
@@ -290,11 +329,17 @@ def calculate_column_rebar_lengths(
             col_x_top = seg.get('x_top_mm', col_x) or col_x
             col_y_top = seg.get('y_top_mm', col_y) or col_y
 
-            # Z from nodes
+            # Z from nodes (try node lookup, fallback to level_z)
             nd_from = adapter.node_coords.get(str(seg.get('node_from', '')), {})
             nd_to = adapter.node_coords.get(str(seg.get('node_to', '')), {})
-            z_start = nd_from.get('z_mm', 0) or 0
-            z_end = nd_to.get('z_mm', z_start + h) or (z_start + h)
+            z_start = nd_from.get('z_mm')
+            z_end = nd_to.get('z_mm')
+
+            # Fallback: use level→Z lookup from StoryDefinition
+            if z_start is None:
+                z_start = adapter.level_z.get(lv_from, 0)
+            if z_end is None:
+                z_end = adapter.level_z.get(lv_to, z_start + h)
 
             # Section dimensions
             b_mm, h_mm, shape = adapter.get_section_dims(member_id, lv_from, lv_to)
@@ -326,141 +371,145 @@ def calculate_column_rebar_lengths(
         if not story_info:
             continue
 
-        # ── DOWEL BAR ──
-        first = story_info[0]
-        if _is_basement(first['level_from']):
-            dowel_len = Lpc + Ldh
-            col_z_bottom = first['z_start']
-            footing_z = col_z_bottom - FOOTING_DEPTH_MM
-            rebar_z_start = footing_z + COVER_MM
-            rebar_z_end = rebar_z_start + dowel_len
+        # ── Split into continuous groups (detect level gaps) ──
+        groups = _split_continuous_groups(story_info)
 
-            results.append({
-                'member_id': member_id, 'start_grid': grid,
-                'level_from': 'FOOTING', 'level_to': first['level_from'],
-                'bar_position': 'MAIN', 'bar_role': 'DOWEL', 'bar_type': 'MAIN',
-                'dia_mm': dia_main, 'n_bars': n_bars,
-                'length_mm': int(round(dowel_len)),
-                'splice_start_mm': None, 'splice_start_end_mm': None,
-                'splice_end_mm': round(col_z_bottom, 1),
-                'splice_end_end_mm': round(col_z_bottom + Lpc, 1),
-                'x_start_mm': first['col_x'], 'y_start_mm': first['col_y'],
-                'z_start_mm': round(rebar_z_start, 1),
-                'x_end_mm': first['col_x'], 'y_end_mm': first['col_y'],
-                'z_end_mm': round(rebar_z_end, 1),
-                'segment_id': first['segment_id'],
-                'b_mm': first['b_mm'], 'h_mm': first['h_mm'],
-                'shape': first['shape'],
-            })
+        for group in groups:
+            # ── DOWEL BAR ──
+            first = group[0]
+            if _is_basement(first['level_from']):
+                dowel_len = Lpc + Ldh
+                col_z_bottom = first['z_start']
+                footing_z = col_z_bottom - FOOTING_DEPTH_MM
+                rebar_z_start = footing_z + COVER_MM
+                rebar_z_end = rebar_z_start + dowel_len
 
-        # ── MAIN BARS (story by story) ──
-        for j, s in enumerate(story_info):
-            is_first = (j == 0)
-            is_top = (j == len(story_info) - 1)
-            h = s['height_mm']
-            L = s['length_mm']  # 3D length (= height for vertical, > height for slanted)
-            z_start = s['z_start']
+                results.append({
+                    'member_id': member_id, 'start_grid': grid,
+                    'level_from': 'FOOTING', 'level_to': first['level_from'],
+                    'bar_position': 'MAIN', 'bar_role': 'DOWEL', 'bar_type': 'MAIN',
+                    'dia_mm': dia_main, 'n_bars': n_bars,
+                    'length_mm': int(round(dowel_len)),
+                    'splice_start_mm': None, 'splice_start_end_mm': None,
+                    'splice_end_mm': round(col_z_bottom, 1),
+                    'splice_end_end_mm': round(col_z_bottom + Lpc, 1),
+                    'x_start_mm': first['col_x'], 'y_start_mm': first['col_y'],
+                    'z_start_mm': round(rebar_z_start, 1),
+                    'x_end_mm': first['col_x'], 'y_end_mm': first['col_y'],
+                    'z_end_mm': round(rebar_z_end, 1),
+                    'segment_id': first['segment_id'],
+                    'b_mm': first['b_mm'], 'h_mm': first['h_mm'],
+                    'shape': first['shape'],
+                })
 
-            if is_top:
-                L_bar = L + Ldh
-                role = 'MAIN_TOP'
-                sp_start = round(z_start, 1)
-                sp_start_end = round(z_start + Lpc, 1)
-                sp_end = None
-                sp_end_end = None
-            elif is_first:
-                L_bar = L + Lpc
-                role = 'MAIN_BOTTOM'
-                sp_start = round(z_start, 1)
-                sp_start_end = round(z_start + Lpc, 1)
-                sp_end = round(z_start + h, 1)
-                sp_end_end = round(z_start + h + Lpc, 1)
-            else:
-                L_bar = L + Lpc
-                role = 'MAIN_INTERMEDIATE'
-                sp_start = round(z_start, 1)
-                sp_start_end = round(z_start + Lpc, 1)
-                sp_end = round(z_start + h, 1)
-                sp_end_end = round(z_start + h + Lpc, 1)
+            # ── MAIN BARS (story by story within group) ──
+            for j, s in enumerate(group):
+                is_first = (j == 0)
+                is_top = (j == len(group) - 1)
+                h = s['height_mm']
+                L = s['length_mm']
+                z_start = s['z_start']
 
-            rebar_z_start = z_start
-            rebar_z_end = z_start + L_bar
+                if is_top:
+                    L_bar = L + Ldh
+                    role = 'MAIN_TOP'
+                    sp_start = round(z_start, 1)
+                    sp_start_end = round(z_start + Lpc, 1)
+                    sp_end = None
+                    sp_end_end = None
+                elif is_first:
+                    L_bar = L + Lpc
+                    role = 'MAIN_BOTTOM'
+                    sp_start = round(z_start, 1)
+                    sp_start_end = round(z_start + Lpc, 1)
+                    sp_end = round(z_start + h, 1)
+                    sp_end_end = round(z_start + h + Lpc, 1)
+                else:
+                    L_bar = L + Lpc
+                    role = 'MAIN_INTERMEDIATE'
+                    sp_start = round(z_start, 1)
+                    sp_start_end = round(z_start + Lpc, 1)
+                    sp_end = round(z_start + h, 1)
+                    sp_end_end = round(z_start + h + Lpc, 1)
 
-            results.append({
-                'member_id': member_id, 'start_grid': grid,
-                'level_from': s['level_from'], 'level_to': s['level_to'],
-                'bar_position': 'MAIN', 'bar_role': role, 'bar_type': 'MAIN',
-                'dia_mm': dia_main, 'n_bars': n_bars,
-                'length_mm': int(round(L_bar)),
-                'splice_start_mm': sp_start, 'splice_start_end_mm': sp_start_end,
-                'splice_end_mm': sp_end, 'splice_end_end_mm': sp_end_end,
-                'x_start_mm': s['col_x'], 'y_start_mm': s['col_y'],
-                'z_start_mm': round(rebar_z_start, 1),
-                'x_end_mm': s['col_x_top'], 'y_end_mm': s['col_y_top'],
-                'z_end_mm': round(rebar_z_end, 1),
-                'segment_id': s['segment_id'],
-                'b_mm': s['b_mm'], 'h_mm': s['h_mm'],
-                'shape': s['shape'],
-            })
+                rebar_z_start = z_start
+                rebar_z_end = z_start + L_bar
 
-        # ── HOOPS (3 zones per story) ──
-        hoop = adapter.hoop_cfg.get(member_id)
-        if hoop:
-            end_cfg = hoop.get('end')
-            mid_cfg = hoop.get('mid')
-            if not end_cfg:
-                end_cfg = mid_cfg
-            if not mid_cfg:
-                mid_cfg = end_cfg
+                results.append({
+                    'member_id': member_id, 'start_grid': grid,
+                    'level_from': s['level_from'], 'level_to': s['level_to'],
+                    'bar_position': 'MAIN', 'bar_role': role, 'bar_type': 'MAIN',
+                    'dia_mm': dia_main, 'n_bars': n_bars,
+                    'length_mm': int(round(L_bar)),
+                    'splice_start_mm': sp_start, 'splice_start_end_mm': sp_start_end,
+                    'splice_end_mm': sp_end, 'splice_end_end_mm': sp_end_end,
+                    'x_start_mm': s['col_x'], 'y_start_mm': s['col_y'],
+                    'z_start_mm': round(rebar_z_start, 1),
+                    'x_end_mm': s['col_x_top'], 'y_end_mm': s['col_y_top'],
+                    'z_end_mm': round(rebar_z_end, 1),
+                    'segment_id': s['segment_id'],
+                    'b_mm': s['b_mm'], 'h_mm': s['h_mm'],
+                    'shape': s['shape'],
+                })
 
-            if end_cfg and mid_cfg:
-                for s in story_info:
-                    H_clear = s['length_mm']  # Use 3D length for hoop distribution
-                    b_mm = s['b_mm']
-                    h_mm = s['h_mm']
-                    b_clear = b_mm - 2 * COVER_MM
-                    h_clear = h_mm - 2 * COVER_MM
+            # ── HOOPS (3 zones per story within group) ──
+            hoop = adapter.hoop_cfg.get(member_id)
+            if hoop:
+                end_cfg = hoop.get('end')
+                mid_cfg = hoop.get('mid')
+                if not end_cfg:
+                    end_cfg = mid_cfg
+                if not mid_cfg:
+                    mid_cfg = end_cfg
 
-                    zones = [
-                        ('HOOP_END_BOTTOM', 0.25 * H_clear, end_cfg),
-                        ('HOOP_MID', 0.50 * H_clear, mid_cfg),
-                        ('HOOP_END_TOP', 0.25 * H_clear, end_cfg),
-                    ]
+                if end_cfg and mid_cfg:
+                    for s in group:
+                        H_clear = s['length_mm']  # Use 3D length for hoop distribution
+                        b_mm = s['b_mm']
+                        h_mm = s['h_mm']
+                        b_clear = b_mm - 2 * COVER_MM
+                        h_clear = h_mm - 2 * COVER_MM
 
-                    z_cursor = s['z_start']
+                        zones = [
+                            ('HOOP_END_BOTTOM', 0.25 * H_clear, end_cfg),
+                            ('HOOP_MID', 0.50 * H_clear, mid_cfg),
+                            ('HOOP_END_TOP', 0.25 * H_clear, end_cfg),
+                        ]
 
-                    for zone_role, zone_length, cfg in zones:
-                        dia = cfg['dia_mm']
-                        spacing = cfg['spacing_mm']
+                        z_cursor = s['z_start']
 
-                        # Hoop perimeter length
-                        L_hoop = 2 * (b_clear + h_clear) + 2 * HOOK_EXTENSION_FACTOR * dia
-                        n_hoops = int(zone_length / spacing) + 1
-                        total_len = L_hoop * n_hoops
+                        for zone_role, zone_length, cfg in zones:
+                            dia = cfg['dia_mm']
+                            spacing = cfg['spacing_mm']
 
-                        results.append({
-                            'member_id': member_id, 'start_grid': grid,
-                            'level_from': s['level_from'], 'level_to': s['level_to'],
-                            'bar_position': 'HOOP', 'bar_role': zone_role,
-                            'bar_type': 'HOOP',
-                            'dia_mm': int(dia), 'n_bars': 0,
-                            'length_mm': int(round(L_hoop)),
-                            'spacing_mm': int(spacing),
-                            'zone_length_mm': int(round(zone_length)),
-                            'quantity_pieces': n_hoops,
-                            'total_length_mm': int(round(total_len)),
-                            'splice_start_mm': None, 'splice_start_end_mm': None,
-                            'splice_end_mm': None, 'splice_end_end_mm': None,
-                            'x_start_mm': s['col_x'], 'y_start_mm': s['col_y'],
-                            'z_start_mm': round(z_cursor, 1),
-                            'x_end_mm': s['col_x'], 'y_end_mm': s['col_y'],
-                            'z_end_mm': round(z_cursor + zone_length, 1),
-                            'segment_id': s['segment_id'],
-                            'b_mm': int(b_mm), 'h_mm': int(h_mm),
-                            'shape': s['shape'],
-                        })
+                            # Hoop perimeter length
+                            L_hoop = 2 * (b_clear + h_clear) + 2 * HOOK_EXTENSION_FACTOR * dia
+                            n_hoops = int(zone_length / spacing) + 1
+                            total_len = L_hoop * n_hoops
 
-                        z_cursor += zone_length
+                            results.append({
+                                'member_id': member_id, 'start_grid': grid,
+                                'level_from': s['level_from'], 'level_to': s['level_to'],
+                                'bar_position': 'HOOP', 'bar_role': zone_role,
+                                'bar_type': 'HOOP',
+                                'dia_mm': int(dia), 'n_bars': 0,
+                                'length_mm': int(round(L_hoop)),
+                                'spacing_mm': int(spacing),
+                                'zone_length_mm': int(round(zone_length)),
+                                'quantity_pieces': n_hoops,
+                                'total_length_mm': int(round(total_len)),
+                                'splice_start_mm': None, 'splice_start_end_mm': None,
+                                'splice_end_mm': None, 'splice_end_end_mm': None,
+                                'x_start_mm': s['col_x'], 'y_start_mm': s['col_y'],
+                                'z_start_mm': round(z_cursor, 1),
+                                'x_end_mm': s['col_x'], 'y_end_mm': s['col_y'],
+                                'z_end_mm': round(z_cursor + zone_length, 1),
+                                'segment_id': s['segment_id'],
+                                'b_mm': int(b_mm), 'h_mm': int(h_mm),
+                                'shape': s['shape'],
+                            })
+
+                            z_cursor += zone_length
 
     # Build output
     df = pd.DataFrame(results)
