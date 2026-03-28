@@ -8,7 +8,6 @@
   h1 { color: #1a1a2e; border-bottom: 3px solid #e94560; padding-bottom: 10px; }
   h2 { color: #16213e; margin-top: 35px; border-bottom: 2px solid #ddd; padding-bottom: 5px; }
   h3 { color: #0f3460; }
-  h4 { color: #533483; }
   table { border-collapse: collapse; width: 100%%; margin: 15px 0; font-size: 13px; }
   th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
   th { background-color: #16213e; color: white; }
@@ -78,6 +77,7 @@ All CSVs use UTF-8 encoding with header row. Units are in mm and N.</p>
 <table>
 <thead>
 <tr>
+<th>#</th>
 <th>Column</th>
 <th>Type</th>
 <th>Unit</th>
@@ -86,71 +86,190 @@ All CSVs use UTF-8 encoding with header row. Units are in mm and N.</p>
 </thead>
 <tbody>
 <tr>
+<td>1</td>
 <td>ID</td>
 <td>int</td>
 <td>—</td>
 <td>Material ID</td>
 </tr>
 <tr>
+<td>2</td>
 <td>Name</td>
 <td>string</td>
 <td>—</td>
 <td>Material name (e.g., "C35(Beam,Column)")</td>
 </tr>
 <tr>
+<td>3</td>
 <td>Type</td>
 <td>string</td>
 <td>—</td>
 <td>Concrete, Steel, etc.</td>
 </tr>
 <tr>
+<td>4</td>
 <td>Standard</td>
 <td>string</td>
 <td>—</td>
 <td>Design code (KS19(RC))</td>
 </tr>
 <tr>
+<td>5</td>
+<td>Code</td>
+<td>—</td>
+<td>—</td>
+<td>(empty)</td>
+</tr>
+<tr>
+<td>6</td>
 <td>DB</td>
 <td>string</td>
 <td>—</td>
 <td>Database grade (C35)</td>
 </tr>
 <tr>
-<td>fck_N/mm²</td>
+<td>7</td>
+<td>Product</td>
+<td>—</td>
+<td>—</td>
+<td>(empty)</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Use Mass Density</td>
+<td>int</td>
+<td>—</td>
+<td>Flag (0/1)</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Elasticity(N/mm²)</td>
 <td>float</td>
+<td>MPa</td>
+<td>Elastic modulus</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Poisson</td>
+<td>float</td>
+<td>—</td>
+<td>Poisson's ratio</td>
+</tr>
+<tr>
+<td>11</td>
+<td>Thermal(1/[C])</td>
+<td>float</td>
+<td>1/°C</td>
+<td>Thermal expansion coefficient</td>
+</tr>
+<tr>
+<td>12</td>
+<td>Density(N/mm³)</td>
+<td>float</td>
+<td>N/mm³</td>
+<td>Weight density</td>
+</tr>
+<tr>
+<td>13</td>
+<td>Mass Density(N/mm³/g)</td>
+<td>float</td>
+<td>—</td>
+<td>Mass density</td>
+</tr>
+<tr>
+<td>14-21</td>
+<td>Standard2 ~ Mass Density2</td>
+<td>—</td>
+<td>—</td>
+<td>Secondary properties (typically empty)</td>
+</tr>
+<tr>
+<td>22</td>
+<td>Plastic Matl.</td>
+<td>—</td>
+<td>—</td>
+<td>(empty)</td>
+</tr>
+<tr>
+<td>23</td>
+<td>Sp. Heat</td>
+<td>float</td>
+<td>—</td>
+<td>Specific heat</td>
+</tr>
+<tr>
+<td>24</td>
+<td>Heat Co.</td>
+<td>float</td>
+<td>—</td>
+<td>Heat conductivity</td>
+</tr>
+<tr>
+<td>25</td>
+<td>Material Type</td>
+<td>string</td>
+<td>—</td>
+<td>Isotropic / Orthotropic</td>
+</tr>
+<tr>
+<td>26-34</td>
+<td>Shear Mod._xy ~ Poisson_yz</td>
+<td>float</td>
+<td>—</td>
+<td>Anisotropic properties (0 for isotropic)</td>
+</tr>
+<tr>
+<td>35</td>
+<td>fck_N/mm²</td>
+<td>int</td>
 <td>MPa</td>
 <td>Concrete compressive strength</td>
 </tr>
 <tr>
+<td>36</td>
+<td>Standard.1</td>
+<td>string</td>
+<td>—</td>
+<td>Rebar design code</td>
+</tr>
+<tr>
+<td>37</td>
+<td>Grade(Main Rebar)</td>
+<td>string</td>
+<td>—</td>
+<td>Main rebar grade (SD600)</td>
+</tr>
+<tr>
+<td>38</td>
+<td>Grade(Sub Rebar)</td>
+<td>string</td>
+<td>—</td>
+<td>Sub rebar grade (SD500)</td>
+</tr>
+<tr>
+<td>39</td>
 <td>fy_N/mm²</td>
-<td>float</td>
+<td>int</td>
 <td>MPa</td>
 <td>Main rebar yield strength</td>
 </tr>
 <tr>
+<td>40</td>
 <td>fys_N/mm²</td>
-<td>float</td>
+<td>int</td>
 <td>MPa</td>
 <td>Shear rebar yield strength</td>
 </tr>
-<tr>
-<td>...</td>
-<td></td>
-<td></td>
-<td>(40 columns total, most are optional properties)</td>
-</tr>
 </tbody>
 </table>
-<pre><code>ID, Name, Type, ..., fck_N/mm², fy_N/mm², fys_N/mm²
-1, C35(Beam,Column), Concrete, ..., 35, 400, 400
-</code></pre>
-<p><strong>Note:</strong> Multiple materials may share the same grade (e.g., 3 entries all C35). Converter deduplicates by grade.</p>
+<p><strong>Note:</strong> Multiple materials may share the same grade (e.g., 3 entries all C35). Converter deduplicates by grade. Columns 35-40 are the most important for the converter.</p>
 <h3>A3. Sections.csv (Required)</h3>
 <p><strong>Source:</strong> MIDAS Gen → Properties → Section Properties
 <strong>Rows:</strong> 197 (P1)</p>
 <table>
 <thead>
 <tr>
+<th>#</th>
 <th>Column</th>
 <th>Type</th>
 <th>Unit</th>
@@ -159,58 +278,179 @@ All CSVs use UTF-8 encoding with header row. Units are in mm and N.</p>
 </thead>
 <tbody>
 <tr>
+<td>1</td>
 <td>ID</td>
 <td>int</td>
 <td>—</td>
 <td>Section ID</td>
 </tr>
 <tr>
+<td>2</td>
 <td>Name</td>
 <td>string</td>
 <td>—</td>
 <td>Section name with level+type encoding</td>
 </tr>
 <tr>
+<td>3</td>
 <td>Shape</td>
 <td>string</td>
 <td>—</td>
 <td>Shape definition (e.g., "SB|Solid Rectangle")</td>
 </tr>
 <tr>
+<td>4</td>
+<td>DB</td>
+<td>—</td>
+<td>—</td>
+<td>Database reference (typically empty)</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Section</td>
+<td>—</td>
+<td>—</td>
+<td>(empty)</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Offset</td>
+<td>string</td>
+<td>—</td>
+<td>Section offset (Center-Center)</td>
+</tr>
+<tr>
+<td>7</td>
+<td>CC type</td>
+<td>—</td>
+<td>—</td>
+<td>(empty)</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Built-Up</td>
+<td>string</td>
+<td>—</td>
+<td>Built-up flag</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Shear Deform</td>
+<td>int</td>
+<td>—</td>
+<td>Shear deformation flag (0/1)</td>
+</tr>
+<tr>
+<td>10</td>
 <td>Size (H)_mm</td>
-<td>float</td>
+<td>int</td>
 <td>mm</td>
 <td>Section height</td>
 </tr>
 <tr>
+<td>11</td>
 <td>Size (B)_mm</td>
-<td>float</td>
+<td>int</td>
 <td>mm</td>
 <td>Section width</td>
 </tr>
 <tr>
+<td>12</td>
 <td>Area_mm²</td>
-<td>float</td>
+<td>int</td>
 <td>mm²</td>
 <td>Cross-sectional area</td>
 </tr>
 <tr>
-<td>Iyy_mm⁴</td>
+<td>13</td>
+<td>Asy_mm²</td>
 <td>float</td>
+<td>mm²</td>
+<td>Shear area Y</td>
+</tr>
+<tr>
+<td>14</td>
+<td>Asz_mm²</td>
+<td>float</td>
+<td>mm²</td>
+<td>Shear area Z</td>
+</tr>
+<tr>
+<td>15</td>
+<td>Ixx_mm⁴</td>
+<td>float</td>
+<td>mm⁴</td>
+<td>Torsional moment of inertia</td>
+</tr>
+<tr>
+<td>16</td>
+<td>Iyy_mm⁴</td>
+<td>int</td>
 <td>mm⁴</td>
 <td>Moment of inertia Y</td>
 </tr>
 <tr>
+<td>17</td>
 <td>Izz_mm⁴</td>
 <td>float</td>
 <td>mm⁴</td>
 <td>Moment of inertia Z</td>
 </tr>
 <tr>
-<td>...</td>
-<td></td>
-<td></td>
-<td>(25 columns total)</td>
+<td>18</td>
+<td>Cyp_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Centroid Y+</td>
+</tr>
+<tr>
+<td>19</td>
+<td>Cym_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Centroid Y-</td>
+</tr>
+<tr>
+<td>20</td>
+<td>Czp_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Centroid Z+</td>
+</tr>
+<tr>
+<td>21</td>
+<td>Czm_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Centroid Z-</td>
+</tr>
+<tr>
+<td>22</td>
+<td>Qyb_mm³</td>
+<td>int</td>
+<td>mm³</td>
+<td>First moment of area Y</td>
+</tr>
+<tr>
+<td>23</td>
+<td>Qzb_mm³</td>
+<td>float</td>
+<td>mm³</td>
+<td>First moment of area Z</td>
+</tr>
+<tr>
+<td>24</td>
+<td>Peri.(Out)_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Outer perimeter</td>
+</tr>
+<tr>
+<td>25</td>
+<td>Peri.(In)_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Inner perimeter (0 for solid)</td>
 </tr>
 </tbody>
 </table>
@@ -277,6 +517,7 @@ All CSVs use UTF-8 encoding with header row. Units are in mm and N.</p>
 <table>
 <thead>
 <tr>
+<th>#</th>
 <th>Column</th>
 <th>Type</th>
 <th>Unit</th>
@@ -285,70 +526,116 @@ All CSVs use UTF-8 encoding with header row. Units are in mm and N.</p>
 </thead>
 <tbody>
 <tr>
+<td>1</td>
 <td>Element</td>
 <td>int</td>
 <td>—</td>
 <td>Element ID</td>
 </tr>
 <tr>
+<td>2</td>
 <td>Type</td>
 <td>string</td>
 <td>—</td>
 <td>BEAM (covers beams, columns, walls)</td>
 </tr>
 <tr>
+<td>3</td>
 <td>Wall Type</td>
 <td>string</td>
 <td>—</td>
-<td>Wall sub-type (if applicable)</td>
+<td>Wall sub-type (typically empty)</td>
 </tr>
 <tr>
+<td>4</td>
 <td>Sub Type</td>
 <td>string</td>
 <td>—</td>
-<td>Sub-type code</td>
+<td>Sub-type code (typically empty)</td>
 </tr>
 <tr>
+<td>5</td>
 <td>Wall ID</td>
 <td>int</td>
 <td>—</td>
 <td>Wall identifier (0 if not a wall)</td>
 </tr>
 <tr>
+<td>6</td>
 <td>Material</td>
 <td>int</td>
 <td>—</td>
 <td>Material ID (FK to Materials)</td>
 </tr>
 <tr>
+<td>7</td>
 <td>Property</td>
 <td>int</td>
 <td>—</td>
-<td>Section or Thickness ID (FK)</td>
+<td>Section or Thickness ID (polymorphic FK)</td>
 </tr>
 <tr>
-<td>B-Angle</td>
-<td>float</td>
+<td>8</td>
+<td>B-Angle([deg])</td>
+<td>int</td>
 <td>deg</td>
 <td>Beta angle</td>
 </tr>
 <tr>
+<td>9</td>
 <td>Node1</td>
 <td>int</td>
 <td>—</td>
 <td>Start node (FK to Nodes)</td>
 </tr>
 <tr>
+<td>10</td>
 <td>Node2</td>
 <td>int</td>
 <td>—</td>
 <td>End node (FK to Nodes)</td>
 </tr>
 <tr>
-<td>Node3-8</td>
+<td>11</td>
+<td>Node3</td>
 <td>int</td>
 <td>—</td>
-<td>Additional nodes (typically empty for line elements)</td>
+<td>Additional node (0 for line elements)</td>
+</tr>
+<tr>
+<td>12</td>
+<td>Node4</td>
+<td>int</td>
+<td>—</td>
+<td>Additional node (0 for line elements)</td>
+</tr>
+<tr>
+<td>13</td>
+<td>Node5</td>
+<td>int</td>
+<td>—</td>
+<td>Additional node (0 for line elements)</td>
+</tr>
+<tr>
+<td>14</td>
+<td>Node6</td>
+<td>int</td>
+<td>—</td>
+<td>Additional node (0 for line elements)</td>
+</tr>
+<tr>
+<td>15</td>
+<td>Node7</td>
+<td>int</td>
+<td>—</td>
+<td>Additional node (0 for line elements)</td>
+</tr>
+<tr>
+<td>16</td>
+<td>Node8</td>
+<td>int</td>
+<td>—</td>
+<td>Additional node (0 for line elements)</td>
 </tr>
 </tbody>
 </table>
@@ -359,6 +646,7 @@ All CSVs use UTF-8 encoding with header row. Units are in mm and N.</p>
 <table>
 <thead>
 <tr>
+<th>#</th>
 <th>Column</th>
 <th>Type</th>
 <th>Unit</th>
@@ -367,34 +655,74 @@ All CSVs use UTF-8 encoding with header row. Units are in mm and N.</p>
 </thead>
 <tbody>
 <tr>
+<td>1</td>
 <td>ID</td>
 <td>int</td>
 <td>—</td>
 <td>Thickness ID</td>
 </tr>
 <tr>
+<td>2</td>
 <td>NAME</td>
 <td>string</td>
 <td>—</td>
 <td>Thickness name (e.g., "Core", "W200")</td>
 </tr>
 <tr>
+<td>3</td>
 <td>Type</td>
 <td>string</td>
 <td>—</td>
 <td>Definition type (Value)</td>
 </tr>
 <tr>
+<td>4</td>
 <td>In,Out</td>
 <td>string</td>
 <td>—</td>
-<td>In-plane/out-of-plane flag</td>
+<td>In-plane/out-of-plane flag (Yes/No)</td>
 </tr>
 <tr>
+<td>5</td>
 <td>Thick-In_mm</td>
-<td>float</td>
+<td>int</td>
 <td>mm</td>
-<td>Thickness value</td>
+<td>Thickness value (in-plane)</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Thick-In_mm.1</td>
+<td>int</td>
+<td>mm</td>
+<td>Thickness value (out-of-plane, typically 0)</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Offset</td>
+<td>string</td>
+<td>—</td>
+<td>Offset flag (No)</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Offset Type</td>
+<td>string</td>
+<td>—</td>
+<td>Offset type (Ratio)</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Offset Ratio</td>
+<td>int</td>
+<td>—</td>
+<td>Offset ratio value</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Offset Value_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Offset distance</td>
 </tr>
 </tbody>
 </table>
@@ -452,64 +780,186 @@ Base, B4, -13700, 4400, Consider
 </code></pre>
 <h3>A7. DesignBeam.csv (Required)</h3>
 <p><strong>Source:</strong> MIDAS Gen → Design → RC Design → Beam Design Results
-<strong>Rows:</strong> 536 (P1), <strong>No header row</strong> (row 1 is sub-header)
-<strong>Block structure:</strong> 3 rows per beam element</p>
+<strong>Rows:</strong> 536 (P1), 24 columns
+<strong>Block structure:</strong> 3 rows per beam element (sub-header + data + ratios)</p>
 <table>
 <thead>
 <tr>
-<th>Row</th>
-<th>Content</th>
+<th>#</th>
+<th>Header (row 1)</th>
+<th>Sub-header (row 2)</th>
+<th>Data row example</th>
+<th>Description</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Row 1</td>
-<td>Sub-header: SECT, Bc, Hc, fy, ..., Rebar, ...</td>
-</tr>
-<tr>
-<td>Row 2</td>
-<td>Section name, fck, position (I/M/J), rebar specs, stirrup specs</td>
-</tr>
-<tr>
-<td>Row 3</td>
-<td>Design ratios: Mu, Vu, rho, etc.</td>
-</tr>
-</tbody>
-</table>
-<p><strong>Key columns (row 2):</strong></p>
-<table>
-<thead>
-<tr>
-<th>Position</th>
-<th>Content</th>
-<th>Example</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Col A</td>
-<td>Section name</td>
+<td>1</td>
+<td>MEMB</td>
+<td>SECT</td>
 <td>6G1</td>
+<td>Section name (with level prefix)</td>
 </tr>
 <tr>
-<td>Col F</td>
-<td>Position</td>
-<td>I, M, or J</td>
+<td>2</td>
+<td>SEL</td>
+<td>—</td>
+<td>—</td>
+<td>Selection flag</td>
 </tr>
 <tr>
-<td>Col H</td>
-<td>Negative rebar spec</td>
+<td>3</td>
+<td>Section</td>
+<td>Bc</td>
+<td>500</td>
+<td>Section width (mm)</td>
+</tr>
+<tr>
+<td>4</td>
+<td>C</td>
+<td>Hc</td>
+<td>1200</td>
+<td>Section height (mm)</td>
+</tr>
+<tr>
+<td>5</td>
+<td>fck</td>
+<td>fy</td>
+<td>400</td>
+<td>Yield strength / fck (MPa)</td>
+</tr>
+<tr>
+<td>6</td>
+<td>POS</td>
+<td>—</td>
+<td>I / M / J</td>
+<td>Design position</td>
+</tr>
+<tr>
+<td>7</td>
+<td>CHK</td>
+<td>—</td>
+<td>OK</td>
+<td>Check result</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Negative Moment</td>
+<td>Rebar</td>
 <td>6-4-D22</td>
+<td>Negative moment main bar spec</td>
 </tr>
 <tr>
-<td>Col N</td>
-<td>Positive rebar spec</td>
+<td>9</td>
+<td>H</td>
+<td>As.use</td>
+<td>3041</td>
+<td>Steel area used (mm²)</td>
+</tr>
+<tr>
+<td>10</td>
+<td>I</td>
+<td>N(-) Mu</td>
+<td>1234</td>
+<td>Negative moment (kN·m)</td>
+</tr>
+<tr>
+<td>11</td>
+<td>J</td>
+<td>LCB</td>
+<td>5</td>
+<td>Load combination</td>
+</tr>
+<tr>
+<td>12</td>
+<td>L</td>
+<td>N(-) φMn</td>
+<td>1500</td>
+<td>Negative moment capacity</td>
+</tr>
+<tr>
+<td>13</td>
+<td>M</td>
+<td>Rat-N</td>
+<td>0.82</td>
+<td>Negative moment ratio</td>
+</tr>
+<tr>
+<td>14</td>
+<td>Positive Moment</td>
+<td>Rebar</td>
 <td>6-4-D22</td>
+<td>Positive moment main bar spec</td>
 </tr>
 <tr>
-<td>Col T</td>
-<td>Stirrup spec</td>
+<td>15</td>
+<td>O</td>
+<td>As.use</td>
+<td>3041</td>
+<td>Steel area used</td>
+</tr>
+<tr>
+<td>16</td>
+<td>P</td>
+<td>P(+) Mu</td>
+<td>800</td>
+<td>Positive moment</td>
+</tr>
+<tr>
+<td>17</td>
+<td>Q</td>
+<td>LCB</td>
+<td>3</td>
+<td>Load combination</td>
+</tr>
+<tr>
+<td>18</td>
+<td>S</td>
+<td>P(+) φMn</td>
+<td>1500</td>
+<td>Positive moment capacity</td>
+</tr>
+<tr>
+<td>19</td>
+<td>T</td>
+<td>Rat-P</td>
+<td>0.53</td>
+<td>Positive moment ratio</td>
+</tr>
+<tr>
+<td>20</td>
+<td>Shear Strength</td>
+<td>Stirrup</td>
 <td>3-D10 @150</td>
+<td>Stirrup spec</td>
+</tr>
+<tr>
+<td>21</td>
+<td>V</td>
+<td>Vu</td>
+<td>500</td>
+<td>Shear force (kN)</td>
+</tr>
+<tr>
+<td>22</td>
+<td>X</td>
+<td>LCB</td>
+<td>5</td>
+<td>Load combination</td>
+</tr>
+<tr>
+<td>23</td>
+<td>Y</td>
+<td>φVc</td>
+<td>300</td>
+<td>Shear capacity</td>
+</tr>
+<tr>
+<td>24</td>
+<td>AC</td>
+<td>Rat-V</td>
+<td>0.65</td>
+<td>Shear ratio</td>
 </tr>
 </tbody>
 </table>
@@ -519,109 +969,343 @@ Base, B4, -13700, 4400, Consider
 - Pipe format: <code>4|5-D13@150</code> → max(4,5) = 5 legs</p>
 <h3>A8. DesignColumn.csv (Required)</h3>
 <p><strong>Source:</strong> MIDAS Gen → Design → RC Design → Column Design Results
-<strong>Rows:</strong> 33 (P1), <strong>No header row</strong>
-<strong>Block structure:</strong> 2 rows per column element</p>
+<strong>Rows:</strong> 33 (P1), 18 columns
+<strong>Block structure:</strong> 2 rows per column element (sub-header + data)</p>
 <table>
 <thead>
 <tr>
-<th>Row</th>
-<th>Content</th>
+<th>#</th>
+<th>Header (row 1)</th>
+<th>Sub-header (row 2)</th>
+<th>Data row example</th>
+<th>Description</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Row 1</td>
-<td>Sub-header: SECT, Bc, Hc, Height, fys, ...</td>
-</tr>
-<tr>
-<td>Row 2</td>
-<td>Section name, fck, fy, main bar spec, tie specs, design ratios</td>
-</tr>
-</tbody>
-</table>
-<p><strong>Key columns (row 2):</strong></p>
-<table>
-<thead>
-<tr>
-<th>Position</th>
-<th>Content</th>
-<th>Example</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Col A</td>
-<td>Section name</td>
+<td>1</td>
+<td>MEMB</td>
+<td>SECT</td>
 <td>6C1</td>
+<td>Section name</td>
 </tr>
 <tr>
-<td>Col I</td>
-<td>Main bar spec</td>
+<td>2</td>
+<td>SEL</td>
+<td>—</td>
+<td>—</td>
+<td>Selection flag</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Section</td>
+<td>Bc</td>
+<td>600</td>
+<td>Section width (mm)</td>
+</tr>
+<tr>
+<td>4</td>
+<td>C</td>
+<td>Hc</td>
+<td>600</td>
+<td>Section height (mm)</td>
+</tr>
+<tr>
+<td>5</td>
+<td>fck</td>
+<td>Height</td>
+<td>3400</td>
+<td>Story height (mm)</td>
+</tr>
+<tr>
+<td>6</td>
+<td>fy</td>
+<td>fys</td>
+<td>400</td>
+<td>Shear rebar yield strength</td>
+</tr>
+<tr>
+<td>7</td>
+<td>CHK</td>
+<td>—</td>
+<td>OK</td>
+<td>Check result</td>
+</tr>
+<tr>
+<td>8</td>
+<td>LCB</td>
+<td>—</td>
+<td>5</td>
+<td>Load combination</td>
+</tr>
+<tr>
+<td>9</td>
+<td>V-Rebar</td>
+<td>—</td>
 <td>12-4-D22</td>
+<td>Main bar spec</td>
 </tr>
 <tr>
-<td>Col P</td>
-<td>Tie end spec</td>
-<td>3-D10 @150</td>
+<td>10</td>
+<td>φPn-max</td>
+<td>—</td>
+<td>15000</td>
+<td>Max axial capacity</td>
 </tr>
 <tr>
-<td>Col S</td>
-<td>Tie mid spec</td>
-<td>3-D10 @200</td>
+<td>11</td>
+<td>Pu</td>
+<td>Rat-P</td>
+<td>0.35</td>
+<td>Axial force / ratio</td>
+</tr>
+<tr>
+<td>12</td>
+<td>MF.y</td>
+<td>MF.z</td>
+<td>1.2</td>
+<td>Moment magnification factor</td>
+</tr>
+<tr>
+<td>13</td>
+<td>Mcy</td>
+<td>Rat-My</td>
+<td>0.45</td>
+<td>Moment Y / ratio</td>
+</tr>
+<tr>
+<td>14</td>
+<td>Mcz</td>
+<td>Rat-Mz</td>
+<td>0.38</td>
+<td>Moment Z / ratio</td>
+</tr>
+<tr>
+<td>15</td>
+<td>LCB.1</td>
+<td>—</td>
+<td>3</td>
+<td>Shear load combination</td>
+</tr>
+<tr>
+<td>16</td>
+<td>H-Rebar.end</td>
+<td>H-Rebar.mid</td>
+<td>3-D10 @150 / 3-D10 @200</td>
+<td>Tie spec end / mid</td>
+</tr>
+<tr>
+<td>17</td>
+<td>Vu.end</td>
+<td>Vu.mid</td>
+<td>250 / 180</td>
+<td>Shear force end / mid</td>
+</tr>
+<tr>
+<td>18</td>
+<td>Rat-V.end</td>
+<td>Rat-V.mid</td>
+<td>0.65 / 0.45</td>
+<td>Shear ratio end / mid</td>
 </tr>
 </tbody>
 </table>
 <h3>A9. DesignWall.csv (Conditional)</h3>
 <p><strong>Source:</strong> MIDAS Gen → Design → RC Design → Wall Design Results
-<strong>Rows:</strong> 243 (P1), <strong>No header row</strong>
-<strong>Block structure:</strong> 2 rows per wall element</p>
+<strong>Rows:</strong> 243 (P1), 26 columns
+<strong>Block structure:</strong> 2 rows per wall element (sub-header + data)</p>
 <table>
 <thead>
 <tr>
-<th>Row</th>
-<th>Content</th>
+<th>#</th>
+<th>Header (row 1)</th>
+<th>Sub-header (row 2)</th>
+<th>Data row example</th>
+<th>Description</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Row 1</td>
-<td>Sub-header: Story, Lw, HTw, hw, fys, ...</td>
-</tr>
-<tr>
-<td>Row 2</td>
-<td>Wall ID, wall mark, dimensions, V-rebar, H-rebar, design ratios</td>
-</tr>
-</tbody>
-</table>
-<p><strong>Key columns (row 2):</strong></p>
-<table>
-<thead>
-<tr>
-<th>Position</th>
-<th>Content</th>
-<th>Example</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Col A</td>
+<td>1</td>
 <td>Wall ID</td>
-<td>13</td>
+<td>Story</td>
+<td>B4</td>
+<td>Wall element ID / story</td>
 </tr>
 <tr>
-<td>Col C</td>
-<td>Wall mark</td>
-<td>CW1</td>
+<td>2</td>
+<td>SEL</td>
+<td>—</td>
+<td>—</td>
+<td>Selection flag</td>
 </tr>
 <tr>
-<td>Col I</td>
-<td>Vertical rebar</td>
+<td>3</td>
+<td>Wall Mark</td>
+<td>Lw</td>
+<td>4530</td>
+<td>Wall mark / wall length (mm)</td>
+</tr>
+<tr>
+<td>4</td>
+<td>D</td>
+<td>HTw</td>
+<td>200</td>
+<td>Thickness (mm)</td>
+</tr>
+<tr>
+<td>5</td>
+<td>fck</td>
+<td>hw</td>
+<td>4400</td>
+<td>fck / wall height (mm)</td>
+</tr>
+<tr>
+<td>6</td>
+<td>fy</td>
+<td>fys</td>
+<td>400</td>
+<td>Yield strengths (MPa)</td>
+</tr>
+<tr>
+<td>7</td>
+<td>CHK</td>
+<td>—</td>
+<td>OK</td>
+<td>Check result</td>
+</tr>
+<tr>
+<td>8</td>
+<td>LCB</td>
+<td>—</td>
+<td>5</td>
+<td>Load combination</td>
+</tr>
+<tr>
+<td>9</td>
+<td>V-Rebar</td>
+<td>H-Rebar</td>
 <td>D13 @150</td>
+<td>Vertical / horizontal rebar spec</td>
 </tr>
 <tr>
-<td>Col W</td>
-<td>Horizontal rebar</td>
-<td>D10 @200</td>
+<td>10</td>
+<td>End-Rebar</td>
+<td>Bar Layer</td>
+<td>Double</td>
+<td>End zone rebar / layer type</td>
+</tr>
+<tr>
+<td>11</td>
+<td>φPn-max</td>
+<td>Pu</td>
+<td>3000</td>
+<td>Axial capacity / force</td>
+</tr>
+<tr>
+<td>12</td>
+<td>Rat-Py</td>
+<td>Rat-Pz</td>
+<td>0.25</td>
+<td>Axial ratios</td>
+</tr>
+<tr>
+<td>13</td>
+<td>MF.y</td>
+<td>MF.z</td>
+<td>1.0</td>
+<td>Moment magnification</td>
+</tr>
+<tr>
+<td>14</td>
+<td>Mcy</td>
+<td>Mcz</td>
+<td>800</td>
+<td>Moment capacities</td>
+</tr>
+<tr>
+<td>15</td>
+<td>Rat-My</td>
+<td>Rat-Mz</td>
+<td>0.30</td>
+<td>Moment ratios</td>
+</tr>
+<tr>
+<td>16</td>
+<td>Vu</td>
+<td>Rat-V</td>
+<td>200</td>
+<td>Shear force / ratio</td>
+</tr>
+<tr>
+<td>17</td>
+<td>CHK.1</td>
+<td>—</td>
+<td>—</td>
+<td>Secondary check</td>
+</tr>
+<tr>
+<td>18</td>
+<td>V-Rebar.1</td>
+<td>ρ.max(%)</td>
+<td>1.2</td>
+<td>Alt V-rebar / max reinforcement ratio</td>
+</tr>
+<tr>
+<td>19</td>
+<td>AL</td>
+<td>ρ.use(%)</td>
+<td>0.8</td>
+<td>Used reinforcement ratio</td>
+</tr>
+<tr>
+<td>20</td>
+<td>AM</td>
+<td>ρ.min(%)</td>
+<td>0.25</td>
+<td>Min reinforcement ratio</td>
+</tr>
+<tr>
+<td>21</td>
+<td>AN</td>
+<td>s.max</td>
+<td>300</td>
+<td>Max spacing</td>
+</tr>
+<tr>
+<td>22</td>
+<td>AO</td>
+<td>s.use</td>
+<td>150</td>
+<td>Used spacing</td>
+</tr>
+<tr>
+<td>23</td>
+<td>H-Rebar</td>
+<td>ρ.use(%)</td>
+<td>0.5</td>
+<td>Horizontal rebar ratio</td>
+</tr>
+<tr>
+<td>24</td>
+<td>AQ</td>
+<td>ρ.min(%)</td>
+<td>0.25</td>
+<td>Min horizontal ratio</td>
+</tr>
+<tr>
+<td>25</td>
+<td>AR</td>
+<td>s.max</td>
+<td>300</td>
+<td>Max horizontal spacing</td>
+</tr>
+<tr>
+<td>26</td>
+<td>AS</td>
+<td>s.use</td>
+<td>200</td>
+<td>Used horizontal spacing</td>
 </tr>
 </tbody>
 </table>
@@ -692,6 +1376,7 @@ Provided as either individual CSVs or a single Excel workbook with 5 sheets.</p>
 <table>
 <thead>
 <tr>
+<th>#</th>
 <th>Column</th>
 <th>Type</th>
 <th>Unit</th>
@@ -700,44 +1385,113 @@ Provided as either individual CSVs or a single Excel workbook with 5 sheets.</p>
 </thead>
 <tbody>
 <tr>
+<td>1</td>
 <td>NO</td>
 <td>int</td>
 <td>—</td>
 <td>Load case number</td>
 </tr>
 <tr>
+<td>2</td>
 <td>Load_Type</td>
 <td>string</td>
 <td>—</td>
-<td>Load type</td>
+<td>Load type (활하중, 고정하중, etc.)</td>
 </tr>
 <tr>
+<td>3</td>
 <td>Distribution Type</td>
 <td>string</td>
 <td>—</td>
 <td>Two Way / One Way</td>
 </tr>
 <tr>
+<td>4</td>
+<td>Load Angle</td>
+<td>int</td>
+<td>deg</td>
+<td>Load angle (typically 0)</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Sub Beam No</td>
+<td>int</td>
+<td>—</td>
+<td>Sub beam number (typically 0)</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Sub Beam Angle_[deg]</td>
+<td>int</td>
+<td>deg</td>
+<td>Sub beam angle (typically 0)</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Unit Self Weight(N/mm²)</td>
+<td>int</td>
+<td>—</td>
+<td>Unit self weight (typically 0)</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Load Direction</td>
+<td>string</td>
+<td>—</td>
+<td>Global Z</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Projection</td>
+<td>string</td>
+<td>—</td>
+<td>No</td>
+</tr>
+<tr>
+<td>10</td>
 <td>Nodes for Loading Area</td>
 <td>string</td>
 <td>—</td>
 <td>Comma-separated node numbers defining slab boundary</td>
 </tr>
 <tr>
+<td>11</td>
+<td>Description</td>
+<td>string</td>
+<td>—</td>
+<td>(typically empty)</td>
+</tr>
+<tr>
+<td>12</td>
+<td>Exclude Inner Elem.</td>
+<td>int</td>
+<td>—</td>
+<td>Exclusion flag (0/1)</td>
+</tr>
+<tr>
+<td>13</td>
+<td>Allow Polygon Type</td>
+<td>int</td>
+<td>—</td>
+<td>Polygon flag (0/1)</td>
+</tr>
+<tr>
+<td>14</td>
+<td>Group</td>
+<td>string</td>
+<td>—</td>
+<td>Group name (Default)</td>
+</tr>
+<tr>
+<td>15</td>
 <td>Slab NO.</td>
 <td>string</td>
 <td>—</td>
 <td>Engineer-assigned slab ID (e.g., B3S1, 1FS3)</td>
 </tr>
-<tr>
-<td>...</td>
-<td></td>
-<td></td>
-<td>(15 columns total, most from MIDAS export)</td>
-</tr>
 </tbody>
 </table>
-<p><strong>Note:</strong> The <code>Slab NO.</code> column (last column) is added by the engineer. Stair entries use SS/ST suffix (e.g., B3SS1) and are filtered out during slab conversion.</p>
+<p><strong>Note:</strong> Columns 1-14 are from MIDAS Gen floor load export. Column 15 (<code>Slab NO.</code>) is added by the engineer. Stair entries use SS/ST suffix (e.g., B3SS1) and are filtered out during slab conversion.</p>
 <h3>B2. SlabReinforcement.csv (Required)</h3>
 <p><strong>Source:</strong> Engineer manual input
 <strong>Rows:</strong> 20 (P1)</p>
@@ -809,6 +1563,7 @@ Provided as either individual CSVs or a single Excel workbook with 5 sheets.</p>
 <table>
 <thead>
 <tr>
+<th>#</th>
 <th>Column</th>
 <th>Type</th>
 <th>Unit</th>
@@ -817,122 +1572,141 @@ Provided as either individual CSVs or a single Excel workbook with 5 sheets.</p>
 </thead>
 <tbody>
 <tr>
+<td>1</td>
 <td>member_id</td>
 <td>string</td>
 <td>—</td>
 <td>Stair ID (e.g., B3SS1)</td>
 </tr>
 <tr>
+<td>2</td>
 <td>level_start</td>
 <td>string</td>
 <td>—</td>
 <td>Lower level (B4)</td>
 </tr>
 <tr>
+<td>3</td>
 <td>level_end</td>
 <td>string</td>
 <td>—</td>
 <td>Upper level (B3)</td>
 </tr>
 <tr>
+<td>4</td>
 <td>Stair_Thickness_mm</td>
 <td>int</td>
 <td>mm</td>
 <td>Flight slab thickness</td>
 </tr>
 <tr>
+<td>5</td>
 <td>Stair_Height_mm</td>
 <td>int</td>
 <td>mm</td>
 <td>Total stair height (story height)</td>
 </tr>
 <tr>
+<td>6</td>
 <td>Stair_Width_mm</td>
 <td>int</td>
 <td>mm</td>
 <td>Flight width</td>
 </tr>
 <tr>
+<td>7</td>
 <td>Stair_Length_mm</td>
 <td>int</td>
 <td>mm</td>
 <td>Flight horizontal length</td>
 </tr>
 <tr>
+<td>8</td>
 <td>landing(Left)_mm</td>
 <td>int</td>
 <td>mm</td>
 <td>Lower landing length</td>
 </tr>
 <tr>
+<td>9</td>
 <td>landing(Right)_mm</td>
 <td>int</td>
 <td>mm</td>
 <td>Upper (mid) landing length</td>
 </tr>
 <tr>
+<td>10</td>
 <td>riser_height</td>
 <td>float</td>
 <td>mm</td>
 <td>Riser height</td>
 </tr>
 <tr>
+<td>11</td>
 <td>tread depth</td>
 <td>float</td>
 <td>mm</td>
 <td>Tread depth</td>
 </tr>
 <tr>
+<td>12</td>
 <td>landing(Left)_transverse_Top</td>
 <td>string</td>
 <td>—</td>
-<td>Rebar spec (e.g., D13@150)</td>
+<td>Landing transverse top rebar (e.g., D13@150)</td>
 </tr>
 <tr>
+<td>13</td>
 <td>landing(Left)_transverse_Bot.</td>
 <td>string</td>
 <td>—</td>
-<td>Rebar spec</td>
+<td>Landing transverse bottom rebar</td>
 </tr>
 <tr>
+<td>14</td>
 <td>landing(Left)_longitudinal_Top</td>
 <td>string</td>
 <td>—</td>
-<td>Rebar spec</td>
+<td>Landing longitudinal top rebar</td>
 </tr>
 <tr>
+<td>15</td>
 <td>landing(Left)_longitudinal_Bot.</td>
 <td>string</td>
 <td>—</td>
-<td>Rebar spec</td>
+<td>Landing longitudinal bottom rebar</td>
 </tr>
 <tr>
+<td>16</td>
 <td>Stair_transverse_Top</td>
 <td>string</td>
 <td>—</td>
-<td>Flight transverse rebar</td>
+<td>Flight transverse top rebar</td>
 </tr>
 <tr>
+<td>17</td>
 <td>Stair_transverse_Bot.</td>
 <td>string</td>
 <td>—</td>
-<td>Flight transverse rebar</td>
+<td>Flight transverse bottom rebar</td>
 </tr>
 <tr>
+<td>18</td>
 <td>Stair_longitudinal_Top</td>
 <td>string</td>
 <td>—</td>
-<td>Flight longitudinal rebar</td>
+<td>Flight longitudinal top rebar</td>
 </tr>
 <tr>
+<td>19</td>
 <td>Stair_longitudinal_Bot.</td>
 <td>string</td>
 <td>—</td>
-<td>Flight longitudinal rebar</td>
+<td>Flight longitudinal bottom rebar</td>
 </tr>
 </tbody>
 </table>
-<p><strong>Note:</strong> P2 has additional columns for Stair_Thickness_mm, and may have different bar diameters for landing vs flight (e.g., D13 landing + D10 flight).</p>
+<p><strong>Note:</strong> P2 may have different bar diameters for landing vs flight (e.g., D13 landing + D10 flight). Column 4 (Stair_Thickness) may be absent in some projects — extracted from Excel source if CSV drops it.</p>
 <h3>B4. FootBoundary.csv (Required)</h3>
 <p><strong>Source:</strong> MIDAS Gen → Query → Node Detail Table, with engineer-added footing IDs
 <strong>Encoding:</strong> CP949 (Korean Windows encoding)
