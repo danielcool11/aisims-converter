@@ -538,13 +538,15 @@ Nodes ────────────────────────�
 **Algorithm:**
 1. Find wall_ids with no DesignWall reinforcement
 2. For each no-design element, compute spatial overlap with Part C wall edges
-   (segment-to-segment distance, 300mm tolerance, OK-status panels only)
+   using **midpoint-to-segment distance** (300mm tolerance, OK-status panels only).
+   Midpoint distance avoids false positives where elements merely share an
+   endpoint with a Part C wall but extend into uncovered gap zones.
 3. Classify each element:
    - `DESIGNED` — has DesignWall reinforcement (untouched)
-   - `COVERED_BY_PART_C` — overlaps Part C wall edge (removed)
-   - `NO_DESIGN` — no rebar from anywhere (kept with flag)
+   - `COVERED_BY_PART_C` — element midpoint within 300mm of Part C edge (removed)
+   - `NO_DESIGN` — no rebar from anywhere (kept with flag for engineer review)
 
-**P1 result:** 456 → 294 elements (162 removed, 10 NO_DESIGN kept)
+**P1 result:** 456 → 306 elements (150 removed, 22 NO_DESIGN kept)
 **P2 result:** no Part C → 0 removed, 9901-9906 (225 elements) flagged NO_DESIGN
 
 ---
