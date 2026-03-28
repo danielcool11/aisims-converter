@@ -33,6 +33,18 @@ def _segment_dist(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2):
     )
 
 
+def _midpoint_to_segment_dist(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2):
+    """Distance from midpoint of segment A to segment B.
+
+    More reliable than segment-to-segment distance for overlap detection,
+    because it avoids false positives when segments merely share an endpoint
+    but extend in different directions.
+    """
+    mx = (ax1 + ax2) / 2
+    my = (ay1 + ay2) / 2
+    return _point_to_segment_dist(mx, my, bx1, by1, bx2, by2)
+
+
 def deduplicate_walls(walls_df, reinf_wall_df, bwall_members_df, nodes_df,
                       overlap_tolerance=300):
     """
@@ -96,8 +108,8 @@ def deduplicate_walls(walls_df, reinf_wall_df, bwall_members_df, nodes_df,
             if ci and cj:
                 best_dist = float('inf')
                 for ex1, ey1, ex2, ey2 in bwall_edges:
-                    d = _segment_dist(ci[0], ci[1], cj[0], cj[1],
-                                      ex1, ey1, ex2, ey2)
+                    d = _midpoint_to_segment_dist(ci[0], ci[1], cj[0], cj[1],
+                                                  ex1, ey1, ex2, ey2)
                     if d < best_dist:
                         best_dist = d
 
