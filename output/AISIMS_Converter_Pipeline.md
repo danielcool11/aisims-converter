@@ -524,6 +524,31 @@ Emit: ReinforcementStair.csv
 
 ---
 
+### Phase 4.5: Wall Deduplication
+
+**Purpose**: Remove MembersWall elements that are covered by Part C basement walls to prevent BIM rendering duplicates.
+
+```
+MembersWall ─────────────► deduplicate_walls() ──► Updated MembersWall
+ReinforcementWall ───────┘       │                    │
+MembersBasementWall ─────────────┘                    ├─ wall_status column added
+Nodes ───────────────────────────┘                    └─ COVERED_BY_PART_C removed
+```
+
+**Algorithm:**
+1. Find wall_ids with no DesignWall reinforcement
+2. For each no-design element, compute spatial overlap with Part C wall edges
+   (segment-to-segment distance, 300mm tolerance, OK-status panels only)
+3. Classify each element:
+   - `DESIGNED` — has DesignWall reinforcement (untouched)
+   - `COVERED_BY_PART_C` — overlaps Part C wall edge (removed)
+   - `NO_DESIGN` — no rebar from anywhere (kept with flag)
+
+**P1 result:** 456 → 294 elements (162 removed, 10 NO_DESIGN kept)
+**P2 result:** no Part C → 0 removed, 9901-9906 (225 elements) flagged NO_DESIGN
+
+---
+
 ### Phase 5: Validation
 
 **Purpose**: Cross-check all outputs for consistency and completeness.
@@ -555,12 +580,12 @@ Checks performed:
 ## Phase Dependencies
 
 ```
-Phase 1 ─► Phase 2 ─► Phase 3 ─► Phase 4 ─► Phase 5 ─► Phase 6
-(Found.)   (Members)  (Grid)     (Reinf.)   (Valid.)   (RebarLen)
-   │          │          │           │          │           │
-   ▼          ▼          ▼           ▼          ▼           ▼
- Nodes     Members×7  Updated    Reinf×5     Report    RebarLengths×7
- Materials            Nodes      Design×3
+Phase 1 ─► Phase 2 ─► Phase 3 ─► Phase 4 ─► Phase 4.5 ─► Phase 5 ─► Phase 6
+(Found.)   (Members)  (Grid)     (Reinf.)   (WallDedup)  (Valid.)   (RebarLen)
+   │          │          │           │           │           │           │
+   ▼          ▼          ▼           ▼           ▼           ▼           ▼
+ Nodes     Members×7  Updated    Reinf×5     Deduped     Report    RebarLengths×7
+ Materials            Nodes      Design×3    MembersWall
  Sections             Members
  Lookups
 ```
@@ -569,8 +594,9 @@ Phase 1 ─► Phase 2 ─► Phase 3 ─► Phase 4 ─► Phase 5 ─► Phase
 1. Phase 1 must complete before Phase 2 (sections/nodes needed)
 2. Phase 2 must complete before Phase 3 (column positions needed)
 3. Phase 3 must complete before Phase 4 (grid labels in Members)
-4. Phase 4 must complete before Phase 5 (all outputs needed for validation)
-5. Phase 5 must complete before Phase 6 (Tier 1 data needed for rebar calculation)
+4. Phase 4 must complete before Phase 4.5 (reinforcement needed for design check)
+5. Phase 4.5 must complete before Phase 5 (deduped walls for accurate validation)
+6. Phase 5 must complete before Phase 6 (Tier 1 data needed for rebar calculation)
 
 **Independent within phase:**
 - Within Phase 2: slabs, stairs, footings, basement walls can run in parallel
@@ -885,6 +911,8 @@ RETURN [piece_1, piece_2, ..., piece_n]
 | File encoding issues | Try utf-8-sig first, fallback to cp949 |
 | Duplicate section_ids | First entry kept, duplicates added to lookup only |
 | Wall mark mismatch (W204 vs wM0204) | Join by wall_id (numeric), not wall_mark |
+| Basement wall in MembersWall + Part C | Per-element spatial overlap check → remove duplicates, flag NO_DESIGN |
+| Basement wall nodes missing/wrong Z | Validate Z ≤ 0, infer XY from valid levels, Z from height stacking |
 
 ---
 

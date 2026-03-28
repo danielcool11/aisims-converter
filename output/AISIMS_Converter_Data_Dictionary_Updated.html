@@ -1,0 +1,2268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AISIMS Converter Data Dictionary</title>
+<style>
+  body { font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; max-width: 1100px; margin: 40px auto; padding: 0 20px; color: #333; line-height: 1.6; }
+  h1 { color: #1a1a2e; border-bottom: 3px solid #e94560; padding-bottom: 10px; }
+  h2 { color: #16213e; margin-top: 35px; border-bottom: 2px solid #ddd; padding-bottom: 5px; }
+  h3 { color: #0f3460; }
+  h4 { color: #533483; }
+  table { border-collapse: collapse; width: 100%%; margin: 15px 0; font-size: 13px; }
+  th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+  th { background-color: #16213e; color: white; }
+  tr:nth-child(even) { background-color: #f9f9f9; }
+  code { background: #eee; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+  pre { background: #f4f4f4; padding: 12px; border-radius: 5px; overflow-x: auto; font-size: 12px; line-height: 1.5; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 30px 0; }
+</style>
+</head>
+<body>
+<h1>AISIMS Converter Data Dictionary</h1>
+<h1>AISIMS 변환기 데이터 사전</h1>
+<p>Generated: 2026-03-27</p>
+<h2>Naming Conventions</h2>
+<table>
+<thead>
+<tr>
+<th>Element</th>
+<th>Convention</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>File names</td>
+<td>PascalCase</td>
+<td>MembersBeam.csv, ReinforcementColumn.csv</td>
+</tr>
+<tr>
+<td>Column headers</td>
+<td>snake_case</td>
+<td>member_id, x_from_mm, bar_spacing_mm</td>
+</tr>
+<tr>
+<td>Unit suffixes</td>
+<td>Standard SI notation</td>
+<td>_mm, _m2, _m4, _MPa, _kN_m3</td>
+</tr>
+<tr>
+<td>Structural symbols</td>
+<td>Engineering convention</td>
+<td>Lx_mm, Mu_neg, phiMn_pos, Vu, Pu</td>
+</tr>
+</tbody>
+</table>
+<h2>File Overview</h2>
+<h3>Core Files (18 files — every project)</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>File</th>
+<th>Source</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Nodes.csv</td>
+<td>Part A</td>
+<td>All nodes with level, grid, coordinates</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Materials.csv</td>
+<td>Part A</td>
+<td>Concrete + rebar material properties</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Sections.csv</td>
+<td>Part A</td>
+<td>Parsed section definitions with dimensions</td>
+</tr>
+<tr>
+<td>4</td>
+<td>MembersBeam.csv</td>
+<td>Part A</td>
+<td>Beam elements with coordinates</td>
+</tr>
+<tr>
+<td>5</td>
+<td>MembersColumn.csv</td>
+<td>Part A</td>
+<td>Column elements with 3D length (slanted support)</td>
+</tr>
+<tr>
+<td>6</td>
+<td>MembersWall.csv</td>
+<td>Part A</td>
+<td>Wall quad panel elements</td>
+</tr>
+<tr>
+<td>7</td>
+<td>MembersSlab.csv</td>
+<td>Part B</td>
+<td>Slab boundary polygons</td>
+</tr>
+<tr>
+<td>8</td>
+<td>MembersStair.csv</td>
+<td>Part B</td>
+<td>U-shaped stair 8-point geometry</td>
+</tr>
+<tr>
+<td>9</td>
+<td>MembersFooting.csv</td>
+<td>Part B</td>
+<td>Mat foundation quads/polygons</td>
+</tr>
+<tr>
+<td>10</td>
+<td>ReinforcementBeam.csv</td>
+<td>Part A</td>
+<td>Beam rebar per position (I/M/J)</td>
+</tr>
+<tr>
+<td>11</td>
+<td>ReinforcementColumn.csv</td>
+<td>Part A</td>
+<td>Column main bars + ties</td>
+</tr>
+<tr>
+<td>12</td>
+<td>ReinforcementWall.csv</td>
+<td>Part A</td>
+<td>Wall V + H bars (paired per element)</td>
+</tr>
+<tr>
+<td>13</td>
+<td>ReinforcementSlab.csv</td>
+<td>Part B</td>
+<td>Slab rebar per direction/layer</td>
+</tr>
+<tr>
+<td>14</td>
+<td>ReinforcementStair.csv</td>
+<td>Part B</td>
+<td>Stair rebar per zone/direction/layer</td>
+</tr>
+<tr>
+<td>15</td>
+<td>ReinforcementFooting.csv</td>
+<td>Part B</td>
+<td>Footing base + additional + stirrup zones</td>
+</tr>
+<tr>
+<td>16</td>
+<td>DesignResultsBeam.csv</td>
+<td>Part A</td>
+<td>Beam design capacity and ratios</td>
+</tr>
+<tr>
+<td>17</td>
+<td>DesignResultsColumn.csv</td>
+<td>Part A</td>
+<td>Column design capacity and ratios</td>
+</tr>
+<tr>
+<td>18</td>
+<td>ValidationReport.txt</td>
+<td>System</td>
+<td>Cross-check results</td>
+</tr>
+</tbody>
+</table>
+<h3>Conditional Files (3 files — project-dependent)</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>File</th>
+<th>Source</th>
+<th>Condition</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>19</td>
+<td>DesignResultsWall.csv</td>
+<td>Part A</td>
+<td>Shear wall system</td>
+<td>Wall design ratios + geometry</td>
+</tr>
+<tr>
+<td>20</td>
+<td>MembersBasementWall.csv</td>
+<td>Part C</td>
+<td>Project has basement</td>
+<td>Basement/retaining wall panels with zone dimensions</td>
+</tr>
+<tr>
+<td>21</td>
+<td>ReinforcementBasementWall.csv</td>
+<td>Part C</td>
+<td>Project has basement</td>
+<td>Basement wall rebar per direction/face/zone</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Column Definitions</h2>
+<h3>1. Nodes.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>node_id</td>
+<td>string</td>
+<td>—</td>
+<td>Unique node identifier (N_{level}_{grid})</td>
+</tr>
+<tr>
+<td>node_number</td>
+<td>int</td>
+<td>—</td>
+<td>Original MIDAS node number</td>
+</tr>
+<tr>
+<td>x_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>X coordinate</td>
+</tr>
+<tr>
+<td>y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Y coordinate</td>
+</tr>
+<tr>
+<td>z_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Z coordinate</td>
+</tr>
+<tr>
+<td>level</td>
+<td>string</td>
+<td>—</td>
+<td>Story level (1F, B1, Roof, PIT, etc.)</td>
+</tr>
+<tr>
+<td>grid</td>
+<td>string</td>
+<td>—</td>
+<td>Grid label (X1Y1) or OFF_GRID</td>
+</tr>
+<tr>
+<td>grid_offset_x_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Distance from nearest X grid line</td>
+</tr>
+<tr>
+<td>grid_offset_y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Distance from nearest Y grid line</td>
+</tr>
+<tr>
+<td>source</td>
+<td>string</td>
+<td>—</td>
+<td>MIDAS or BOUNDARY</td>
+</tr>
+</tbody>
+</table>
+<h3>2. Materials.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>material_id</td>
+<td>string</td>
+<td>—</td>
+<td>Material identifier (C35, SD400)</td>
+</tr>
+<tr>
+<td>type</td>
+<td>string</td>
+<td>—</td>
+<td>concrete or rebar</td>
+</tr>
+<tr>
+<td>grade</td>
+<td>string</td>
+<td>—</td>
+<td>Grade name</td>
+</tr>
+<tr>
+<td>fck_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Concrete compressive strength (null for rebar)</td>
+</tr>
+<tr>
+<td>fy_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Rebar yield strength (null for concrete)</td>
+</tr>
+<tr>
+<td>E_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Elastic modulus</td>
+</tr>
+<tr>
+<td>density_kN_m3</td>
+<td>float</td>
+<td>kN/m3</td>
+<td>Unit weight</td>
+</tr>
+</tbody>
+</table>
+<h3>3. Sections.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>section_id</td>
+<td>string</td>
+<td>—</td>
+<td>Unique section ID (RC_{member}_{level})</td>
+</tr>
+<tr>
+<td>member_type</td>
+<td>string</td>
+<td>—</td>
+<td>BEAM, COLUMN, or WALL</td>
+</tr>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Base member identifier (G1, TC1, BT1)</td>
+</tr>
+<tr>
+<td>level_from</td>
+<td>string</td>
+<td>—</td>
+<td>Start level (nullable)</td>
+</tr>
+<tr>
+<td>level_to</td>
+<td>string</td>
+<td>—</td>
+<td>End level (nullable)</td>
+</tr>
+<tr>
+<td>shape</td>
+<td>string</td>
+<td>—</td>
+<td>RECT or CIRCLE</td>
+</tr>
+<tr>
+<td>b_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Width</td>
+</tr>
+<tr>
+<td>h_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Height/depth</td>
+</tr>
+<tr>
+<td>diameter_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Diameter for circular sections</td>
+</tr>
+<tr>
+<td>thickness_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Wall thickness</td>
+</tr>
+<tr>
+<td>area_m2</td>
+<td>float</td>
+<td>m2</td>
+<td>Cross-sectional area</td>
+</tr>
+<tr>
+<td>inertia_y_m4</td>
+<td>float</td>
+<td>m4</td>
+<td>Moment of inertia (Y-axis)</td>
+</tr>
+<tr>
+<td>inertia_z_m4</td>
+<td>float</td>
+<td>m4</td>
+<td>Moment of inertia (Z-axis)</td>
+</tr>
+<tr>
+<td>effective_depth_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>d = h - cover - dia/2</td>
+</tr>
+<tr>
+<td>cover_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Concrete cover (KDS)</td>
+</tr>
+</tbody>
+</table>
+<h3>4. MembersBeam.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>element_id</td>
+<td>int</td>
+<td>—</td>
+<td>MIDAS element number</td>
+</tr>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Base member ID (G1, B11, LB1)</td>
+</tr>
+<tr>
+<td>section_id</td>
+<td>string</td>
+<td>—</td>
+<td>Section reference</td>
+</tr>
+<tr>
+<td>design_key</td>
+<td>string</td>
+<td>—</td>
+<td>Raw MIDAS section name (FK to reinforcement)</td>
+</tr>
+<tr>
+<td>node_from</td>
+<td>string</td>
+<td>—</td>
+<td>Start node ID</td>
+</tr>
+<tr>
+<td>node_to</td>
+<td>string</td>
+<td>—</td>
+<td>End node ID</td>
+</tr>
+<tr>
+<td>level</td>
+<td>string</td>
+<td>—</td>
+<td>Story level</td>
+</tr>
+<tr>
+<td>grid_from</td>
+<td>string</td>
+<td>—</td>
+<td>Start grid label</td>
+</tr>
+<tr>
+<td>grid_to</td>
+<td>string</td>
+<td>—</td>
+<td>End grid label</td>
+</tr>
+<tr>
+<td>x_from_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Start X coordinate</td>
+</tr>
+<tr>
+<td>y_from_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Start Y coordinate</td>
+</tr>
+<tr>
+<td>x_to_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>End X coordinate</td>
+</tr>
+<tr>
+<td>y_to_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>End Y coordinate</td>
+</tr>
+<tr>
+<td>z_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Beam elevation (Z)</td>
+</tr>
+<tr>
+<td>length_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Span length</td>
+</tr>
+<tr>
+<td>b_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Section width</td>
+</tr>
+<tr>
+<td>h_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Section depth</td>
+</tr>
+</tbody>
+</table>
+<h3>5. MembersColumn.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>element_id</td>
+<td>int</td>
+<td>—</td>
+<td>MIDAS element number</td>
+</tr>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Base member ID (C1, TC1)</td>
+</tr>
+<tr>
+<td>section_id</td>
+<td>string</td>
+<td>—</td>
+<td>Section reference</td>
+</tr>
+<tr>
+<td>design_key</td>
+<td>string</td>
+<td>—</td>
+<td>Raw MIDAS section name (FK to reinforcement)</td>
+</tr>
+<tr>
+<td>node_from</td>
+<td>string</td>
+<td>—</td>
+<td>Bottom node ID</td>
+</tr>
+<tr>
+<td>node_to</td>
+<td>string</td>
+<td>—</td>
+<td>Top node ID</td>
+</tr>
+<tr>
+<td>level_from</td>
+<td>string</td>
+<td>—</td>
+<td>Bottom level</td>
+</tr>
+<tr>
+<td>level_to</td>
+<td>string</td>
+<td>—</td>
+<td>Top level</td>
+</tr>
+<tr>
+<td>grid</td>
+<td>string</td>
+<td>—</td>
+<td>Grid location</td>
+</tr>
+<tr>
+<td>x_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bottom X coordinate</td>
+</tr>
+<tr>
+<td>y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bottom Y coordinate</td>
+</tr>
+<tr>
+<td>x_top_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Top X coordinate (differs for slanted)</td>
+</tr>
+<tr>
+<td>y_top_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Top Y coordinate (differs for slanted)</td>
+</tr>
+<tr>
+<td>height_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Vertical height (Z component)</td>
+</tr>
+<tr>
+<td>length_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Actual 3D length (&gt;height for slanted columns)</td>
+</tr>
+<tr>
+<td>b_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Section width</td>
+</tr>
+<tr>
+<td>h_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Section depth</td>
+</tr>
+</tbody>
+</table>
+<h3>6. MembersWall.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>element_id</td>
+<td>int</td>
+<td>—</td>
+<td>MIDAS element number</td>
+</tr>
+<tr>
+<td>wall_mark</td>
+<td>string</td>
+<td>—</td>
+<td>Wall mark name (CW1, W201)</td>
+</tr>
+<tr>
+<td>wall_id</td>
+<td>int</td>
+<td>—</td>
+<td>MIDAS wall group ID</td>
+</tr>
+<tr>
+<td>level</td>
+<td>string</td>
+<td>—</td>
+<td>Story level</td>
+</tr>
+<tr>
+<td>centroid_x_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Panel centroid X</td>
+</tr>
+<tr>
+<td>centroid_y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Panel centroid Y</td>
+</tr>
+<tr>
+<td>centroid_z_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Panel centroid Z</td>
+</tr>
+<tr>
+<td>thickness_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Wall thickness</td>
+</tr>
+<tr>
+<td>height_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Panel height</td>
+</tr>
+<tr>
+<td>width_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Panel width (plan length)</td>
+</tr>
+<tr>
+<td>node_i</td>
+<td>string</td>
+<td>—</td>
+<td>Corner node 1</td>
+</tr>
+<tr>
+<td>node_j</td>
+<td>string</td>
+<td>—</td>
+<td>Corner node 2</td>
+</tr>
+<tr>
+<td>node_k</td>
+<td>string</td>
+<td>—</td>
+<td>Corner node 3</td>
+</tr>
+<tr>
+<td>node_l</td>
+<td>string</td>
+<td>—</td>
+<td>Corner node 4</td>
+</tr>
+<tr>
+<td>wall_status</td>
+<td>string</td>
+<td>—</td>
+<td>DESIGNED / NO_DESIGN (see wall deduplication below)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Wall deduplication:</strong> Elements from MembersWall that spatially overlap with Part C
+basement wall panels are removed (they are handled by MembersBasementWall instead).
+Remaining elements without DesignWall reinforcement are flagged as <code>NO_DESIGN</code>
+(e.g., buttress walls, uncovered perimeter gaps).</p>
+<h3>7. MembersSlab.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Slab identifier (B3S1, 6S2)</td>
+</tr>
+<tr>
+<td>level</td>
+<td>string</td>
+<td>—</td>
+<td>Story level</td>
+</tr>
+<tr>
+<td>slab_type</td>
+<td>string</td>
+<td>—</td>
+<td>C (continuous) or B (cantilever)</td>
+</tr>
+<tr>
+<td>thickness_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Slab thickness</td>
+</tr>
+<tr>
+<td>centroid_x_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Centroid X</td>
+</tr>
+<tr>
+<td>centroid_y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Centroid Y</td>
+</tr>
+<tr>
+<td>z_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Slab elevation</td>
+</tr>
+<tr>
+<td>Lx_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>X-direction span (bounding box)</td>
+</tr>
+<tr>
+<td>Ly_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Y-direction span (bounding box)</td>
+</tr>
+<tr>
+<td>boundary_nodes</td>
+<td>string</td>
+<td>—</td>
+<td>Polygon nodes (semicolon-separated)</td>
+</tr>
+<tr>
+<td>node_count</td>
+<td>int</td>
+<td>—</td>
+<td>Number of boundary nodes</td>
+</tr>
+</tbody>
+</table>
+<h3>8. MembersStair.csv (73 columns)</h3>
+<table>
+<thead>
+<tr>
+<th>Column Group</th>
+<th>Columns</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Base (15)</td>
+<td>member_id, member_type, level_from, level_to, centroid_x/y, z_mm, Lx/Ly_mm, boundary_nodes, length_mm, story_group, material_id, segment_no, segment_id</td>
+<td>Member identification and location</td>
+</tr>
+<tr>
+<td>Configuration (10)</td>
+<td>stair_type, flight_count, landing_count, total_height_mm, stair_width_mm, flight_run_mm, flight_slope_mm, gap_mm, landing_lower_mm, landing_mid_mm</td>
+<td>Stair geometry parameters</td>
+</tr>
+<tr>
+<td>Detailing (5)</td>
+<td>waist_thickness_mm, riser_height_mm, tread_depth_mm, num_risers, risers_per_flight</td>
+<td>Step dimensions (from design office)</td>
+</tr>
+<tr>
+<td>8-point model (24)</td>
+<td>p1_x..p8_z</td>
+<td>Lower landing (P1-P4) + mid-landing (P5-P8) coordinates</td>
+</tr>
+<tr>
+<td>Flight geometry (14)</td>
+<td>flight1/2_start/end_x/y/z, flight1/2_num_risers</td>
+<td>Flight start/end points and riser counts</td>
+</tr>
+<tr>
+<td>Mid-landing (5)</td>
+<td>landing1_start_x/y/z, landing1_length_mm, landing1_width_mm</td>
+<td>Mid-landing position and dimensions</td>
+</tr>
+</tbody>
+</table>
+<h3>9. MembersFooting.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Foundation ID (MF1, MF2)</td>
+</tr>
+<tr>
+<td>part_id</td>
+<td>string</td>
+<td>—</td>
+<td>Part identifier (MF1-1, MF1-2)</td>
+</tr>
+<tr>
+<td>member_type</td>
+<td>string</td>
+<td>—</td>
+<td>FOOTING</td>
+</tr>
+<tr>
+<td>footing_type</td>
+<td>string</td>
+<td>—</td>
+<td>MAT</td>
+</tr>
+<tr>
+<td>shape</td>
+<td>string</td>
+<td>—</td>
+<td>RECT or POLYGON_N</td>
+</tr>
+<tr>
+<td>level</td>
+<td>string</td>
+<td>—</td>
+<td>Foundation level</td>
+</tr>
+<tr>
+<td>thickness_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Foundation thickness</td>
+</tr>
+<tr>
+<td>centroid_x_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Centroid X</td>
+</tr>
+<tr>
+<td>centroid_y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Centroid Y</td>
+</tr>
+<tr>
+<td>z_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Foundation elevation</td>
+</tr>
+<tr>
+<td>Lx_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>X-direction span</td>
+</tr>
+<tr>
+<td>Ly_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Y-direction span</td>
+</tr>
+<tr>
+<td>area_mm2</td>
+<td>float</td>
+<td>mm2</td>
+<td>Plan area</td>
+</tr>
+<tr>
+<td>x_min_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bounding box X min</td>
+</tr>
+<tr>
+<td>y_min_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bounding box Y min</td>
+</tr>
+<tr>
+<td>x_max_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bounding box X max</td>
+</tr>
+<tr>
+<td>y_max_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bounding box Y max</td>
+</tr>
+<tr>
+<td>boundary_nodes</td>
+<td>string</td>
+<td>—</td>
+<td>Nodes (semicolon-separated)</td>
+</tr>
+<tr>
+<td>material_id</td>
+<td>string</td>
+<td>—</td>
+<td>Material reference</td>
+</tr>
+<tr>
+<td>segment_no</td>
+<td>int</td>
+<td>—</td>
+<td>Part sequence number</td>
+</tr>
+<tr>
+<td>segment_id</td>
+<td>string</td>
+<td>—</td>
+<td>Segment identifier</td>
+</tr>
+</tbody>
+</table>
+<h3>10. ReinforcementBeam.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>element_id</td>
+<td>int</td>
+<td>—</td>
+<td>MIDAS element (nullable, I position only)</td>
+</tr>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Raw MIDAS section name (level-prefixed)</td>
+</tr>
+<tr>
+<td>section_id</td>
+<td>string</td>
+<td>—</td>
+<td>Section number</td>
+</tr>
+<tr>
+<td>position</td>
+<td>string</td>
+<td>—</td>
+<td>I (start), M (midspan), J (end)</td>
+</tr>
+<tr>
+<td>fck_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Concrete strength</td>
+</tr>
+<tr>
+<td>fy_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Main bar yield strength</td>
+</tr>
+<tr>
+<td>fys_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Stirrup yield strength</td>
+</tr>
+<tr>
+<td>bar_role</td>
+<td>string</td>
+<td>—</td>
+<td>Bar role identifier</td>
+</tr>
+<tr>
+<td>top_bar_spec</td>
+<td>string</td>
+<td>—</td>
+<td>Top bar specification (e.g., 6-4-D22)</td>
+</tr>
+<tr>
+<td>top_total</td>
+<td>int</td>
+<td>—</td>
+<td>Total top bars (main + additional)</td>
+</tr>
+<tr>
+<td>top_main</td>
+<td>int</td>
+<td>—</td>
+<td>Main (continuous) top bars</td>
+</tr>
+<tr>
+<td>top_additional</td>
+<td>int</td>
+<td>—</td>
+<td>Additional top bars</td>
+</tr>
+<tr>
+<td>top_dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Top bar diameter</td>
+</tr>
+<tr>
+<td>bot_bar_spec</td>
+<td>string</td>
+<td>—</td>
+<td>Bottom bar specification</td>
+</tr>
+<tr>
+<td>bot_total</td>
+<td>int</td>
+<td>—</td>
+<td>Total bottom bars</td>
+</tr>
+<tr>
+<td>bot_main</td>
+<td>int</td>
+<td>—</td>
+<td>Main bottom bars</td>
+</tr>
+<tr>
+<td>bot_additional</td>
+<td>int</td>
+<td>—</td>
+<td>Additional bottom bars</td>
+</tr>
+<tr>
+<td>bot_dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bottom bar diameter</td>
+</tr>
+<tr>
+<td>stirrup_spec</td>
+<td>string</td>
+<td>—</td>
+<td>Stirrup specification (e.g., 3-D10 @150)</td>
+</tr>
+<tr>
+<td>stirrup_legs</td>
+<td>int</td>
+<td>—</td>
+<td>Number of stirrup legs</td>
+</tr>
+<tr>
+<td>stirrup_dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Stirrup diameter</td>
+</tr>
+<tr>
+<td>stirrup_spacing_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Stirrup spacing</td>
+</tr>
+</tbody>
+</table>
+<h3>11. ReinforcementColumn.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>element_id</td>
+<td>int</td>
+<td>—</td>
+<td>MIDAS element</td>
+</tr>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Raw MIDAS section name (level-prefixed)</td>
+</tr>
+<tr>
+<td>section_id</td>
+<td>string</td>
+<td>—</td>
+<td>Section number</td>
+</tr>
+<tr>
+<td>fck_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Concrete strength</td>
+</tr>
+<tr>
+<td>fy_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Main bar yield strength</td>
+</tr>
+<tr>
+<td>fys_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Tie yield strength</td>
+</tr>
+<tr>
+<td>b_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Section width</td>
+</tr>
+<tr>
+<td>h_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Section depth</td>
+</tr>
+<tr>
+<td>height_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Column height</td>
+</tr>
+<tr>
+<td>main_bar_spec</td>
+<td>string</td>
+<td>—</td>
+<td>Main bar spec (e.g., 16-5-D29)</td>
+</tr>
+<tr>
+<td>main_total</td>
+<td>int</td>
+<td>—</td>
+<td>Total main bars</td>
+</tr>
+<tr>
+<td>main_count</td>
+<td>int</td>
+<td>—</td>
+<td>Continuous main bars</td>
+</tr>
+<tr>
+<td>main_additional</td>
+<td>int</td>
+<td>—</td>
+<td>Additional main bars</td>
+</tr>
+<tr>
+<td>main_dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Main bar diameter</td>
+</tr>
+<tr>
+<td>tie_end_spec</td>
+<td>string</td>
+<td>—</td>
+<td>Tie at column ends (e.g., 3-D10 @150)</td>
+</tr>
+<tr>
+<td>tie_end_legs</td>
+<td>int</td>
+<td>—</td>
+<td>Tie legs at ends</td>
+</tr>
+<tr>
+<td>tie_end_dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Tie diameter at ends</td>
+</tr>
+<tr>
+<td>tie_end_spacing_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Tie spacing at ends</td>
+</tr>
+<tr>
+<td>tie_mid_spec</td>
+<td>string</td>
+<td>—</td>
+<td>Tie at mid-height</td>
+</tr>
+<tr>
+<td>tie_mid_legs</td>
+<td>int</td>
+<td>—</td>
+<td>Tie legs at mid</td>
+</tr>
+<tr>
+<td>tie_mid_dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Tie diameter at mid</td>
+</tr>
+<tr>
+<td>tie_mid_spacing_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Tie spacing at mid</td>
+</tr>
+</tbody>
+</table>
+<h3>12. ReinforcementWall.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>wall_id</td>
+<td>int</td>
+<td>—</td>
+<td>MIDAS wall group ID</td>
+</tr>
+<tr>
+<td>wall_mark</td>
+<td>string</td>
+<td>—</td>
+<td>Wall mark name</td>
+</tr>
+<tr>
+<td>level</td>
+<td>string</td>
+<td>—</td>
+<td>Story level</td>
+</tr>
+<tr>
+<td>v_bar_spec</td>
+<td>string</td>
+<td>—</td>
+<td>Vertical bar spec (e.g., D13 @150)</td>
+</tr>
+<tr>
+<td>v_dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Vertical bar diameter</td>
+</tr>
+<tr>
+<td>v_spacing_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Vertical bar spacing</td>
+</tr>
+<tr>
+<td>h_bar_spec</td>
+<td>string</td>
+<td>—</td>
+<td>Horizontal bar spec</td>
+</tr>
+<tr>
+<td>h_dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Horizontal bar diameter</td>
+</tr>
+<tr>
+<td>h_spacing_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Horizontal bar spacing</td>
+</tr>
+<tr>
+<td>bar_layer</td>
+<td>string</td>
+<td>—</td>
+<td>Single or Double</td>
+</tr>
+<tr>
+<td>end_rebar</td>
+<td>string</td>
+<td>—</td>
+<td>Boundary zone rebar (nullable)</td>
+</tr>
+</tbody>
+</table>
+<h3>13. ReinforcementSlab.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Slab identifier</td>
+</tr>
+<tr>
+<td>level</td>
+<td>string</td>
+<td>—</td>
+<td>Story level</td>
+</tr>
+<tr>
+<td>direction</td>
+<td>string</td>
+<td>—</td>
+<td>X or Y</td>
+</tr>
+<tr>
+<td>layer</td>
+<td>string</td>
+<td>—</td>
+<td>Top or Bot</td>
+</tr>
+<tr>
+<td>bar_spec</td>
+<td>string</td>
+<td>—</td>
+<td>Bar specification (e.g., D10@200)</td>
+</tr>
+<tr>
+<td>bar_dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar diameter</td>
+</tr>
+<tr>
+<td>bar_spacing_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar spacing</td>
+</tr>
+<tr>
+<td>thickness_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Slab thickness</td>
+</tr>
+</tbody>
+</table>
+<h3>14. ReinforcementStair.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Stair identifier</td>
+</tr>
+<tr>
+<td>level_from</td>
+<td>string</td>
+<td>—</td>
+<td>Start level</td>
+</tr>
+<tr>
+<td>level_to</td>
+<td>string</td>
+<td>—</td>
+<td>End level</td>
+</tr>
+<tr>
+<td>zone</td>
+<td>string</td>
+<td>—</td>
+<td>landing_left, landing_right, stair</td>
+</tr>
+<tr>
+<td>direction</td>
+<td>string</td>
+<td>—</td>
+<td>transverse or longitudinal</td>
+</tr>
+<tr>
+<td>layer</td>
+<td>string</td>
+<td>—</td>
+<td>Top or Bot</td>
+</tr>
+<tr>
+<td>bar_spec</td>
+<td>string</td>
+<td>—</td>
+<td>Bar specification</td>
+</tr>
+<tr>
+<td>bar_dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar diameter</td>
+</tr>
+<tr>
+<td>bar_spacing_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar spacing</td>
+</tr>
+</tbody>
+</table>
+<h3>15. ReinforcementFooting.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Foundation ID (MF1, MF2)</td>
+</tr>
+<tr>
+<td>zone</td>
+<td>string</td>
+<td>—</td>
+<td>Zone ID (MF1=base, R1=additional, V1=stirrup)</td>
+</tr>
+<tr>
+<td>zone_type</td>
+<td>string</td>
+<td>—</td>
+<td>BASE, ADDITIONAL, or STIRRUP</td>
+</tr>
+<tr>
+<td>direction</td>
+<td>string</td>
+<td>—</td>
+<td>X or Y (null for stirrups)</td>
+</tr>
+<tr>
+<td>layer</td>
+<td>string</td>
+<td>—</td>
+<td>Top or Bot (null for stirrups)</td>
+</tr>
+<tr>
+<td>bar_spec</td>
+<td>string</td>
+<td>—</td>
+<td>Bar specification</td>
+</tr>
+<tr>
+<td>dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar diameter</td>
+</tr>
+<tr>
+<td>spacing_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar spacing</td>
+</tr>
+<tr>
+<td>n_legs</td>
+<td>int</td>
+<td>—</td>
+<td>Stirrup legs (null for bars)</td>
+</tr>
+<tr>
+<td>zone_x_min</td>
+<td>float</td>
+<td>mm</td>
+<td>Zone bounding box X min</td>
+</tr>
+<tr>
+<td>zone_x_max</td>
+<td>float</td>
+<td>mm</td>
+<td>Zone bounding box X max</td>
+</tr>
+<tr>
+<td>zone_y_min</td>
+<td>float</td>
+<td>mm</td>
+<td>Zone bounding box Y min</td>
+</tr>
+<tr>
+<td>zone_y_max</td>
+<td>float</td>
+<td>mm</td>
+<td>Zone bounding box Y max</td>
+</tr>
+<tr>
+<td>zone_boundary</td>
+<td>string</td>
+<td>—</td>
+<td>Zone node coordinates</td>
+</tr>
+</tbody>
+</table>
+<h3>16. DesignResultsBeam.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Raw MIDAS section name</td>
+</tr>
+<tr>
+<td>position</td>
+<td>string</td>
+<td>—</td>
+<td>I, M, or J</td>
+</tr>
+<tr>
+<td>fck_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Concrete strength</td>
+</tr>
+<tr>
+<td>fy_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Main bar yield strength</td>
+</tr>
+<tr>
+<td>fys_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Stirrup yield strength</td>
+</tr>
+<tr>
+<td>top_bar_spec</td>
+<td>string</td>
+<td>—</td>
+<td>Top bar specification</td>
+</tr>
+<tr>
+<td>bot_bar_spec</td>
+<td>string</td>
+<td>—</td>
+<td>Bottom bar specification</td>
+</tr>
+<tr>
+<td>stirrup_spec</td>
+<td>string</td>
+<td>—</td>
+<td>Stirrup specification</td>
+</tr>
+<tr>
+<td>Mu_neg</td>
+<td>float</td>
+<td>N-mm</td>
+<td>Negative factored moment</td>
+</tr>
+<tr>
+<td>phiMn_neg</td>
+<td>float</td>
+<td>N-mm</td>
+<td>Negative moment capacity</td>
+</tr>
+<tr>
+<td>ratio_negative</td>
+<td>float</td>
+<td>—</td>
+<td>Negative moment D/C ratio</td>
+</tr>
+<tr>
+<td>Mu_pos</td>
+<td>float</td>
+<td>N-mm</td>
+<td>Positive factored moment</td>
+</tr>
+<tr>
+<td>phiMn_pos</td>
+<td>float</td>
+<td>N-mm</td>
+<td>Positive moment capacity</td>
+</tr>
+<tr>
+<td>ratio_positive</td>
+<td>float</td>
+<td>—</td>
+<td>Positive moment D/C ratio</td>
+</tr>
+<tr>
+<td>Vu</td>
+<td>float</td>
+<td>N</td>
+<td>Factored shear</td>
+</tr>
+<tr>
+<td>phiVc</td>
+<td>float</td>
+<td>N</td>
+<td>Concrete shear capacity</td>
+</tr>
+<tr>
+<td>ratio_shear</td>
+<td>float</td>
+<td>—</td>
+<td>Shear D/C ratio</td>
+</tr>
+</tbody>
+</table>
+<h3>17. DesignResultsColumn.csv</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Raw MIDAS section name</td>
+</tr>
+<tr>
+<td>fck_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Concrete strength</td>
+</tr>
+<tr>
+<td>fy_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Main bar yield strength</td>
+</tr>
+<tr>
+<td>fys_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Tie yield strength</td>
+</tr>
+<tr>
+<td>b_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Section width</td>
+</tr>
+<tr>
+<td>h_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Section depth</td>
+</tr>
+<tr>
+<td>height_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Column height</td>
+</tr>
+<tr>
+<td>main_bar_spec</td>
+<td>string</td>
+<td>—</td>
+<td>Main bar specification</td>
+</tr>
+<tr>
+<td>phiPn_max</td>
+<td>float</td>
+<td>N</td>
+<td>Maximum axial capacity</td>
+</tr>
+<tr>
+<td>Pu</td>
+<td>float</td>
+<td>N</td>
+<td>Factored axial load</td>
+</tr>
+<tr>
+<td>ratio_axial</td>
+<td>float</td>
+<td>—</td>
+<td>Axial D/C ratio</td>
+</tr>
+<tr>
+<td>ratio_moment_y</td>
+<td>float</td>
+<td>—</td>
+<td>Moment Y D/C ratio</td>
+</tr>
+<tr>
+<td>ratio_moment_z</td>
+<td>float</td>
+<td>—</td>
+<td>Moment Z D/C ratio</td>
+</tr>
+<tr>
+<td>Vu_end</td>
+<td>float</td>
+<td>N</td>
+<td>End shear force</td>
+</tr>
+<tr>
+<td>ratio_shear_end</td>
+<td>float</td>
+<td>—</td>
+<td>End shear D/C ratio</td>
+</tr>
+<tr>
+<td>Vu_mid</td>
+<td>float</td>
+<td>N</td>
+<td>Mid shear force</td>
+</tr>
+<tr>
+<td>ratio_shear_mid</td>
+<td>float</td>
+<td>—</td>
+<td>Mid shear D/C ratio</td>
+</tr>
+</tbody>
+</table>
+<h3>19. DesignResultsWall.csv (Conditional)</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>wall_id</td>
+<td>int</td>
+<td>—</td>
+<td>MIDAS wall group ID</td>
+</tr>
+<tr>
+<td>wall_mark</td>
+<td>string</td>
+<td>—</td>
+<td>Wall mark name</td>
+</tr>
+<tr>
+<td>level</td>
+<td>string</td>
+<td>—</td>
+<td>Story level</td>
+</tr>
+<tr>
+<td>fck_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Concrete strength</td>
+</tr>
+<tr>
+<td>fy_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Vertical bar yield strength</td>
+</tr>
+<tr>
+<td>fys_MPa</td>
+<td>float</td>
+<td>MPa</td>
+<td>Horizontal bar yield strength</td>
+</tr>
+<tr>
+<td>lw_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Wall length</td>
+</tr>
+<tr>
+<td>htw_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Wall total height</td>
+</tr>
+<tr>
+<td>thickness_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Wall thickness</td>
+</tr>
+<tr>
+<td>ratio_axial</td>
+<td>float</td>
+<td>—</td>
+<td>Axial D/C ratio</td>
+</tr>
+<tr>
+<td>ratio_moment</td>
+<td>float</td>
+<td>—</td>
+<td>Moment D/C ratio</td>
+</tr>
+<tr>
+<td>ratio_shear</td>
+<td>float</td>
+<td>—</td>
+<td>Shear D/C ratio</td>
+</tr>
+</tbody>
+</table>
+<h3>20. MembersBasementWall.csv (Conditional)</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>wall_mark</td>
+<td>string</td>
+<td>—</td>
+<td>Wall name (BW1, DW1, FW1)</td>
+</tr>
+<tr>
+<td>level</td>
+<td>string</td>
+<td>—</td>
+<td>Story level (B1, B4~B1)</td>
+</tr>
+<tr>
+<td>panel_no</td>
+<td>int</td>
+<td>—</td>
+<td>Panel sequence (for multi-panel walls)</td>
+</tr>
+<tr>
+<td>wall_type</td>
+<td>string</td>
+<td>—</td>
+<td>Wall type code (A, B, etc.)</td>
+</tr>
+<tr>
+<td>thickness_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Wall thickness</td>
+</tr>
+<tr>
+<td>length_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Wall plan length</td>
+</tr>
+<tr>
+<td>height_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Wall height</td>
+</tr>
+<tr>
+<td>zone_width_left_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Left zone width</td>
+</tr>
+<tr>
+<td>zone_width_middle_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Middle zone width</td>
+</tr>
+<tr>
+<td>zone_width_right_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Right zone width</td>
+</tr>
+<tr>
+<td>zone_height_top_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Top zone height</td>
+</tr>
+<tr>
+<td>zone_height_middle_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Middle zone height</td>
+</tr>
+<tr>
+<td>zone_height_bottom_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bottom zone height</td>
+</tr>
+<tr>
+<td>node_i</td>
+<td>string</td>
+<td>—</td>
+<td>Corner node 1 (converted ID, or MISSING_xxx if invalid)</td>
+</tr>
+<tr>
+<td>node_j</td>
+<td>string</td>
+<td>—</td>
+<td>Corner node 2 (converted ID, or MISSING_xxx if invalid)</td>
+</tr>
+<tr>
+<td>node_k</td>
+<td>string</td>
+<td>—</td>
+<td>Corner node 3 (converted ID, or MISSING_xxx if invalid)</td>
+</tr>
+<tr>
+<td>node_l</td>
+<td>string</td>
+<td>—</td>
+<td>Corner node 4 (converted ID, or MISSING_xxx if invalid)</td>
+</tr>
+<tr>
+<td>centroid_x_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Panel centroid X (inferred from valid nodes if needed)</td>
+</tr>
+<tr>
+<td>centroid_y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Panel centroid Y (inferred from valid nodes if needed)</td>
+</tr>
+<tr>
+<td>z_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Panel elevation (computed via height stacking)</td>
+</tr>
+<tr>
+<td>node_status</td>
+<td>string</td>
+<td>—</td>
+<td>OK / PARTIAL / INFERRED / MISSING — coordinate reliability</td>
+</tr>
+</tbody>
+</table>
+<h3>21. ReinforcementBasementWall.csv (Conditional)</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>wall_mark</td>
+<td>string</td>
+<td>—</td>
+<td>Wall name</td>
+</tr>
+<tr>
+<td>level</td>
+<td>string</td>
+<td>—</td>
+<td>Story level</td>
+</tr>
+<tr>
+<td>wall_type</td>
+<td>string</td>
+<td>—</td>
+<td>Wall type code</td>
+</tr>
+<tr>
+<td>thickness_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Wall thickness</td>
+</tr>
+<tr>
+<td>direction</td>
+<td>string</td>
+<td>—</td>
+<td>HORIZONTAL or VERTICAL</td>
+</tr>
+<tr>
+<td>face</td>
+<td>string</td>
+<td>—</td>
+<td>INTERIOR or EXTERIOR</td>
+</tr>
+<tr>
+<td>zone</td>
+<td>string</td>
+<td>—</td>
+<td>LEFT/MIDDLE/RIGHT (H) or TOP/MIDDLE/BOTTOM (V)</td>
+</tr>
+<tr>
+<td>bar_spec</td>
+<td>string</td>
+<td>—</td>
+<td>Bar specification (e.g., D13@200)</td>
+</tr>
+<tr>
+<td>dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar diameter</td>
+</tr>
+<tr>
+<td>spacing_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar spacing</td>
+</tr>
+</tbody>
+</table>
+<p>Note: Composite bars (e.g., D13+D16@100) are split into 2 rows with
+doubled spacing per individual bar type (D13@200 + D16@200).</p>
+<hr />
+<h2>FK Relationships</h2>
+<table>
+<thead>
+<tr>
+<th>From</th>
+<th>Column</th>
+<th>To</th>
+<th>Column</th>
+<th>Relationship</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MembersBeam</td>
+<td>design_key</td>
+<td>ReinforcementBeam</td>
+<td>member_id</td>
+<td>Many-to-many (3 positions per beam)</td>
+</tr>
+<tr>
+<td>MembersColumn</td>
+<td>design_key</td>
+<td>ReinforcementColumn</td>
+<td>member_id</td>
+<td>Many-to-one</td>
+</tr>
+<tr>
+<td>MembersWall</td>
+<td>wall_id</td>
+<td>ReinforcementWall</td>
+<td>wall_id</td>
+<td>Many-to-many (numeric join)</td>
+</tr>
+<tr>
+<td>MembersWall</td>
+<td>wall_id</td>
+<td>DesignResultsWall</td>
+<td>wall_id</td>
+<td>Many-to-many</td>
+</tr>
+<tr>
+<td>MembersSlab</td>
+<td>member_id</td>
+<td>ReinforcementSlab</td>
+<td>member_id</td>
+<td>One-to-many</td>
+</tr>
+<tr>
+<td>MembersStair</td>
+<td>member_id</td>
+<td>ReinforcementStair</td>
+<td>member_id</td>
+<td>One-to-many</td>
+</tr>
+<tr>
+<td>MembersFooting</td>
+<td>member_id</td>
+<td>ReinforcementFooting</td>
+<td>member_id</td>
+<td>One-to-many</td>
+</tr>
+<tr>
+<td>MembersBasementWall</td>
+<td>wall_mark + level</td>
+<td>ReinforcementBasementWall</td>
+<td>wall_mark + level</td>
+<td>One-to-many</td>
+</tr>
+<tr>
+<td>All Members</td>
+<td>node_*</td>
+<td>Nodes</td>
+<td>node_id / node_number</td>
+<td>Many-to-one</td>
+</tr>
+<tr>
+<td>All Members</td>
+<td>section_id</td>
+<td>Sections</td>
+<td>section_id</td>
+<td>Many-to-one</td>
+</tr>
+<tr>
+<td>All Members</td>
+<td>material_id</td>
+<td>Materials</td>
+<td>material_id</td>
+<td>Many-to-one</td>
+</tr>
+</tbody>
+</table>
+<h2>Notes</h2>
+<ul>
+<li>All coordinates in mm (MIDAS Gen global coordinate system)</li>
+<li>Level names follow StoryDefinition (1F, B1, Roof, PIT, etc.)</li>
+<li>Semicolons (;) used as separator in boundary_nodes to prevent Excel interpretation</li>
+<li>Composite bars (D16+D13@200) split into 2 rows with doubled spacing</li>
+<li>Pipe format stirrups (4|5-D13@150) take max leg count</li>
+</ul>
+</body>
+</html>
