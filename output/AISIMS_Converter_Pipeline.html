@@ -4,18 +4,18 @@
 <meta charset="UTF-8">
 <title>AISIMS Converter Pipeline</title>
 <style>
-body { font-family: "Segoe UI", "Malgun Gothic", sans-serif; max-width: 1000px; margin: 40px auto; padding: 0 20px; line-height: 1.6; color: #333; }
-h1 { font-size: 1.5em; color: #1a1a2e; border-bottom: 3px solid #16213e; padding-bottom: 10px; }
-h2 { font-size: 1.25em; color: #16213e; margin-top: 30px; background: #f0f2f5; padding: 8px 12px; border-left: 4px solid #0f3460; }
-h3 { font-size: 1.1em; color: #0f3460; margin-top: 20px; }
-table { border-collapse: collapse; width: 100%%; margin: 12px 0; font-size: 0.85em; }
-th, td { border: 1px solid #bdc3c7; padding: 6px 8px; text-align: left; }
-th { background-color: #16213e; color: white; }
-tr:nth-child(even) { background-color: #f5f7fa; }
-code { background: #e8ecf1; padding: 2px 4px; border-radius: 3px; font-family: Consolas, monospace; font-size: 0.88em; }
-pre { background: #1a1a2e; color: #e0e0e0; padding: 15px; border-radius: 6px; overflow-x: auto; font-size: 0.82em; }
-pre code { background: none; color: inherit; }
-hr { border: none; border-top: 2px solid #16213e; margin: 25px 0; }
+  body { font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; max-width: 1100px; margin: 40px auto; padding: 0 20px; color: #333; line-height: 1.6; }
+  h1 { color: #1a1a2e; border-bottom: 3px solid #e94560; padding-bottom: 10px; }
+  h2 { color: #16213e; margin-top: 35px; border-bottom: 2px solid #ddd; padding-bottom: 5px; }
+  h3 { color: #0f3460; }
+  h4 { color: #533483; }
+  table { border-collapse: collapse; width: 100%%; margin: 15px 0; font-size: 13px; }
+  th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+  th { background-color: #16213e; color: white; }
+  tr:nth-child(even) { background-color: #f9f9f9; }
+  code { background: #eee; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+  pre { background: #f4f4f4; padding: 12px; border-radius: 5px; overflow-x: auto; font-size: 12px; line-height: 1.5; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 30px 0; }
 </style>
 </head>
 <body>
@@ -24,18 +24,20 @@ hr { border: none; border-top: 2px solid #16213e; margin: 25px 0; }
 <h2>Overview</h2>
 <p>The AISIMS Converter transforms raw MIDAS Gen structural analysis exports into
 standardized CSV files for the AISIMS V2 BIM Builder Engine. It runs as a
-Streamlit web application with a 5-phase pipeline.</p>
-<pre><code> INPUT DATA                    CONVERTER PIPELINE                     OUTPUT
- ==========                    ==================                     ======
+Streamlit web application with a 6-phase pipeline.</p>
+<pre><code> INPUT DATA                          CONVERTER PIPELINE                              OUTPUT
+ ==========                          ==================                              ======
 
  Part A ─────┐
- (MIDAS Gen) │   Phase 1    Phase 2    Phase 3    Phase 4    Phase 5
-             ├──► FOUND ──► MEMBERS ──► GRID ──► REINF ──► VALID ──► 21 CSVs
- Part B ─────┤   ATION      BERS       AUTO       ORCE      ATION     + Report
- (Engineer)  │                          DETECT     MENT
-             │
- Part C ─────┘
- (Basement)
+ (MIDAS Gen) │  Phase 1   Phase 2   Phase 3   Phase 4   Phase 5   Phase 6
+             ├──► FOUND ─► MEMB ──► GRID ──► REINF ──► VALID ──► REBAR ──► 28 CSVs
+ Part B ─────┤   ATION    ERS       AUTO      ORCE      ATION     LENGTHS   + Report
+ (Engineer)  │                      DETECT    MENT                (Tier 2)
+             │                                                        │
+ Part C ─────┘                       ┌────────────────────────────────┘
+ (Basement)                          │  Tier 1 DataFrames passed
+                                     │  in-memory (no re-upload)
+                                     └──► 7 RebarLengths CSVs
 </code></pre>
 <hr />
 <h2>Input Data Sources</h2>
@@ -185,6 +187,56 @@ StoryDefinition.csv ────────┘ (level resolution)       │
 - Missing StoryDefinition → nodes get <code>Z{value}</code> as level fallback
 - Missing MGT → default SD400 rebar added
 - Unparseable section name → member_type = UNKNOWN (flagged in validation)</p>
+<h4>Pseudocode: convert_nodes()</h4>
+<pre><code>Load StoryDefinition → build level_z_map {level_name → z_mm}
+
+FOR each raw node (node_number, x, y, z):
+  Match z to nearest StoryDefinition level (tolerance 100mm)
+  IF match found: level = matched level name
+  ELSE:           level = &quot;Z{z_value}&quot; (fallback)
+
+  IF manual grid provided:
+    Match (x, y) to nearest grid intersection (tolerance 50mm)
+    IF on grid: node_id = &quot;N_{level}_{gridX}{gridY}&quot;, grid = &quot;{gridX}{gridY}&quot;
+    ELSE:       node_id = &quot;N_{level}_OFF{node_number}&quot;, grid = &quot;OFF_GRID&quot;
+  ELSE:
+    node_id = &quot;N_{level}_OFF{node_number}&quot;, grid = &quot;OFF_GRID&quot;
+
+  Emit: node_id, node_number, x_mm, y_mm, z_mm, level, grid, offsets
+</code></pre>
+<h4>Pseudocode: convert_materials()</h4>
+<pre><code>Load raw Materials.csv (40+ columns per material)
+IF MGT file exists:
+  Parse *MATERIAL section → extract rebar grades (SD400/500/600)
+
+FOR each material:
+  Detect type: CONCRETE (contains fck) or REBAR (from MGT)
+  IF CONCRETE: extract fck_MPa, normalize name (e.g., &quot;C35&quot;)
+  Deduplicate: 3× C35 with same properties → 1 row
+
+Emit: material_id, material_type, fck_MPa, fy_MPa, ...
+Append rebar materials from MGT (SD400, SD500, SD600)
+</code></pre>
+<h4>Pseudocode: convert_sections()</h4>
+<pre><code>Load Sections.csv + Thickness.csv
+Build StoryDefinition lookup for level resolution
+
+FOR each section:
+  Parse section name using 20+ prefix patterns:
+    Joined format:    &quot;6C1&quot; → level=6F, type=COLUMN, base=C1
+    Space-separated:  &quot;1 B1&quot; → level=1F, type=BEAM, base=B1
+    Parenthetical:    &quot;TC1 (1-P)&quot; → level=1F~P, type=COLUMN, base=TC1
+    Prefixes: C, TC, B, TB, G, TG, W, BT, RG, CB, WCG, TWG, ...
+  Resolve ambiguous levels: &quot;P&quot; → PIT or PH (check StoryDefinition)
+  Determine member_type: BEAM, COLUMN, WALL from prefix
+  Extract dimensions: b_mm, h_mm from section properties
+
+Merge Thickness entries (wall/slab thickness definitions)
+Deduplicate section_ids (first wins, rest added to lookup)
+
+Emit: section_id, member_type, level, b_mm, h_mm, ...
+Build: section_lookup dict, thickness_lookup dict
+</code></pre>
 <hr />
 <h3>Phase 2: Members</h3>
 <p><strong>Purpose</strong>: Convert raw elements into categorized structural members.</p>
@@ -245,6 +297,112 @@ node_lookup ─────────────────┘              
 <p><strong>Node merging:</strong>
 - FootBoundary nodes (1001-1040 in P1) merged into main Nodes.csv
 - Tagged with <code>source=BOUNDARY</code> to distinguish from MIDAS nodes</p>
+<h4>Pseudocode: convert_elements()</h4>
+<pre><code>FOR each element (node_i, node_j, section_id, ...):
+  Lookup section → get member_type, dimensions
+  Get node coordinates → compute orientation
+
+  IF section references Thickness table (not Sections):
+    IF vertical: type = WALL
+    IF horizontal: type = LINK_BEAM (labeled ELEM_{id})
+
+  Classify by orientation + section prefix:
+    Horizontal + BEAM prefix → MembersBeam
+    Vertical + COLUMN prefix → MembersColumn
+    Vertical + WALL/BT prefix → MembersWall
+
+  FOR beams:
+    length_mm = distance(node_i, node_j)
+    Assign: x_from_mm, y_from_mm, x_to_mm, y_to_mm, level, grid, design_key
+
+  FOR columns:
+    height_mm = |z_top - z_bottom|
+    length_mm = 3D distance(node_i, node_j)  (for slanted columns)
+    x_top_mm, y_top_mm (may differ from bottom for slanted)
+
+  FOR walls:
+    height_mm, width_mm from aggregated node positions
+    wall_id from numeric element ID
+    wall_mark from MGT wall marks lookup
+
+Emit: MembersBeam.csv, MembersColumn.csv, MembersWall.csv
+</code></pre>
+<h4>Pseudocode: convert_slabs()</h4>
+<pre><code>FOR each slab boundary entry:
+  Parse boundary nodes (semicolon-separated)
+  Lookup node coordinates → compute bounding box
+  Filter out stair entries (SS/ST suffix in member_id)
+
+  Compute:
+    Lx_mm, Ly_mm from bounding box
+    centroid_x/y from average of boundary node coordinates
+    z_mm from node Z (should be consistent for a slab)
+    area_mm2 from bounding box (or Shoelace for polygons)
+    thickness_mm from linked Thickness entry
+
+Emit: MembersSlab.csv
+</code></pre>
+<h4>Pseudocode: convert_stairs()</h4>
+<pre><code>FOR each stair reinforcement entry (contains geometry + rebar):
+  Extract: member_id, level, stair_width, landing dimensions, riser/tread
+  Identify boundary nodes → lookup coordinates
+  Auto-detect wall side from core wall positions
+
+  Build 8-point U-shaped geometry model:
+    P1 = lower landing start (at wall)
+    P2 = lower landing end (flight start)
+    P3 = flight 1 bottom
+    P4 = flight 1 top = mid landing start
+    P5 = mid landing end (flight 2 start)
+    P6 = flight 2 bottom
+    P7 = flight 2 top = upper landing start
+    P8 = upper landing end (at wall)
+
+  Flight centerline inset by stair_width/2 from boundary
+  Flight 2 end Z = z_start + total_height (not P3's Z)
+  Gap = boundary_Lx - 2 × stair_width
+
+Emit: MembersStair.csv (73 columns per stair)
+</code></pre>
+<h4>Pseudocode: convert_footings()</h4>
+<pre><code>FOR each footing boundary entry:
+  Parse boundary nodes
+  IF node_count % 4 == 0: split into quads (rectangular panels)
+  ELSE: treat as polygon (compute area via Shoelace formula)
+
+  Group by member_id → detect multi-part footings (MF1-1, MF1-2)
+  Compute: bounding box, centroid, area, Lx, Ly
+  Boundary nodes use semicolon separator (Excel compatibility)
+
+FOR each footing reinforcement entry:
+  Parse zone_type: BASE / ADDITIONAL / STIRRUP
+  Parse zone_boundary (pipe-separated quads for L-shaped footprints)
+  Parse bar specs: D19@250, 5-10@200
+
+Emit: MembersFooting.csv, ReinforcementFooting.csv
+</code></pre>
+<h4>Pseudocode: convert_basement_walls()</h4>
+<pre><code>FOR each boundary row:
+  Group by (wall_name, level) → collect nodes
+  Fill zone dimensions from first non-null row per group
+  Build raw-to-converted node ID mapping
+
+Validate nodes:
+  Check existence in Nodes.csv AND Z in basement range (≤ 0)
+  Compute wall reference XY from valid basement nodes
+  Compute Z centroid via height stacking (not from node Z)
+  Mark node_status: OK / PARTIAL / INFERRED / MISSING
+
+Split nodes into panels (4 per quad)
+
+FOR each reinforcement row:
+  Map 12 column positions to (direction, face, zone):
+    H_Int.(Left), H_Ext.(Left), ..., V_Int.(Top), V_Ext.(Top), ...
+  Handle composite bars: D13+D16@100 → 2 rows with doubled spacing
+  Parse bar specs via rebar_spec parser
+
+Emit: MembersBasementWall.csv, ReinforcementBasementWall.csv
+</code></pre>
 <hr />
 <h3>Phase 3: Grid Auto-Detection</h3>
 <p><strong>Purpose</strong>: Detect grid lines from column positions when no manual grid is provided.</p>
@@ -268,6 +426,23 @@ Re-run convert_elements() with updated nodes → updated grid labels in Members
 <p><strong>When skipped:</strong>
 - Manual grid entry → grid already assigned in Phase 1
 - Grid CSV upload → positions provided directly</p>
+<h4>Pseudocode: detect_grid_from_columns()</h4>
+<pre><code>Collect all column (x_mm, y_mm) positions across all levels
+Cluster X positions (tolerance 100mm) → grid_x lines
+Cluster Y positions (tolerance 100mm) → grid_y lines
+Filter: require minimum 2 columns per grid line
+Label: X1, X2, X3, ... / Y1, Y2, Y3, ... (sorted by position)
+
+reassign_node_grids(nodes, grid_x, grid_y):
+  FOR each node:
+    Find nearest grid_x label (within 50mm)
+    Find nearest grid_y label (within 50mm)
+    IF both match: grid = &quot;{gridX}{gridY}&quot;, update node_id
+    ELSE: grid = &quot;OFF_GRID&quot;, keep OFF node_id
+    Compute grid_offset_x/y_mm (distance from nearest grid)
+
+  Re-run convert_elements() with updated grid labels in nodes
+</code></pre>
 <hr />
 <h3>Phase 4: Reinforcement + Design Results</h3>
 <p><strong>Purpose</strong>: Parse MIDAS design output into reinforcement specifications and design capacity data.</p>
@@ -311,6 +486,76 @@ StairReinforcement.csv ──► convert_reinforcement_stair() ─► Reinforcem
 - Members use base IDs: <code>B11</code>, <code>G1</code>, <code>TC1</code>
 - <code>design_key</code> column in Members stores the raw name for FK joining
 - Validation uses <code>_extract_base_member_id()</code> for coverage checking</p>
+<h4>Pseudocode: convert_reinforcement_beam()</h4>
+<pre><code>Parse DesignBeam.csv in 3-row blocks (I=start, M=mid, J=end):
+  Row 1: section_id, element_id, fck, fy, fys, b, h
+  Row 2: main bar spec + stirrup spec at position I/M/J
+  Row 3: design ratios (Mu, Vu, rho, etc.)
+
+FOR each 3-row block:
+  Parse main bars: &quot;6-4-D22&quot; → main_count=6, additional=4, dia=22, total=10
+  Parse stirrups: &quot;3-D10 @150&quot; → legs=3, dia=10, spacing=150
+    Handle pipe format: &quot;4|5-D13@150&quot; → legs=max(4,5)=5
+    Handle no-D-prefix: &quot;5-10@200&quot;
+
+  Split output:
+    ReinforcementBeam → member_id, position(I/M/J), bar specs, counts
+    DesignResultsBeam → member_id, position, Mu, Vu, rho, ratios
+
+Emit: ReinforcementBeam.csv, DesignResultsBeam.csv
+</code></pre>
+<h4>Pseudocode: convert_reinforcement_column()</h4>
+<pre><code>Parse DesignColumn.csv in 2-row blocks:
+  Row 1: section_id, element_id, fck, main bar spec, tie specs
+  Row 2: b, h, height, design ratios
+
+FOR each block:
+  Parse main: &quot;24-8-D29&quot; → main_count=24, additional=8, dia=29, total=32
+  Parse tie_end + tie_mid: &quot;3-D13 @150&quot; → legs, dia, spacing
+
+  Split output:
+    ReinforcementColumn → member_id, main bar props, tie end/mid props
+    DesignResultsColumn → member_id, Pu, Mu, ratios
+
+Emit: ReinforcementColumn.csv, DesignResultsColumn.csv
+</code></pre>
+<h4>Pseudocode: convert_reinforcement_wall()</h4>
+<pre><code>Parse DesignWall.csv in 2-row blocks:
+  Row 1: wall_id, V bar spec, H bar spec, design ratios
+  Row 2: story, height, thickness, geometry
+
+FOR each block:
+  Parse V bars: &quot;D13 @150&quot; → dia=13, spacing=150
+  Parse H bars: &quot;D10 @200&quot; → dia=10, spacing=200
+  Add wall_id (numeric) for FK joining (wall_mark naming differs)
+
+  Split output:
+    ReinforcementWall → wall_id, wall_mark, v/h bar specs
+    DesignResultsWall → wall_id, wall_mark, shear ratios
+
+Emit: ReinforcementWall.csv, DesignResultsWall.csv
+</code></pre>
+<h4>Pseudocode: convert_reinforcement_slab()</h4>
+<pre><code>FOR each slab reinforcement entry:
+  Parse bar spec: &quot;D10@200&quot; → dia=10, spacing=200
+  Handle composite: &quot;D13+D16@100&quot; → 2 rows @ doubled spacing (D13@200 + D16@200)
+
+  Expand: each slab → 4 rows (X_Top, X_Bot, Y_Top, Y_Bot)
+  Normalize level names (R→Roof, 1→1F)
+
+Emit: ReinforcementSlab.csv
+</code></pre>
+<h4>Pseudocode: convert_reinforcement_stair()</h4>
+<pre><code>FOR each stair reinforcement entry:
+  Expand into 8 rows per stair:
+    landing_left × (longitudinal, transverse) × (Top, Bot)
+    landing_right × (longitudinal, transverse) × (Top, Bot)
+    stair × (longitudinal, transverse) × (Top, Bot)
+  Parse bar specs per zone
+  Normalize level names
+
+Emit: ReinforcementStair.csv
+</code></pre>
 <hr />
 <h3>Phase 5: Validation</h3>
 <p><strong>Purpose</strong>: Cross-check all outputs for consistency and completeness.</p>
@@ -335,28 +580,25 @@ Checks performed:
 - <strong>FAIL</strong>: Critical issue (e.g., no concrete materials)</p>
 <hr />
 <h2>Phase Dependencies</h2>
-<pre><code>Phase 1 ──────► Phase 2 ──────► Phase 3 ──────► Phase 4 ──────► Phase 5
-(Foundation)    (Members)       (Grid Auto)        (Reinf.)        (Valid.)
-    │               │               │                  │               │
-    │               │               │                  │               │
-    ▼               ▼               ▼                  ▼               ▼
- Nodes.csv     MembersBeam    Updated Nodes      ReinfBeam       Report
- Materials     MembersColumn  Updated Members    ReinfColumn
- Sections      MembersWall                       ReinfWall
- Lookups       MembersSlab                       ReinfSlab
-               MembersStair                      ReinfStair
-               MembersFooting                    ReinfFooting
-               MembersBasementWall               ReinfBasementWall
-                                                 DesignResults×3
+<pre><code>Phase 1 ─► Phase 2 ─► Phase 3 ─► Phase 4 ─► Phase 5 ─► Phase 6
+(Found.)   (Members)  (Grid)     (Reinf.)   (Valid.)   (RebarLen)
+   │          │          │           │          │           │
+   ▼          ▼          ▼           ▼          ▼           ▼
+ Nodes     Members×7  Updated    Reinf×5     Report    RebarLengths×7
+ Materials            Nodes      Design×3
+ Sections             Members
+ Lookups
 </code></pre>
 <p><strong>Strict order:</strong>
 1. Phase 1 must complete before Phase 2 (sections/nodes needed)
 2. Phase 2 must complete before Phase 3 (column positions needed)
 3. Phase 3 must complete before Phase 4 (grid labels in Members)
-4. Phase 4 must complete before Phase 5 (all outputs needed for validation)</p>
+4. Phase 4 must complete before Phase 5 (all outputs needed for validation)
+5. Phase 5 must complete before Phase 6 (Tier 1 data needed for rebar calculation)</p>
 <p><strong>Independent within phase:</strong>
 - Within Phase 2: slabs, stairs, footings, basement walls can run in parallel
-- Within Phase 4: beam, column, wall, slab, stair reinforcement can run in parallel</p>
+- Within Phase 4: beam, column, wall, slab, stair reinforcement can run in parallel
+- Within Phase 6: all 7 rebar length calculators can run in parallel</p>
 <hr />
 <h2>Data Flow Diagram</h2>
 <pre><code>                        ┌─────────────────────────────────────────────┐
@@ -393,32 +635,223 @@ Checks performed:
                         │  │ VALID.   │  Validation:                  │
                         │  └────┬─────┘  └─ validation.py             │
                         │       │                                     │
+                        │       ▼        Tier 2:                      │
+                        │  ┌──────────┐  ├─ rebar_lengths_beam.py     │
+                        │  │ Phase 6  │  ├─ rebar_lengths_column.py   │
+                        │  │ REBAR    │  ├─ rebar_lengths_slab.py     │
+                        │  │ LENGTHS  │  ├─ rebar_lengths_stair.py    │
+                        │  └────┬─────┘  ├─ rebar_lengths_wall.py     │
+                        │       │        ├─ rebar_lengths_footing.py  │
+                        │       │        ├─ rebar_lengths_basement_wall│
+                        │       │        └─ stock_split.py (shared)   │
                         │       ▼                                     │
                         │  ┌──────────┐                               │
-                        │  │ OUTPUT   │──► 21 CSVs + ValidationReport │
+                        │  │ OUTPUT   │──► 28 CSVs + ValidationReport │
                         │  │ (ZIP)    │──► Download as .zip           │
                         │  └──────────┘                               │
                         └─────────────────────────────────────────────┘
 </code></pre>
 <hr />
-<h2>Tier 2: Rebar Length Calculators (separate module)</h2>
-<p>The Tier 2 calculators consume Tier 1 output to compute bar-by-bar lengths.
-They are NOT part of the Streamlit pipeline but run independently.</p>
-<pre><code>Tier 1 CSVs ──────────► Tier 2 Calculators ──────► RebarLengths CSVs
-
-Available:
-  tier2/rebar_lengths_beam.py    ──► RebarLengthsBeam.csv (2,801 records P1)
-  tier2/rebar_lengths_column.py  ──► RebarLengthsColumn.csv (91 records P1)
-
-Pending:
-  tier2/rebar_lengths_wall.py    ──► RebarLengthsWall.csv
-  tier2/rebar_lengths_slab.py    ──► RebarLengthsSlab.csv
-  tier2/rebar_lengths_stair.py   ──► RebarLengthsStair.csv
-  tier2/rebar_lengths_footing.py ──► RebarLengthsFooting.csv
+<h3>Phase 6: Rebar Lengths (Tier 2)</h3>
+<p><strong>Purpose</strong>: Compute bar-by-bar lengths from Tier 1 output for BIM rebar modeling.</p>
+<pre><code>Tier 1 DataFrames ──► Tier 2 Calculators ──► RebarLengths CSVs
+(in-memory)              │
+                         ├─ rebar_lengths_beam.py       ──► RebarLengthsBeam.csv
+                         ├─ rebar_lengths_column.py     ──► RebarLengthsColumn.csv
+                         ├─ rebar_lengths_slab.py       ──► RebarLengthsSlab.csv
+                         ├─ rebar_lengths_stair.py      ──► RebarLengthsStair.csv
+                         ├─ rebar_lengths_wall.py       ──► RebarLengthsWall.csv
+                         ├─ rebar_lengths_footing.py    ──► RebarLengthsFooting.csv
+                         └─ rebar_lengths_basement_wall.py ► RebarLengthsBasementWall.csv
 
 Shared resources:
   config/development_lengths.csv  (486 rows: 3 fy × 6 fc × 3 member_types × 9 bars)
   config/lap_splice.csv           (486 rows: same coverage)
+  config/cover_requirements.csv   (member_type → cover_mm)
+  tier2/stock_split.py            (shared &gt;12m bar splitting utility)
+</code></pre>
+<p><strong>Data flow:</strong> Phase 6 consumes Tier 1 DataFrames directly from memory (same objects
+that get written to the ZIP download). No re-upload or file I/O needed.</p>
+<p><strong>Conditional execution:</strong> Each calculator only runs if its required Tier 1 inputs exist.
+Each is wrapped in try/except so a failure in one does not block the others.</p>
+<hr />
+<h4>Pseudocode: Beam Rebar Lengths</h4>
+<pre><code>FOR each beam gridline group (clustered by perpendicular coordinate):
+  Sort beams along the gridline by position
+  FOR each span:
+    Lookup reinforcement (TOP/BOT at I/M/J positions)
+    Determine bar_role based on span position:
+      SINGLE (1 span), START/INTERMEDIATE/END (multi-span)
+    FOR each bar position (TOP, BOT):
+      bar_length = clear_span
+      IF start is free edge:  bar_length += Ldh (hook)
+      ELSE:                   bar_length += Llap (lap into adjacent span)
+      IF end is free edge:    bar_length += Ldh (hook)
+      ELSE:                   bar_length += Llap (lap)
+      IF bar_length &gt; 12000mm:
+        split into pieces via stock_split
+      Compute splice zone coordinates
+      Emit record with x_start/y_start/z_start → x_end/y_end/z_end
+    FOR stirrups (END zone + MID zone):
+      stirrup_length = 2*(b + h) - 8*cover + 2*hook
+      n_stirrups = zone_length / spacing
+      Emit record
+</code></pre>
+<h4>Pseudocode: Column Rebar Lengths</h4>
+<pre><code>Group columns by (grid, member_id)
+Merge slanted stacks (same member_id, Z-continuous, different XY)
+FOR each wall stack:
+  Split into continuous groups (Z-based gap detection, tolerance 200mm)
+  FOR each continuous group:
+    Sort by Z (bottom to top)
+    FOR each level in group:
+      Determine role: BOTTOM / INTERMEDIATE / TOP / SINGLE
+      Main bars:
+        IF BOTTOM:       length = height + Lpc (lap at top)
+        IF INTERMEDIATE: length = height + Lpc (lap at top)
+        IF TOP:          length = height + Ldh (hook at top)
+        IF SINGLE:       length = height + Ldh
+        Use length_mm (3D) for slanted columns, not height_mm
+      Hoops:
+        END zone = 2 × max(h, b, height/6, 450mm)
+        MID zone = height - 2 × end_zone
+        hoop_length = 2*(b + h) - 8*cover + 2*hook
+        n_hoops = zone_length / spacing
+      Emit records with x_start/y_start/z_start → x_end/y_end/z_end
+</code></pre>
+<h4>Pseudocode: Slab Rebar Lengths</h4>
+<pre><code>Build panel bounds from boundary nodes (bounding box per slab)
+Build beam width lookup (for clear span calculation)
+
+FOR each slab panel:
+  FOR each direction (X, Y):
+    Detect panel role via coordinate adjacency:
+      Find panels sharing edges → SINGLE/START/INTERMEDIATE/END
+    Check thickness mismatch with adjacent panels
+    FOR each layer (Top, Bot):
+      Determine anchorage strategy:
+        Top bars: hook at free edges, lap at continuous edges
+        Bot bars: hook at thickness mismatch, lap at same-thickness
+      clear_span = panel_span - 0.5*(beam_width_1 + beam_width_2)
+      bar_length = clear_span + anchorage_start + anchorage_end
+      n_bars = perpendicular_width / spacing + 1
+      z_bar = panel_z ± (thickness/2 - cover - dia/2)
+      IF bar_length &gt; 12000mm:
+        split into pieces via stock_split (with coordinate interpolation)
+      Emit record with mesh_origin → mesh_terminus, distribution_axis
+</code></pre>
+<h4>Pseudocode: Stair Rebar Lengths</h4>
+<pre><code>FOR each stair (8-point U-shaped geometry model):
+  Extract geometry: P1-P8 points, A (lower landing), B (width), C (mid landing)
+  Compute flight slope vectors and lengths
+  Lookup dev/lap lengths for stair bar diameter
+
+  Emit 10 bar types per stair:
+    #1  Lower landing TOP along A     = A (hook at wall)
+    #2  Lower landing BOT along A     = A + lap_bot (extends into flight slope)
+    #3  Lower landing DIST span B     = B + Ldh + dia (hook at wall)
+    #4  Mid landing TOP along C       = C + lap_top (extends from flight slope)
+    #5  Mid landing BOT along C       = C (hook at wall)
+    #6  Mid landing DIST span B       = B + Ldh + dia
+    #7  Flight slope TOP              = slope_length + lap_top + lap_top
+    #8  Flight slope BOT              = slope_length + lap_bot + lap_bot
+    #9  Flight transverse             = flight_width + 2*Ldh
+    #10 (Flight 2 mirrors Flight 1)
+
+  Each record: start/end 3D coordinates + width_dir vector + width_span
+</code></pre>
+<h4>Pseudocode: Wall Rebar Lengths</h4>
+<pre><code>Group walls by wall_id → sort by level
+Split into continuous groups (Z-based gap detection, tolerance 200mm)
+
+FOR each continuous group:
+  FOR each level:
+    Determine vertical bar role: BOTTOM/INTERMEDIATE/TOP/SINGLE
+    Aggregate node positions for wall segment XY bounds
+
+    VERTICAL bars:
+      IF BOTTOM at foundation: emit DOWEL + main bar with lap at top
+      IF BOTTOM above foundation: main bar with lap at top
+      IF TOP: main bar with hook at top (wall terminates)
+      IF INTERMEDIATE: main bar with lap at top
+      n_bars = (width - 2*cover) / spacing × face_multiplier (×2 for Double)
+      IF bar_length &gt; 12000mm: stock_split
+
+    HORIZONTAL bars:
+      U_bar_length = width + (thickness - 2*cover)
+      n_bars = (height - 2*cover) / spacing × face_multiplier
+      IF bar_length &gt; 12000mm: stock_split
+
+    Emit records with mesh_origin → mesh_terminus
+</code></pre>
+<h4>Pseudocode: Footing Rebar Lengths</h4>
+<pre><code>FOR each reinforcement zone:
+  IF zone_type == BASE:
+    Parse zone_boundary into sub-rectangles (pipe-separated quads)
+    Compute bar groups:
+      X-direction: each sub-rect generates bars spanning its X-width
+      Y-direction: merge Y-adjacent sub-rects sharing X-overlap
+                   → continuous bars across L-shaped footprint
+    FOR each bar group:
+      bar_length = clear_span + 2*Ldh (hook at both free edges)
+      n_bars = distribution_width / spacing + 1
+      z_bar = footing_z ± (thickness/2 - cover - dia/2)
+      Stock split (mat foundations easily exceed 12m)
+
+  IF zone_type == ADDITIONAL:
+    Simple rectangular zone
+    bar_length = zone_span + 2*Ldh
+    n_bars = perpendicular_width / spacing + 1
+
+  IF zone_type == STIRRUP:
+    bar_length = thickness - 2*cover + 2*hook_extension
+    n_total = n_x × n_y × n_legs (grid of vertical ties)
+</code></pre>
+<h4>Pseudocode: Basement Wall Rebar Lengths</h4>
+<pre><code>Skip panels with node_status != OK (unreliable coordinates)
+Group panels by wall_mark
+Separate full-height (B4~B1) from per-level panels
+
+FOR full-height panels:
+  Process as FULL_HEIGHT role (hook at top for each vertical zone)
+
+FOR per-level panels:
+  Split into continuous groups (Z-based, same as standard wall)
+  Determine role per level: BOTTOM/INTERMEDIATE/TOP/SINGLE
+
+FOR each panel:
+  VERTICAL bars (per zone: TOP/MIDDLE/BOTTOM):
+    zone_height from zone_height_top/middle/bottom_mm
+    bar_length = zone_height + Ldh or Lpc (based on role)
+    n_bars = (wall_length - 2*cover) / spacing
+    Stock split if needed
+
+  HORIZONTAL bars (per zone: LEFT/MIDDLE/RIGHT):
+    zone_width from zone_width_left/middle/right_mm
+    U_bar_length = zone_width + (thickness - 2*cover)
+    n_bars = (height - 2*cover) / spacing
+    Stock split if needed
+
+  Each zone × each face (INTERIOR/EXTERIOR) = separate record
+</code></pre>
+<h4>Stock Split Algorithm (shared)</h4>
+<pre><code>IF bar_length &lt;= 12000mm:
+  RETURN [original bar]  (no split needed)
+
+n_pieces = ceil(bar_length / 12000)
+total_material = bar_length + (n_pieces - 1) × L_lap
+piece_length = total_material / n_pieces
+
+FOR each piece i = 1..n_pieces:
+  t_start = (i-1) / n_pieces
+  t_end = i / n_pieces
+  Interpolate start/end coordinates along original bar line
+  piece.length_mm = piece_length
+  piece.split_piece = i
+  piece.split_total = n_pieces
+  piece.original_length_mm = bar_length
+
+RETURN [piece_1, piece_2, ..., piece_n]
 </code></pre>
 <hr />
 <h2>Error Recovery</h2>
@@ -488,22 +921,30 @@ Shared resources:
 <th>Project</th>
 <th>Nodes</th>
 <th>Elements</th>
-<th>Processing Time</th>
+<th>Tier 1</th>
+<th>Tier 2</th>
+<th>Total Output</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Project 1 (청담동, 10 stories + 4 basements)</td>
+<td>P1 (청담동, 10F + 4B)</td>
 <td>744</td>
 <td>1,042</td>
-<td>~5 seconds</td>
+<td>~5s</td>
+<td>~3s</td>
+<td>21 + 7 CSVs (3,866 rebar records)</td>
 </tr>
 <tr>
-<td>Project 2 (불당동, 15 stories + 5 basements)</td>
+<td>P2 (불당동, 15F + 5B)</td>
 <td>9,435</td>
 <td>10,476</td>
-<td>~15 seconds</td>
+<td>~15s</td>
+<td>~8s</td>
+<td>21 + 6 CSVs (no basement wall)</td>
 </tr>
 </tbody>
 </table>
-<hr /></body></html>
+<hr />
+</body>
+</html>

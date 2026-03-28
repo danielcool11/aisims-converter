@@ -1,0 +1,1828 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AISIMS Tier 2 Data Dictionary</title>
+<style>
+  body { font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; max-width: 1100px; margin: 40px auto; padding: 0 20px; color: #333; line-height: 1.6; }
+  h1 { color: #1a1a2e; border-bottom: 3px solid #e94560; padding-bottom: 10px; }
+  h2 { color: #16213e; margin-top: 35px; border-bottom: 2px solid #ddd; padding-bottom: 5px; }
+  h3 { color: #0f3460; }
+  table { border-collapse: collapse; width: 100%%; margin: 15px 0; font-size: 13px; }
+  th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+  th { background-color: #16213e; color: white; }
+  tr:nth-child(even) { background-color: #f9f9f9; }
+  code { background: #eee; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+  pre { background: #f4f4f4; padding: 12px; border-radius: 5px; overflow-x: auto; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 30px 0; }
+  p { margin: 8px 0; }
+</style>
+</head>
+<body>
+<h1>AISIMS Tier 2 Data Dictionary — RebarLengths CSVs</h1>
+<p><strong>Version:</strong> 2.0
+<strong>Date:</strong> 2026-03-27</p>
+<p>Tier 2 rebar length calculators consume Tier 1 output and produce bar-by-bar length records for BIM modeling. Each record represents a group of identical bars with computed lengths, anchorage, and placement coordinates.</p>
+<hr />
+<h2>Common Columns</h2>
+<p>The following columns appear in all 7 RebarLengths files:</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar diameter</td>
+</tr>
+<tr>
+<td>spacing_mm</td>
+<td>int/float</td>
+<td>mm</td>
+<td>Bar spacing (0 or null for count-based bars)</td>
+</tr>
+<tr>
+<td>n_bars</td>
+<td>int</td>
+<td>—</td>
+<td>Number of bars in this group</td>
+</tr>
+<tr>
+<td>length_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Individual bar length (after anchorage, before stock split)</td>
+</tr>
+<tr>
+<td>total_length_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Total material length (length_mm x n_bars)</td>
+</tr>
+<tr>
+<td>split_piece</td>
+<td>float</td>
+<td>—</td>
+<td>Stock split piece number (null if bar &lt;= 12m)</td>
+</tr>
+<tr>
+<td>split_total</td>
+<td>float</td>
+<td>—</td>
+<td>Total pieces after stock split (null if no split)</td>
+</tr>
+<tr>
+<td>original_length_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Original bar length before stock split (null if no split)</td>
+</tr>
+</tbody>
+</table>
+<h3>Coordinate Conventions</h3>
+<p>Two coordinate systems are used depending on bar placement type:</p>
+<p><strong>Individual bar placement</strong> (Beam, Column, Stair):
+- <code>x_start_mm, y_start_mm, z_start_mm</code> — bar start point
+- <code>x_end_mm, y_end_mm, z_end_mm</code> — bar end point</p>
+<p><strong>Distributed bar mesh</strong> (Slab, Wall, Footing, Basement Wall):
+- <code>mesh_origin_x/y/z_mm</code> — mesh start point
+- <code>mesh_terminus_x/y/z_mm</code> — mesh end point
+- <code>mesh_distribution_axis</code> — axis along which n_bars are distributed</p>
+<h3>Stock Split</h3>
+<p>Bars exceeding 12m stock length are split into multiple pieces with lap splices at each joint. The shared utility (<code>tier2/stock_split.py</code>) computes:
+- Number of pieces: <code>ceil(length / 12000)</code>
+- Piece length: <code>(original_length + (n_pieces - 1) x lap) / n_pieces</code>
+- Coordinates interpolated for each piece</p>
+<hr />
+<h2>1. RebarLengthsBeam.csv (40 columns)</h2>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>segment_id</td>
+<td>string</td>
+<td>—</td>
+<td>Unique segment ID (e.g., B1-SEG001)</td>
+</tr>
+<tr>
+<td>level</td>
+<td>string</td>
+<td>—</td>
+<td>Story level (1F, 2F, B1, etc.)</td>
+</tr>
+<tr>
+<td>direction</td>
+<td>string</td>
+<td>—</td>
+<td>Beam direction (X or Y)</td>
+</tr>
+<tr>
+<td>line_grid</td>
+<td>float</td>
+<td>mm</td>
+<td>Perpendicular gridline coordinate</td>
+</tr>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Base member ID (e.g., B1, G1)</td>
+</tr>
+<tr>
+<td>span_index</td>
+<td>int</td>
+<td>—</td>
+<td>Span number along the beam line</td>
+</tr>
+<tr>
+<td>start_grid</td>
+<td>string</td>
+<td>—</td>
+<td>Grid label at beam start (or OFF_GRID)</td>
+</tr>
+<tr>
+<td>end_grid</td>
+<td>string</td>
+<td>—</td>
+<td>Grid label at beam end (or OFF_GRID)</td>
+</tr>
+<tr>
+<td>bar_position</td>
+<td>string</td>
+<td>—</td>
+<td>TOP, BOT, or STIRRUP</td>
+</tr>
+<tr>
+<td>bar_role</td>
+<td>string</td>
+<td>—</td>
+<td>Detailed role (MAIN_SINGLE, MAIN_START, MAIN_INTERMEDIATE, MAIN_END, ADD_TOP, ADD_BOT, STIRRUP_END, STIRRUP_MID)</td>
+</tr>
+<tr>
+<td>bar_type</td>
+<td>string</td>
+<td>—</td>
+<td>MAIN or STIRRUP</td>
+</tr>
+<tr>
+<td>dia_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar diameter</td>
+</tr>
+<tr>
+<td>n_bars</td>
+<td>int</td>
+<td>—</td>
+<td>Number of bars</td>
+</tr>
+<tr>
+<td>length_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Individual bar length</td>
+</tr>
+<tr>
+<td>layer</td>
+<td>float</td>
+<td>—</td>
+<td>Bar layer number (1, 2 for multi-layer)</td>
+</tr>
+<tr>
+<td>spacing_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Stirrup spacing (null for main bars)</td>
+</tr>
+<tr>
+<td>zone_length_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Length of the reinforcement zone</td>
+</tr>
+<tr>
+<td>quantity_pieces</td>
+<td>float</td>
+<td>—</td>
+<td>Number of stirrup sets in zone</td>
+</tr>
+<tr>
+<td>total_length_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Total material length</td>
+</tr>
+<tr>
+<td>anchorage_start</td>
+<td>string</td>
+<td>—</td>
+<td>Start anchorage type (HOOK, LAP, NONE)</td>
+</tr>
+<tr>
+<td>anchorage_end</td>
+<td>string</td>
+<td>—</td>
+<td>End anchorage type (HOOK, LAP, NONE)</td>
+</tr>
+<tr>
+<td>lap_length_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Lap splice length used</td>
+</tr>
+<tr>
+<td>development_length_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Development length (Ldh) used</td>
+</tr>
+<tr>
+<td>splice_start_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Splice zone start Z coordinate</td>
+</tr>
+<tr>
+<td>splice_start_end_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Splice zone start end coordinate</td>
+</tr>
+<tr>
+<td>splice_end_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Splice zone end Z coordinate</td>
+</tr>
+<tr>
+<td>splice_end_end_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Splice zone end end coordinate</td>
+</tr>
+<tr>
+<td>transition_type</td>
+<td>string</td>
+<td>—</td>
+<td>Bar transition type at span boundary</td>
+</tr>
+<tr>
+<td>reinforcement_type</td>
+<td>string</td>
+<td>—</td>
+<td>UNIFORM or VARYING</td>
+</tr>
+<tr>
+<td>split_piece</td>
+<td>float</td>
+<td>—</td>
+<td>Stock split piece number</td>
+</tr>
+<tr>
+<td>original_length_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Original length before stock split</td>
+</tr>
+<tr>
+<td>x_start_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar start X coordinate</td>
+</tr>
+<tr>
+<td>y_start_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar start Y coordinate</td>
+</tr>
+<tr>
+<td>z_start_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar start Z coordinate</td>
+</tr>
+<tr>
+<td>x_end_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar end X coordinate</td>
+</tr>
+<tr>
+<td>y_end_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar end Y coordinate</td>
+</tr>
+<tr>
+<td>z_end_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar end Z coordinate</td>
+</tr>
+<tr>
+<td>b_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Section width</td>
+</tr>
+<tr>
+<td>h_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Section height</td>
+</tr>
+<tr>
+<td>shape</td>
+<td>string</td>
+<td>—</td>
+<td>Section shape (RECT)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>2. RebarLengthsColumn.csv (31 columns)</h2>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Column member ID (e.g., TC1, C1)</td>
+</tr>
+<tr>
+<td>start_grid</td>
+<td>string</td>
+<td>—</td>
+<td>Grid location (e.g., X1Y3)</td>
+</tr>
+<tr>
+<td>level_from</td>
+<td>string</td>
+<td>—</td>
+<td>Bottom level of the continuous stack</td>
+</tr>
+<tr>
+<td>level_to</td>
+<td>string</td>
+<td>—</td>
+<td>Top level of the continuous stack</td>
+</tr>
+<tr>
+<td>bar_position</td>
+<td>string</td>
+<td>—</td>
+<td>MAIN or HOOP</td>
+</tr>
+<tr>
+<td>bar_role</td>
+<td>string</td>
+<td>—</td>
+<td>MAIN_TOP, MAIN_BOTTOM, MAIN_INTERMEDIATE, MAIN_SINGLE, HOOP_END, HOOP_MID</td>
+</tr>
+<tr>
+<td>bar_type</td>
+<td>string</td>
+<td>—</td>
+<td>MAIN or HOOP</td>
+</tr>
+<tr>
+<td>dia_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar diameter</td>
+</tr>
+<tr>
+<td>n_bars</td>
+<td>int</td>
+<td>—</td>
+<td>Number of bars</td>
+</tr>
+<tr>
+<td>length_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Individual bar length</td>
+</tr>
+<tr>
+<td>spacing_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Hoop spacing (null for main bars)</td>
+</tr>
+<tr>
+<td>zone_length_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Length of the hoop zone</td>
+</tr>
+<tr>
+<td>quantity_pieces</td>
+<td>float</td>
+<td>—</td>
+<td>Number of hoop sets in zone</td>
+</tr>
+<tr>
+<td>total_length_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Total material length</td>
+</tr>
+<tr>
+<td>splice_start_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Splice zone start Z coordinate</td>
+</tr>
+<tr>
+<td>splice_start_end_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Splice zone end coordinate</td>
+</tr>
+<tr>
+<td>splice_end_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Splice zone end Z coordinate</td>
+</tr>
+<tr>
+<td>splice_end_end_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Splice zone end end coordinate</td>
+</tr>
+<tr>
+<td>x_start_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar start X coordinate</td>
+</tr>
+<tr>
+<td>y_start_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar start Y coordinate</td>
+</tr>
+<tr>
+<td>z_start_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar start Z coordinate</td>
+</tr>
+<tr>
+<td>x_end_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar end X coordinate</td>
+</tr>
+<tr>
+<td>y_end_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar end Y coordinate</td>
+</tr>
+<tr>
+<td>z_end_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar end Z coordinate</td>
+</tr>
+<tr>
+<td>segment_id</td>
+<td>string</td>
+<td>—</td>
+<td>Unique segment ID</td>
+</tr>
+<tr>
+<td>b_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Section width</td>
+</tr>
+<tr>
+<td>h_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Section depth</td>
+</tr>
+<tr>
+<td>shape</td>
+<td>string</td>
+<td>—</td>
+<td>Section shape (RECT)</td>
+</tr>
+<tr>
+<td>split_piece</td>
+<td>—</td>
+<td>—</td>
+<td>Null (columns don't exceed 12m)</td>
+</tr>
+<tr>
+<td>split_total</td>
+<td>—</td>
+<td>—</td>
+<td>Null</td>
+</tr>
+<tr>
+<td>original_length_mm</td>
+<td>—</td>
+<td>—</td>
+<td>Null</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>3. RebarLengthsSlab.csv (40 columns)</h2>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Slab member ID (e.g., B3S1, 1FS3)</td>
+</tr>
+<tr>
+<td>level</td>
+<td>string</td>
+<td>—</td>
+<td>Story level</td>
+</tr>
+<tr>
+<td>slab_type</td>
+<td>string</td>
+<td>—</td>
+<td>Slab type code</td>
+</tr>
+<tr>
+<td>thickness_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Slab thickness</td>
+</tr>
+<tr>
+<td>direction</td>
+<td>string</td>
+<td>—</td>
+<td>Bar direction (X or Y)</td>
+</tr>
+<tr>
+<td>layer</td>
+<td>string</td>
+<td>—</td>
+<td>Top or Bot</td>
+</tr>
+<tr>
+<td>bar_role</td>
+<td>string</td>
+<td>—</td>
+<td>MAIN_SINGLE, MAIN_START, MAIN_INTERMEDIATE, MAIN_END, or ANCHOR variants</td>
+</tr>
+<tr>
+<td>start_type</td>
+<td>string</td>
+<td>—</td>
+<td>Start anchorage (hook or lap)</td>
+</tr>
+<tr>
+<td>end_type</td>
+<td>string</td>
+<td>—</td>
+<td>End anchorage (hook or lap)</td>
+</tr>
+<tr>
+<td>dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar diameter</td>
+</tr>
+<tr>
+<td>spacing_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar spacing</td>
+</tr>
+<tr>
+<td>n_bars</td>
+<td>int</td>
+<td>—</td>
+<td>Number of bars</td>
+</tr>
+<tr>
+<td>length_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Individual bar length</td>
+</tr>
+<tr>
+<td>l_cl_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Clear span between beam faces</td>
+</tr>
+<tr>
+<td>Wg1_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Beam width at start edge</td>
+</tr>
+<tr>
+<td>Wg2_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Beam width at end edge</td>
+</tr>
+<tr>
+<td>Ldh_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Development length (hook)</td>
+</tr>
+<tr>
+<td>Llap_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Lap splice length used</td>
+</tr>
+<tr>
+<td>Lx_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Panel X dimension</td>
+</tr>
+<tr>
+<td>Ly_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Panel Y dimension</td>
+</tr>
+<tr>
+<td>short_direction</td>
+<td>string</td>
+<td>—</td>
+<td>Short span direction (X or Y)</td>
+</tr>
+<tr>
+<td>panel_role</td>
+<td>string</td>
+<td>—</td>
+<td>SINGLE, START, INTERMEDIATE, END</td>
+</tr>
+<tr>
+<td>mismatch_before</td>
+<td>bool</td>
+<td>—</td>
+<td>Thickness mismatch with panel before</td>
+</tr>
+<tr>
+<td>mismatch_after</td>
+<td>bool</td>
+<td>—</td>
+<td>Thickness mismatch with panel after</td>
+</tr>
+<tr>
+<td>adj_thickness_before_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Adjacent panel thickness (before)</td>
+</tr>
+<tr>
+<td>adj_thickness_after_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Adjacent panel thickness (after)</td>
+</tr>
+<tr>
+<td>centroid_x_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Panel centroid X</td>
+</tr>
+<tr>
+<td>centroid_y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Panel centroid Y</td>
+</tr>
+<tr>
+<td>z_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Panel elevation</td>
+</tr>
+<tr>
+<td>mesh_origin_x_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line start X</td>
+</tr>
+<tr>
+<td>mesh_origin_y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line start Y</td>
+</tr>
+<tr>
+<td>mesh_origin_z_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line start Z (bar position within thickness)</td>
+</tr>
+<tr>
+<td>mesh_terminus_x_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line end X</td>
+</tr>
+<tr>
+<td>mesh_terminus_y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line end Y</td>
+</tr>
+<tr>
+<td>mesh_terminus_z_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line end Z</td>
+</tr>
+<tr>
+<td>mesh_distribution_axis</td>
+<td>string</td>
+<td>—</td>
+<td>Distribution axis (X or Y)</td>
+</tr>
+<tr>
+<td>split_piece</td>
+<td>float</td>
+<td>—</td>
+<td>Stock split piece number</td>
+</tr>
+<tr>
+<td>split_total</td>
+<td>float</td>
+<td>—</td>
+<td>Total split pieces</td>
+</tr>
+<tr>
+<td>original_length_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Original length before split</td>
+</tr>
+<tr>
+<td>total_length_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Total material length</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>4. RebarLengthsStair.csv (29 columns)</h2>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>segment_id</td>
+<td>string</td>
+<td>—</td>
+<td>Unique segment ID</td>
+</tr>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Stair member ID (e.g., B3SS1)</td>
+</tr>
+<tr>
+<td>story_group</td>
+<td>string</td>
+<td>—</td>
+<td>Story range (e.g., B4~B3)</td>
+</tr>
+<tr>
+<td>zone</td>
+<td>string</td>
+<td>—</td>
+<td>LOWER_LANDING, MID_LANDING, FLIGHT1, FLIGHT2</td>
+</tr>
+<tr>
+<td>sub_zone</td>
+<td>string</td>
+<td>—</td>
+<td>Specific bar location (TOP_ALONG_A, BOT_ALONG_A, DIST_SPAN_B, etc.)</td>
+</tr>
+<tr>
+<td>direction</td>
+<td>string</td>
+<td>—</td>
+<td>LONGITUDINAL or TRANSVERSE</td>
+</tr>
+<tr>
+<td>layer</td>
+<td>string</td>
+<td>—</td>
+<td>TOP, BOTTOM, or BOTH</td>
+</tr>
+<tr>
+<td>dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar diameter</td>
+</tr>
+<tr>
+<td>spacing_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar spacing</td>
+</tr>
+<tr>
+<td>n_bars</td>
+<td>int</td>
+<td>—</td>
+<td>Number of bars</td>
+</tr>
+<tr>
+<td>length_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Individual bar length</td>
+</tr>
+<tr>
+<td>total_length_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Total material length</td>
+</tr>
+<tr>
+<td>cover_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Concrete cover (30mm for stairs)</td>
+</tr>
+<tr>
+<td>Ldh_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Development length (hook)</td>
+</tr>
+<tr>
+<td>lap_top_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Top lap splice length</td>
+</tr>
+<tr>
+<td>lap_bot_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bottom lap splice length</td>
+</tr>
+<tr>
+<td>start_x</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar start X coordinate</td>
+</tr>
+<tr>
+<td>start_y</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar start Y coordinate</td>
+</tr>
+<tr>
+<td>start_z</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar start Z coordinate</td>
+</tr>
+<tr>
+<td>end_x</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar end X coordinate</td>
+</tr>
+<tr>
+<td>end_y</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar end Y coordinate</td>
+</tr>
+<tr>
+<td>end_z</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar end Z coordinate</td>
+</tr>
+<tr>
+<td>width_dir_x</td>
+<td>float</td>
+<td>—</td>
+<td>Distribution direction unit vector X</td>
+</tr>
+<tr>
+<td>width_dir_y</td>
+<td>float</td>
+<td>—</td>
+<td>Distribution direction unit vector Y</td>
+</tr>
+<tr>
+<td>width_dir_z</td>
+<td>float</td>
+<td>—</td>
+<td>Distribution direction unit vector Z</td>
+</tr>
+<tr>
+<td>width_span_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Distribution span (width minus covers)</td>
+</tr>
+<tr>
+<td>split_piece</td>
+<td>—</td>
+<td>—</td>
+<td>Null (stairs don't exceed 12m)</td>
+</tr>
+<tr>
+<td>split_total</td>
+<td>—</td>
+<td>—</td>
+<td>Null</td>
+</tr>
+<tr>
+<td>original_length_mm</td>
+<td>—</td>
+<td>—</td>
+<td>Null</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>5. RebarLengthsWall.csv (29 columns)</h2>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>wall_id</td>
+<td>int</td>
+<td>—</td>
+<td>Numeric wall ID (FK to MembersWall)</td>
+</tr>
+<tr>
+<td>wall_mark</td>
+<td>string</td>
+<td>—</td>
+<td>Wall mark name (CW1, W201, etc.)</td>
+</tr>
+<tr>
+<td>level</td>
+<td>string</td>
+<td>—</td>
+<td>Story level (or FOOTING for dowels)</td>
+</tr>
+<tr>
+<td>direction</td>
+<td>string</td>
+<td>—</td>
+<td>VERTICAL or HORIZONTAL</td>
+</tr>
+<tr>
+<td>bar_role</td>
+<td>string</td>
+<td>—</td>
+<td>MAIN_BOTTOM, MAIN_INTERMEDIATE, MAIN_TOP, MAIN_SINGLE, MAIN_SINGLE_WITH_DOWEL, DOWEL, U_BAR</td>
+</tr>
+<tr>
+<td>dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar diameter</td>
+</tr>
+<tr>
+<td>spacing_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar spacing</td>
+</tr>
+<tr>
+<td>n_bars</td>
+<td>int</td>
+<td>—</td>
+<td>Number of bars (includes face multiplier)</td>
+</tr>
+<tr>
+<td>length_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Individual bar length</td>
+</tr>
+<tr>
+<td>total_length_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Total material length</td>
+</tr>
+<tr>
+<td>height_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Wall story height</td>
+</tr>
+<tr>
+<td>width_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Wall plan width</td>
+</tr>
+<tr>
+<td>thickness_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Wall thickness</td>
+</tr>
+<tr>
+<td>bar_layer</td>
+<td>string</td>
+<td>—</td>
+<td>Double or Single</td>
+</tr>
+<tr>
+<td>splice_start_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Splice zone start Z</td>
+</tr>
+<tr>
+<td>splice_start_end_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Splice zone start end</td>
+</tr>
+<tr>
+<td>splice_end_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Splice zone end Z</td>
+</tr>
+<tr>
+<td>splice_end_end_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Splice zone end end</td>
+</tr>
+<tr>
+<td>cover_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Concrete cover (50mm)</td>
+</tr>
+<tr>
+<td>mesh_origin_x_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line start X</td>
+</tr>
+<tr>
+<td>mesh_origin_y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line start Y</td>
+</tr>
+<tr>
+<td>mesh_origin_z_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line start Z</td>
+</tr>
+<tr>
+<td>mesh_terminus_x_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line end X</td>
+</tr>
+<tr>
+<td>mesh_terminus_y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line end Y</td>
+</tr>
+<tr>
+<td>mesh_terminus_z_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line end Z</td>
+</tr>
+<tr>
+<td>mesh_distribution_axis</td>
+<td>string</td>
+<td>—</td>
+<td>ALONG_WALL_LENGTH or ALONG_WALL_HEIGHT</td>
+</tr>
+<tr>
+<td>split_piece</td>
+<td>float</td>
+<td>—</td>
+<td>Stock split piece number</td>
+</tr>
+<tr>
+<td>split_total</td>
+<td>float</td>
+<td>—</td>
+<td>Total split pieces</td>
+</tr>
+<tr>
+<td>original_length_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Original length before split</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>6. RebarLengthsFooting.csv (26 columns)</h2>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Footing member ID (MF1, MF2)</td>
+</tr>
+<tr>
+<td>zone</td>
+<td>string</td>
+<td>—</td>
+<td>Zone name (MF1, R1, R2, V1, etc.)</td>
+</tr>
+<tr>
+<td>zone_type</td>
+<td>string</td>
+<td>—</td>
+<td>BASE, ADDITIONAL, or STIRRUP</td>
+</tr>
+<tr>
+<td>direction</td>
+<td>string</td>
+<td>—</td>
+<td>X, Y, or VERTICAL (stirrup)</td>
+</tr>
+<tr>
+<td>layer</td>
+<td>string</td>
+<td>—</td>
+<td>Top, Bot, or null (stirrup)</td>
+</tr>
+<tr>
+<td>bar_role</td>
+<td>string</td>
+<td>—</td>
+<td>BASE_X_TOP, BASE_Y_BOT, ADDITIONAL_X_TOP, STIRRUP, etc.</td>
+</tr>
+<tr>
+<td>dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar diameter</td>
+</tr>
+<tr>
+<td>spacing_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar spacing</td>
+</tr>
+<tr>
+<td>n_bars</td>
+<td>int</td>
+<td>—</td>
+<td>Number of bars</td>
+</tr>
+<tr>
+<td>length_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Individual bar length</td>
+</tr>
+<tr>
+<td>total_length_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Total material length</td>
+</tr>
+<tr>
+<td>Ldh_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Development length (hook)</td>
+</tr>
+<tr>
+<td>Llap_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Lap splice length</td>
+</tr>
+<tr>
+<td>cover_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Concrete cover (75mm)</td>
+</tr>
+<tr>
+<td>bar_span_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Bar span before anchorage</td>
+</tr>
+<tr>
+<td>dist_width_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Distribution width</td>
+</tr>
+<tr>
+<td>mesh_distribution_axis</td>
+<td>string</td>
+<td>—</td>
+<td>X, Y, or XY_GRID (stirrup)</td>
+</tr>
+<tr>
+<td>mesh_origin_x_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line start X</td>
+</tr>
+<tr>
+<td>mesh_origin_y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line start Y</td>
+</tr>
+<tr>
+<td>mesh_origin_z_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line start Z</td>
+</tr>
+<tr>
+<td>mesh_terminus_x_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line end X</td>
+</tr>
+<tr>
+<td>mesh_terminus_y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line end Y</td>
+</tr>
+<tr>
+<td>mesh_terminus_z_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line end Z</td>
+</tr>
+<tr>
+<td>split_piece</td>
+<td>float</td>
+<td>—</td>
+<td>Stock split piece number</td>
+</tr>
+<tr>
+<td>split_total</td>
+<td>float</td>
+<td>—</td>
+<td>Total split pieces</td>
+</tr>
+<tr>
+<td>original_length_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Original length before split</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>7. RebarLengthsBasementWall.csv (29 columns)</h2>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>wall_mark</td>
+<td>string</td>
+<td>—</td>
+<td>Basement wall name (BW1, DW1, FW1)</td>
+</tr>
+<tr>
+<td>level</td>
+<td>string</td>
+<td>—</td>
+<td>Story level (B1, B2, B4~B1)</td>
+</tr>
+<tr>
+<td>direction</td>
+<td>string</td>
+<td>—</td>
+<td>VERTICAL or HORIZONTAL</td>
+</tr>
+<tr>
+<td>face</td>
+<td>string</td>
+<td>—</td>
+<td>INTERIOR or EXTERIOR</td>
+</tr>
+<tr>
+<td>zone</td>
+<td>string</td>
+<td>—</td>
+<td>TOP, MIDDLE, BOTTOM (vertical) or LEFT, MIDDLE, RIGHT (horizontal)</td>
+</tr>
+<tr>
+<td>bar_role</td>
+<td>string</td>
+<td>—</td>
+<td>BOTTOM_V_TOP, INTERMEDIATE_V_MIDDLE, FULL_HEIGHT_V_BOTTOM, H_LEFT, H_MIDDLE, H_RIGHT, etc.</td>
+</tr>
+<tr>
+<td>dia_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar diameter</td>
+</tr>
+<tr>
+<td>spacing_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bar spacing</td>
+</tr>
+<tr>
+<td>n_bars</td>
+<td>int</td>
+<td>—</td>
+<td>Number of bars</td>
+</tr>
+<tr>
+<td>length_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Individual bar length</td>
+</tr>
+<tr>
+<td>total_length_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Total material length</td>
+</tr>
+<tr>
+<td>height_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Wall story height</td>
+</tr>
+<tr>
+<td>length_wall_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Wall plan length</td>
+</tr>
+<tr>
+<td>thickness_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Wall thickness</td>
+</tr>
+<tr>
+<td>zone_height_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Vertical zone height (TOP/MID/BOT)</td>
+</tr>
+<tr>
+<td>Ldh_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Development length (hook)</td>
+</tr>
+<tr>
+<td>Lpc_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Lap splice length (vertical continuity)</td>
+</tr>
+<tr>
+<td>cover_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Concrete cover (50mm)</td>
+</tr>
+<tr>
+<td>mesh_origin_x_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line start X</td>
+</tr>
+<tr>
+<td>mesh_origin_y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line start Y</td>
+</tr>
+<tr>
+<td>mesh_origin_z_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line start Z</td>
+</tr>
+<tr>
+<td>mesh_terminus_x_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line end X</td>
+</tr>
+<tr>
+<td>mesh_terminus_y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line end Y</td>
+</tr>
+<tr>
+<td>mesh_terminus_z_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Mesh line end Z</td>
+</tr>
+<tr>
+<td>mesh_distribution_axis</td>
+<td>string</td>
+<td>—</td>
+<td>ALONG_WALL_LENGTH or ALONG_WALL_HEIGHT</td>
+</tr>
+<tr>
+<td>split_piece</td>
+<td>float</td>
+<td>—</td>
+<td>Stock split piece number</td>
+</tr>
+<tr>
+<td>split_total</td>
+<td>float</td>
+<td>—</td>
+<td>Total split pieces</td>
+</tr>
+<tr>
+<td>original_length_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Original length before split</td>
+</tr>
+<tr>
+<td>zone_width_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Horizontal zone width (LEFT/MID/RIGHT)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>bar_role Reference</h2>
+<h3>Beam bar_role Values</h3>
+<table>
+<thead>
+<tr>
+<th>bar_role</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MAIN_SINGLE</td>
+<td>Single-span beam main bar (hook at both ends)</td>
+</tr>
+<tr>
+<td>MAIN_START</td>
+<td>First span of multi-span (hook at start, lap at end)</td>
+</tr>
+<tr>
+<td>MAIN_INTERMEDIATE</td>
+<td>Middle span (lap at both ends)</td>
+</tr>
+<tr>
+<td>MAIN_END</td>
+<td>Last span (lap at start, hook at end)</td>
+</tr>
+<tr>
+<td>ADD_TOP</td>
+<td>Additional top bar at support</td>
+</tr>
+<tr>
+<td>ADD_BOT</td>
+<td>Additional bottom bar at midspan</td>
+</tr>
+<tr>
+<td>STIRRUP_END</td>
+<td>Stirrup in end zone (dense spacing)</td>
+</tr>
+<tr>
+<td>STIRRUP_MID</td>
+<td>Stirrup in middle zone</td>
+</tr>
+</tbody>
+</table>
+<h3>Column bar_role Values</h3>
+<table>
+<thead>
+<tr>
+<th>bar_role</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MAIN_TOP</td>
+<td>Top of continuous stack (hook at top)</td>
+</tr>
+<tr>
+<td>MAIN_BOTTOM</td>
+<td>Bottom of stack (lap at top)</td>
+</tr>
+<tr>
+<td>MAIN_INTERMEDIATE</td>
+<td>Middle of stack (lap at top)</td>
+</tr>
+<tr>
+<td>MAIN_SINGLE</td>
+<td>Single-level column</td>
+</tr>
+<tr>
+<td>HOOP_END</td>
+<td>Hoop in end zone</td>
+</tr>
+<tr>
+<td>HOOP_MID</td>
+<td>Hoop in middle zone</td>
+</tr>
+</tbody>
+</table>
+<h3>Slab bar_role Values</h3>
+<table>
+<thead>
+<tr>
+<th>bar_role</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MAIN_SINGLE</td>
+<td>Isolated panel (hook at both ends)</td>
+</tr>
+<tr>
+<td>MAIN_START</td>
+<td>First panel in row (hook at start, lap at end)</td>
+</tr>
+<tr>
+<td>MAIN_INTERMEDIATE</td>
+<td>Middle panel (lap at both ends)</td>
+</tr>
+<tr>
+<td>MAIN_END</td>
+<td>Last panel (lap at start, hook at end)</td>
+</tr>
+<tr>
+<td>MAIN_*_ANCHOR</td>
+<td>Thickness mismatch variant (hook instead of lap at mismatch edge)</td>
+</tr>
+</tbody>
+</table>
+<h3>Wall bar_role Values</h3>
+<table>
+<thead>
+<tr>
+<th>bar_role</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MAIN_BOTTOM</td>
+<td>Bottom of continuous stack (lap at top for continuity)</td>
+</tr>
+<tr>
+<td>MAIN_INTERMEDIATE</td>
+<td>Middle of stack (lap at top)</td>
+</tr>
+<tr>
+<td>MAIN_TOP</td>
+<td>Top of stack (hook at top — wall terminates)</td>
+</tr>
+<tr>
+<td>MAIN_SINGLE</td>
+<td>Single-level wall (hook at top)</td>
+</tr>
+<tr>
+<td>MAIN_SINGLE_WITH_DOWEL</td>
+<td>Single level at foundation (dowel below, hook at top)</td>
+</tr>
+<tr>
+<td>DOWEL</td>
+<td>Foundation dowel bar</td>
+</tr>
+<tr>
+<td>U_BAR</td>
+<td>Horizontal bar with U-turn at free edge</td>
+</tr>
+</tbody>
+</table>
+<h3>Footing bar_role Values</h3>
+<table>
+<thead>
+<tr>
+<th>bar_role</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>BASE_X_TOP</td>
+<td>Base reinforcement, X-direction, top layer</td>
+</tr>
+<tr>
+<td>BASE_X_BOT</td>
+<td>Base reinforcement, X-direction, bottom layer</td>
+</tr>
+<tr>
+<td>BASE_Y_TOP</td>
+<td>Base reinforcement, Y-direction, top layer</td>
+</tr>
+<tr>
+<td>BASE_Y_BOT</td>
+<td>Base reinforcement, Y-direction, bottom layer</td>
+</tr>
+<tr>
+<td>ADDITIONAL_X_TOP</td>
+<td>Additional zone, X-direction, top</td>
+</tr>
+<tr>
+<td>ADDITIONAL_Y_BOT</td>
+<td>Additional zone, Y-direction, bottom</td>
+</tr>
+<tr>
+<td>STIRRUP</td>
+<td>Vertical tie at column location</td>
+</tr>
+</tbody>
+</table>
+<h3>Basement Wall bar_role Values</h3>
+<table>
+<thead>
+<tr>
+<th>bar_role</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>BOTTOM_V_TOP</td>
+<td>Bottom level, vertical, top zone</td>
+</tr>
+<tr>
+<td>BOTTOM_V_MIDDLE</td>
+<td>Bottom level, vertical, middle zone</td>
+</tr>
+<tr>
+<td>BOTTOM_V_BOTTOM</td>
+<td>Bottom level, vertical, bottom zone</td>
+</tr>
+<tr>
+<td>INTERMEDIATE_V_*</td>
+<td>Intermediate level, vertical, per zone</td>
+</tr>
+<tr>
+<td>TOP_V_*</td>
+<td>Top level, vertical, per zone</td>
+</tr>
+<tr>
+<td>SINGLE_V_*</td>
+<td>Single level, vertical, per zone</td>
+</tr>
+<tr>
+<td>FULL_HEIGHT_V_*</td>
+<td>Full-height wall (B4~B1), vertical, per zone</td>
+</tr>
+<tr>
+<td>H_LEFT</td>
+<td>Horizontal bar, left zone</td>
+</tr>
+<tr>
+<td>H_MIDDLE</td>
+<td>Horizontal bar, middle zone</td>
+</tr>
+<tr>
+<td>H_RIGHT</td>
+<td>Horizontal bar, right zone</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>Tier 1 Input Dependencies</h2>
+<table>
+<thead>
+<tr>
+<th>RebarLengths File</th>
+<th>Tier 1 Inputs Required</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>RebarLengthsBeam</td>
+<td>MembersBeam, MembersColumn, Sections, ReinforcementBeam, Nodes</td>
+</tr>
+<tr>
+<td>RebarLengthsColumn</td>
+<td>MembersColumn, ReinforcementColumn, Sections, Nodes</td>
+</tr>
+<tr>
+<td>RebarLengthsSlab</td>
+<td>MembersSlab, ReinforcementSlab, MembersBeam, Nodes</td>
+</tr>
+<tr>
+<td>RebarLengthsStair</td>
+<td>MembersStair, ReinforcementStair</td>
+</tr>
+<tr>
+<td>RebarLengthsWall</td>
+<td>MembersWall, ReinforcementWall, Nodes</td>
+</tr>
+<tr>
+<td>RebarLengthsFooting</td>
+<td>MembersFooting, ReinforcementFooting</td>
+</tr>
+<tr>
+<td>RebarLengthsBasementWall</td>
+<td>MembersBasementWall, ReinforcementBasementWall, Nodes</td>
+</tr>
+</tbody>
+</table>
+<p>All calculators also require: <code>config/development_lengths.csv</code>, <code>config/lap_splice.csv</code>
+Optional: <code>config/cover_requirements.csv</code></p>
+</body>
+</html>

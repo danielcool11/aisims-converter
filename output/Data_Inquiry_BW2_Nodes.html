@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>BW2 지하외벽 노드 확인 요청</title>
+<style>
+  body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; max-width: 900px; margin: 40px auto; padding: 0 20px; color: #333; line-height: 1.6; }
+  h1 { color: #1a1a2e; border-bottom: 3px solid #e94560; padding-bottom: 10px; }
+  h2 { color: #16213e; margin-top: 30px; }
+  h3 { color: #0f3460; }
+  table { border-collapse: collapse; width: 100%; margin: 15px 0; }
+  th, td { border: 1px solid #ddd; padding: 8px 12px; text-align: left; font-size: 14px; }
+  th { background-color: #16213e; color: white; }
+  tr:nth-child(even) { background-color: #f9f9f9; }
+  .error { color: #e94560; font-weight: bold; }
+  .ok { color: #2ecc71; font-weight: bold; }
+  .warn { color: #e67e22; font-weight: bold; }
+  .meta { color: #666; font-size: 14px; margin-bottom: 20px; }
+  .highlight { background-color: #fff3cd; padding: 2px 4px; }
+  .section { background: #f8f9fa; border-left: 4px solid #e94560; padding: 12px 16px; margin: 15px 0; }
+  code { background: #eee; padding: 2px 6px; border-radius: 3px; font-size: 13px; }
+  .request-box { background: #e8f5e9; border: 2px solid #4caf50; border-radius: 8px; padding: 16px; margin-top: 25px; }
+</style>
+</head>
+<body>
+
+<h1>BW2 지하외벽 노드 확인 요청</h1>
+
+<p class="meta">
+  <strong>Project:</strong> 청담동 78-5 &nbsp;|&nbsp;
+  <strong>File:</strong> <code>Part C_지하외벽 입력 Data.xlsx</code> → <code>BasementWall Boundary</code> 시트 &nbsp;|&nbsp;
+  <strong>Date:</strong> 2026-03-27
+</p>
+
+<hr>
+
+<h2>문제 내용</h2>
+<p>BW2 벽체의 B1~B3층 노드 정보에 문제가 있어 BIM 모델 생성이 불가합니다.</p>
+
+<table>
+  <tr>
+    <th>Row</th><th>Name</th><th>Position</th><th>Node</th><th>상태</th><th>비고</th>
+  </tr>
+  <tr>
+    <td>35-38</td><td>BW2</td><td>B1</td><td>666, 679</td>
+    <td class="warn">좌표 불일치</td>
+    <td>Node 666 (z=<span class="highlight">+16,950mm</span>), Node 679 (z=<span class="highlight">+21,100mm</span>) — 지상층 좌표</td>
+  </tr>
+  <tr>
+    <td>39-42</td><td>BW2</td><td>B2</td><td>476, 489</td>
+    <td class="error">Node 476 누락</td>
+    <td>Nodes.csv에 존재하지 않음</td>
+  </tr>
+  <tr>
+    <td>43-46</td><td>BW2</td><td>B3</td><td>277, 296</td>
+    <td class="error">Node 296 누락</td>
+    <td>Nodes.csv에 존재하지 않음</td>
+  </tr>
+  <tr>
+    <td>47-50</td><td>BW2</td><td>B4</td><td>71, 81</td>
+    <td class="ok">정상</td>
+    <td>z=-13,700mm (지하층)</td>
+  </tr>
+</table>
+
+<h2>상세 설명</h2>
+
+<h3>1. B1층 (Row 35-38) — 좌표 불일치</h3>
+<div class="section">
+  <p>Node 666과 679는 Nodes.csv에 존재하지만, 좌표가 지상층에 해당합니다:</p>
+  <ul>
+    <li>Node 666: x=3,100 / y=15,000 / <strong class="error">z=+16,950mm</strong></li>
+    <li>Node 679: x=3,100 / y=0 / <strong class="error">z=+21,100mm</strong></li>
+  </ul>
+  <p>BW2의 B1층은 z가 음수(지하)여야 하나, 해당 노드들은 지상 5~6층 높이의 좌표를 가지고 있습니다.</p>
+</div>
+
+<h3>2. B2층 (Row 39-42) — Node 476 누락</h3>
+<div class="section">
+  <ul>
+    <li>Node 476: Nodes.csv 및 MGT 파일에 <strong class="error">존재하지 않음</strong> (삭제된 노드로 추정)</li>
+    <li>Node 489: 존재하지만 z=+8,650mm (지상층 좌표)</li>
+  </ul>
+</div>
+
+<h3>3. B3층 (Row 43-46) — Node 296 누락</h3>
+<div class="section">
+  <ul>
+    <li>Node 296: Nodes.csv 및 MGT 파일에 <strong class="error">존재하지 않음</strong> (삭제된 노드로 추정)</li>
+    <li>Node 277: 존재하지만 z=-4,150mm (B1층 좌표로 B3층과 불일치)</li>
+  </ul>
+</div>
+
+<h3>참고: B4층 (Row 47-50) — 정상</h3>
+<div class="section">
+  <ul>
+    <li>Node 71: x=11,600 / y=1,700 / <span class="ok">z=-13,700mm</span></li>
+    <li>Node 81: x=6,360 / y=3,660 / <span class="ok">z=-13,700mm</span></li>
+  </ul>
+  <p>B4층 노드만 지하 좌표로 정상입니다.</p>
+</div>
+
+<div class="request-box">
+  <h2 style="margin-top:0; color:#2e7d32;">요청사항</h2>
+  <p style="margin-bottom:0;">BW2의 <strong>B1~B3층</strong>에 해당하는 올바른 노드 번호를 확인해 주시기 바랍니다.</p>
+</div>
+
+</body>
+</html>

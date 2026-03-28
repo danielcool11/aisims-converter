@@ -31,6 +31,13 @@ from converters.reinforcement_stair import convert_reinforcement_stair
 from converters.footings import convert_footings
 from converters.basement_walls import convert_basement_walls
 from converters.validation import validate_outputs, format_report
+from tier2.rebar_lengths_beam import calculate_beam_rebar_lengths
+from tier2.rebar_lengths_column import calculate_column_rebar_lengths
+from tier2.rebar_lengths_slab import calculate_slab_rebar_lengths
+from tier2.rebar_lengths_stair import calculate_stair_rebar_lengths
+from tier2.rebar_lengths_wall import calculate_wall_rebar_lengths
+from tier2.rebar_lengths_footing import calculate_footing_rebar_lengths
+from tier2.rebar_lengths_basement_wall import calculate_basement_wall_rebar_lengths
 
 
 # ══════════════════════════════════════════════════════════════
@@ -386,11 +393,114 @@ if st.button("CONVERT", type="primary", use_container_width=True):
             log(f"ReinfStair: {len(reinf_stair_df)} rows")
 
         # ── Phase 5: Validation ──
-        progress.progress(90, text="Phase 5: Validation...")
+        progress.progress(85, text="Phase 5: Validation...")
         validation_results = validate_outputs(outputs)
         report_text = format_report(validation_results)
         outputs['validation_report'] = report_text
         log("Validation complete")
+
+        # ── Phase 6: Tier 2 Rebar Lengths ──
+        dev_path = os.path.join(os.path.dirname(__file__), 'config', 'development_lengths.csv')
+        lap_path = os.path.join(os.path.dirname(__file__), 'config', 'lap_splice.csv')
+        cover_path = os.path.join(os.path.dirname(__file__), 'config', 'cover_requirements.csv')
+
+        if os.path.exists(dev_path) and os.path.exists(lap_path):
+            tier2_count = 0
+
+            # Beam
+            if all(k in outputs for k in ('beams', 'columns', 'sections', 'reinf_beam', 'nodes')):
+                progress.progress(87, text="Phase 6: Rebar lengths — Beam...")
+                try:
+                    rebar_beam = calculate_beam_rebar_lengths(
+                        outputs['beams'], outputs['columns'], outputs['sections'],
+                        outputs['reinf_beam'], outputs['nodes'], dev_path, lap_path)
+                    outputs['rebar_beam'] = rebar_beam
+                    log(f"RebarLengthsBeam: {len(rebar_beam)} records")
+                    tier2_count += 1
+                except Exception as e:
+                    log(f"RebarLengthsBeam FAILED: {e}")
+
+            # Column
+            if all(k in outputs for k in ('columns', 'reinf_column', 'sections', 'nodes')):
+                progress.progress(89, text="Phase 6: Rebar lengths — Column...")
+                try:
+                    rebar_col = calculate_column_rebar_lengths(
+                        outputs['columns'], outputs['reinf_column'], outputs['sections'],
+                        outputs['nodes'], dev_path, lap_path)
+                    outputs['rebar_column'] = rebar_col
+                    log(f"RebarLengthsColumn: {len(rebar_col)} records")
+                    tier2_count += 1
+                except Exception as e:
+                    log(f"RebarLengthsColumn FAILED: {e}")
+
+            # Slab
+            if all(k in outputs for k in ('slabs', 'reinf_slab', 'beams', 'nodes')):
+                progress.progress(91, text="Phase 6: Rebar lengths — Slab...")
+                try:
+                    rebar_slab = calculate_slab_rebar_lengths(
+                        outputs['slabs'], outputs['reinf_slab'], outputs['beams'],
+                        outputs['nodes'], dev_path, lap_path)
+                    outputs['rebar_slab'] = rebar_slab
+                    log(f"RebarLengthsSlab: {len(rebar_slab)} records")
+                    tier2_count += 1
+                except Exception as e:
+                    log(f"RebarLengthsSlab FAILED: {e}")
+
+            # Stair
+            if all(k in outputs for k in ('stairs', 'reinf_stair')):
+                progress.progress(93, text="Phase 6: Rebar lengths — Stair...")
+                try:
+                    rebar_stair = calculate_stair_rebar_lengths(
+                        outputs['stairs'], outputs['reinf_stair'],
+                        dev_path, lap_path, cover_path=cover_path)
+                    outputs['rebar_stair'] = rebar_stair
+                    log(f"RebarLengthsStair: {len(rebar_stair)} records")
+                    tier2_count += 1
+                except Exception as e:
+                    log(f"RebarLengthsStair FAILED: {e}")
+
+            # Wall
+            if all(k in outputs for k in ('walls', 'reinf_wall', 'nodes')):
+                progress.progress(95, text="Phase 6: Rebar lengths — Wall...")
+                try:
+                    rebar_wall = calculate_wall_rebar_lengths(
+                        outputs['walls'], outputs['reinf_wall'], outputs['nodes'],
+                        dev_path, lap_path, cover_path=cover_path)
+                    outputs['rebar_wall'] = rebar_wall
+                    log(f"RebarLengthsWall: {len(rebar_wall)} records")
+                    tier2_count += 1
+                except Exception as e:
+                    log(f"RebarLengthsWall FAILED: {e}")
+
+            # Footing
+            if all(k in outputs for k in ('footings', 'reinf_footing')):
+                progress.progress(97, text="Phase 6: Rebar lengths — Footing...")
+                try:
+                    rebar_footing = calculate_footing_rebar_lengths(
+                        outputs['footings'], outputs['reinf_footing'],
+                        dev_path, lap_path, cover_path=cover_path)
+                    outputs['rebar_footing'] = rebar_footing
+                    log(f"RebarLengthsFooting: {len(rebar_footing)} records")
+                    tier2_count += 1
+                except Exception as e:
+                    log(f"RebarLengthsFooting FAILED: {e}")
+
+            # Basement Wall
+            if all(k in outputs for k in ('bwall_members', 'reinf_bwall', 'nodes')):
+                progress.progress(99, text="Phase 6: Rebar lengths — Basement Wall...")
+                try:
+                    rebar_bwall = calculate_basement_wall_rebar_lengths(
+                        outputs['bwall_members'], outputs['reinf_bwall'], outputs['nodes'],
+                        dev_path, lap_path, cover_path=cover_path)
+                    outputs['rebar_bwall'] = rebar_bwall
+                    log(f"RebarLengthsBasementWall: {len(rebar_bwall)} records")
+                    tier2_count += 1
+                except Exception as e:
+                    log(f"RebarLengthsBasementWall FAILED: {e}")
+
+            log(f"Tier 2 complete: {tier2_count} calculators ran")
+        else:
+            log("Tier 2 skipped: development_lengths.csv or lap_splice.csv not found")
 
         progress.progress(100, text="Done!")
         st.session_state.outputs = outputs
@@ -439,6 +549,13 @@ if st.session_state.outputs:
         'reinf_stair': 'ReinforcementStair.csv',
         'footings': 'MembersFooting.csv',
         'reinf_footing': 'ReinforcementFooting.csv',
+        'rebar_beam': 'RebarLengthsBeam.csv',
+        'rebar_column': 'RebarLengthsColumn.csv',
+        'rebar_slab': 'RebarLengthsSlab.csv',
+        'rebar_stair': 'RebarLengthsStair.csv',
+        'rebar_wall': 'RebarLengthsWall.csv',
+        'rebar_footing': 'RebarLengthsFooting.csv',
+        'rebar_bwall': 'RebarLengthsBasementWall.csv',
     }
 
     # Show previews
