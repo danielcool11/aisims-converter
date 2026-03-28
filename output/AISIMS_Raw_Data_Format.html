@@ -1,0 +1,1355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AISIMS Raw Data Format Reference</title>
+<style>
+  body { font-family: "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; max-width: 1100px; margin: 40px auto; padding: 0 20px; color: #333; line-height: 1.6; }
+  h1 { color: #1a1a2e; border-bottom: 3px solid #e94560; padding-bottom: 10px; }
+  h2 { color: #16213e; margin-top: 35px; border-bottom: 2px solid #ddd; padding-bottom: 5px; }
+  h3 { color: #0f3460; }
+  h4 { color: #533483; }
+  table { border-collapse: collapse; width: 100%%; margin: 15px 0; font-size: 13px; }
+  th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+  th { background-color: #16213e; color: white; }
+  tr:nth-child(even) { background-color: #f9f9f9; }
+  code { background: #eee; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+  pre { background: #f4f4f4; padding: 12px; border-radius: 5px; overflow-x: auto; font-size: 12px; line-height: 1.5; }
+  hr { border: none; border-top: 1px solid #ddd; margin: 30px 0; }
+</style>
+</head>
+<body>
+<h1>AISIMS Raw Data Format Reference</h1>
+<p><strong>Version:</strong> 2.0
+<strong>Date:</strong> 2026-03-28
+<strong>Reference Project:</strong> Project 1 (청담동 78-5)</p>
+<p>This document describes the raw input data format expected by the AISIMS Converter.
+Data is organized into three parts based on source.</p>
+<hr />
+<h2>Part A — MIDAS Gen Exports</h2>
+<p>Exported directly from MIDAS Gen structural analysis software.
+All CSVs use UTF-8 encoding with header row. Units are in mm and N.</p>
+<h3>A1. Nodes.csv (Required)</h3>
+<p><strong>Source:</strong> MIDAS Gen → Results → Result Tables → Node Table
+<strong>Rows:</strong> 704 (P1)</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Node</td>
+<td>int</td>
+<td>—</td>
+<td>Node number (unique ID)</td>
+</tr>
+<tr>
+<td>X_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>X coordinate</td>
+</tr>
+<tr>
+<td>Y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Y coordinate</td>
+</tr>
+<tr>
+<td>Z_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Z coordinate (negative = below ground)</td>
+</tr>
+</tbody>
+</table>
+<pre><code>Node, X_mm, Y_mm, Z_mm
+1, 0, 0, -18100
+7, 6360, 0, -18100
+</code></pre>
+<h3>A2. Materials.csv (Required)</h3>
+<p><strong>Source:</strong> MIDAS Gen → Properties → Material Properties
+<strong>Rows:</strong> 3 (P1)</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ID</td>
+<td>int</td>
+<td>—</td>
+<td>Material ID</td>
+</tr>
+<tr>
+<td>Name</td>
+<td>string</td>
+<td>—</td>
+<td>Material name (e.g., "C35(Beam,Column)")</td>
+</tr>
+<tr>
+<td>Type</td>
+<td>string</td>
+<td>—</td>
+<td>Concrete, Steel, etc.</td>
+</tr>
+<tr>
+<td>Standard</td>
+<td>string</td>
+<td>—</td>
+<td>Design code (KS19(RC))</td>
+</tr>
+<tr>
+<td>DB</td>
+<td>string</td>
+<td>—</td>
+<td>Database grade (C35)</td>
+</tr>
+<tr>
+<td>fck_N/mm²</td>
+<td>float</td>
+<td>MPa</td>
+<td>Concrete compressive strength</td>
+</tr>
+<tr>
+<td>fy_N/mm²</td>
+<td>float</td>
+<td>MPa</td>
+<td>Main rebar yield strength</td>
+</tr>
+<tr>
+<td>fys_N/mm²</td>
+<td>float</td>
+<td>MPa</td>
+<td>Shear rebar yield strength</td>
+</tr>
+<tr>
+<td>...</td>
+<td></td>
+<td></td>
+<td>(40 columns total, most are optional properties)</td>
+</tr>
+</tbody>
+</table>
+<pre><code>ID, Name, Type, ..., fck_N/mm², fy_N/mm², fys_N/mm²
+1, C35(Beam,Column), Concrete, ..., 35, 400, 400
+</code></pre>
+<p><strong>Note:</strong> Multiple materials may share the same grade (e.g., 3 entries all C35). Converter deduplicates by grade.</p>
+<h3>A3. Sections.csv (Required)</h3>
+<p><strong>Source:</strong> MIDAS Gen → Properties → Section Properties
+<strong>Rows:</strong> 197 (P1)</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ID</td>
+<td>int</td>
+<td>—</td>
+<td>Section ID</td>
+</tr>
+<tr>
+<td>Name</td>
+<td>string</td>
+<td>—</td>
+<td>Section name with level+type encoding</td>
+</tr>
+<tr>
+<td>Shape</td>
+<td>string</td>
+<td>—</td>
+<td>Shape definition (e.g., "SB|Solid Rectangle")</td>
+</tr>
+<tr>
+<td>Size (H)_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Section height</td>
+</tr>
+<tr>
+<td>Size (B)_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Section width</td>
+</tr>
+<tr>
+<td>Area_mm²</td>
+<td>float</td>
+<td>mm²</td>
+<td>Cross-sectional area</td>
+</tr>
+<tr>
+<td>Iyy_mm⁴</td>
+<td>float</td>
+<td>mm⁴</td>
+<td>Moment of inertia Y</td>
+</tr>
+<tr>
+<td>Izz_mm⁴</td>
+<td>float</td>
+<td>mm⁴</td>
+<td>Moment of inertia Z</td>
+</tr>
+<tr>
+<td>...</td>
+<td></td>
+<td></td>
+<td>(25 columns total)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Section name encoding:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Pattern</th>
+<th>Example</th>
+<th>Level</th>
+<th>Type</th>
+<th>Base ID</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Joined</td>
+<td>6C1</td>
+<td>6F</td>
+<td>COLUMN</td>
+<td>C1</td>
+</tr>
+<tr>
+<td>Joined</td>
+<td>3~4TC1</td>
+<td>3F~4F</td>
+<td>COLUMN</td>
+<td>TC1</td>
+</tr>
+<tr>
+<td>Joined</td>
+<td>B3G1</td>
+<td>B3</td>
+<td>BEAM</td>
+<td>G1</td>
+</tr>
+<tr>
+<td>Space-separated</td>
+<td>1 B1</td>
+<td>1F</td>
+<td>BEAM</td>
+<td>B1</td>
+</tr>
+<tr>
+<td>Parenthetical</td>
+<td>TC1 (1-P)</td>
+<td>1F~P</td>
+<td>COLUMN</td>
+<td>TC1</td>
+</tr>
+<tr>
+<td>Wall</td>
+<td>BT1</td>
+<td>—</td>
+<td>WALL</td>
+<td>BT1</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Recognized prefixes:</strong> C, TC, TCG, B, TB, G, TG, W, BT, RG, CB, WCG, TWG, LB, S, SS, ST</p>
+<h3>A4. Elements.csv (Required)</h3>
+<p><strong>Source:</strong> MIDAS Gen → Results → Result Tables → Element Table
+<strong>Rows:</strong> 1,042 (P1)</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Element</td>
+<td>int</td>
+<td>—</td>
+<td>Element ID</td>
+</tr>
+<tr>
+<td>Type</td>
+<td>string</td>
+<td>—</td>
+<td>BEAM (covers beams, columns, walls)</td>
+</tr>
+<tr>
+<td>Wall Type</td>
+<td>string</td>
+<td>—</td>
+<td>Wall sub-type (if applicable)</td>
+</tr>
+<tr>
+<td>Sub Type</td>
+<td>string</td>
+<td>—</td>
+<td>Sub-type code</td>
+</tr>
+<tr>
+<td>Wall ID</td>
+<td>int</td>
+<td>—</td>
+<td>Wall identifier (0 if not a wall)</td>
+</tr>
+<tr>
+<td>Material</td>
+<td>int</td>
+<td>—</td>
+<td>Material ID (FK to Materials)</td>
+</tr>
+<tr>
+<td>Property</td>
+<td>int</td>
+<td>—</td>
+<td>Section or Thickness ID (FK)</td>
+</tr>
+<tr>
+<td>B-Angle</td>
+<td>float</td>
+<td>deg</td>
+<td>Beta angle</td>
+</tr>
+<tr>
+<td>Node1</td>
+<td>int</td>
+<td>—</td>
+<td>Start node (FK to Nodes)</td>
+</tr>
+<tr>
+<td>Node2</td>
+<td>int</td>
+<td>—</td>
+<td>End node (FK to Nodes)</td>
+</tr>
+<tr>
+<td>Node3-8</td>
+<td>int</td>
+<td>—</td>
+<td>Additional nodes (typically empty for line elements)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Polymorphic FK:</strong> The <code>Property</code> column references either Sections.ID (for beams/columns) or Thickness.ID (for walls). The converter auto-detects based on which table contains the ID.</p>
+<h3>A5. Thickness.csv (Required)</h3>
+<p><strong>Source:</strong> MIDAS Gen → Properties → Thickness Properties
+<strong>Rows:</strong> 8 (P1)</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ID</td>
+<td>int</td>
+<td>—</td>
+<td>Thickness ID</td>
+</tr>
+<tr>
+<td>NAME</td>
+<td>string</td>
+<td>—</td>
+<td>Thickness name (e.g., "Core", "W200")</td>
+</tr>
+<tr>
+<td>Type</td>
+<td>string</td>
+<td>—</td>
+<td>Definition type (Value)</td>
+</tr>
+<tr>
+<td>In,Out</td>
+<td>string</td>
+<td>—</td>
+<td>In-plane/out-of-plane flag</td>
+</tr>
+<tr>
+<td>Thick-In_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Thickness value</td>
+</tr>
+</tbody>
+</table>
+<h3>A6. StoryDefinition.csv (Required)</h3>
+<p><strong>Source:</strong> MIDAS Gen → Structure → Story
+<strong>Rows:</strong> 12 (P1)</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Module Name</td>
+<td>string</td>
+<td>—</td>
+<td>Module name (Base)</td>
+</tr>
+<tr>
+<td>Story Name</td>
+<td>string</td>
+<td>—</td>
+<td>Level name (Roof, 6F, 5F, ..., B1, B2, B3, B4)</td>
+</tr>
+<tr>
+<td>Level_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Absolute elevation</td>
+</tr>
+<tr>
+<td>Height_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Story height (0 for Roof)</td>
+</tr>
+<tr>
+<td>Floor Diaphragm</td>
+<td>string</td>
+<td>—</td>
+<td>Diaphragm type (Consider)</td>
+</tr>
+</tbody>
+</table>
+<pre><code>Module Name, Story Name, Level_mm, Height_mm, Floor Diaphragm
+Base, Roof, 32300, 0, Consider
+Base, 6F, 28900, 3400, Consider
+Base, 5F, 25500, 3400, Consider
+...
+Base, B4, -13700, 4400, Consider
+</code></pre>
+<h3>A7. DesignBeam.csv (Required)</h3>
+<p><strong>Source:</strong> MIDAS Gen → Design → RC Design → Beam Design Results
+<strong>Rows:</strong> 536 (P1), <strong>No header row</strong> (row 1 is sub-header)
+<strong>Block structure:</strong> 3 rows per beam element</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Row 1</td>
+<td>Sub-header: SECT, Bc, Hc, fy, ..., Rebar, ...</td>
+</tr>
+<tr>
+<td>Row 2</td>
+<td>Section name, fck, position (I/M/J), rebar specs, stirrup specs</td>
+</tr>
+<tr>
+<td>Row 3</td>
+<td>Design ratios: Mu, Vu, rho, etc.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Key columns (row 2):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Position</th>
+<th>Content</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Col A</td>
+<td>Section name</td>
+<td>6G1</td>
+</tr>
+<tr>
+<td>Col F</td>
+<td>Position</td>
+<td>I, M, or J</td>
+</tr>
+<tr>
+<td>Col H</td>
+<td>Negative rebar spec</td>
+<td>6-4-D22</td>
+</tr>
+<tr>
+<td>Col N</td>
+<td>Positive rebar spec</td>
+<td>6-4-D22</td>
+</tr>
+<tr>
+<td>Col T</td>
+<td>Stirrup spec</td>
+<td>3-D10 @150</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rebar notation:</strong>
+- Main bars: <code>N1-N2-Dxx</code> → N1 main + N2 additional bars of diameter xx
+- Stirrups: <code>N-Dxx @sss</code> → N legs, diameter xx, spacing sss
+- Pipe format: <code>4|5-D13@150</code> → max(4,5) = 5 legs</p>
+<h3>A8. DesignColumn.csv (Required)</h3>
+<p><strong>Source:</strong> MIDAS Gen → Design → RC Design → Column Design Results
+<strong>Rows:</strong> 33 (P1), <strong>No header row</strong>
+<strong>Block structure:</strong> 2 rows per column element</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Row 1</td>
+<td>Sub-header: SECT, Bc, Hc, Height, fys, ...</td>
+</tr>
+<tr>
+<td>Row 2</td>
+<td>Section name, fck, fy, main bar spec, tie specs, design ratios</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Key columns (row 2):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Position</th>
+<th>Content</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Col A</td>
+<td>Section name</td>
+<td>6C1</td>
+</tr>
+<tr>
+<td>Col I</td>
+<td>Main bar spec</td>
+<td>12-4-D22</td>
+</tr>
+<tr>
+<td>Col P</td>
+<td>Tie end spec</td>
+<td>3-D10 @150</td>
+</tr>
+<tr>
+<td>Col S</td>
+<td>Tie mid spec</td>
+<td>3-D10 @200</td>
+</tr>
+</tbody>
+</table>
+<h3>A9. DesignWall.csv (Conditional)</h3>
+<p><strong>Source:</strong> MIDAS Gen → Design → RC Design → Wall Design Results
+<strong>Rows:</strong> 243 (P1), <strong>No header row</strong>
+<strong>Block structure:</strong> 2 rows per wall element</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>Content</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Row 1</td>
+<td>Sub-header: Story, Lw, HTw, hw, fys, ...</td>
+</tr>
+<tr>
+<td>Row 2</td>
+<td>Wall ID, wall mark, dimensions, V-rebar, H-rebar, design ratios</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Key columns (row 2):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Position</th>
+<th>Content</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Col A</td>
+<td>Wall ID</td>
+<td>13</td>
+</tr>
+<tr>
+<td>Col C</td>
+<td>Wall mark</td>
+<td>CW1</td>
+</tr>
+<tr>
+<td>Col I</td>
+<td>Vertical rebar</td>
+<td>D13 @150</td>
+</tr>
+<tr>
+<td>Col W</td>
+<td>Horizontal rebar</td>
+<td>D10 @200</td>
+</tr>
+</tbody>
+</table>
+<h3>A10. project.mgt (Optional)</h3>
+<p><strong>Source:</strong> MIDAS Gen → File → Save As → MGT format
+<strong>Size:</strong> ~1 MB (P1)
+<strong>Encoding:</strong> UTF-8 text file with <code>*SECTION_NAME</code> delimited blocks</p>
+<p><strong>Sections used by converter:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Section</th>
+<th>Content</th>
+<th>Used for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>*REBAR-MATL-CODE</td>
+<td>Rebar material grades</td>
+<td>SD400/500/600 detection</td>
+</tr>
+<tr>
+<td>*NODE</td>
+<td>All node definitions</td>
+<td>Fallback node lookup</td>
+</tr>
+<tr>
+<td>*ELEMENT</td>
+<td>All element definitions</td>
+<td>Cross-reference</td>
+</tr>
+<tr>
+<td>*MATERIAL</td>
+<td>Material properties</td>
+<td>fck extraction</td>
+</tr>
+<tr>
+<td>*SECTION</td>
+<td>Section definitions</td>
+<td>Name parsing</td>
+</tr>
+<tr>
+<td>*WALL-SSRF</td>
+<td>Wall surface definitions</td>
+<td>Wall mark mapping</td>
+</tr>
+<tr>
+<td>*STORY</td>
+<td>Story definitions</td>
+<td>Level assignment</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Format:</strong></p>
+<pre><code>*REBAR-MATL-CODE
+; iSEQ, MAT_ID, SECT_ID, POSI, GRADE
+1, 1, 0, MAIN, KS-SD400
+2, 1, 0, SUB, KS-SD400
+</code></pre>
+<hr />
+<h2>Part B — Engineer Input Data</h2>
+<p>Manually prepared by the structural engineer. Contains data not available in MIDAS exports.
+Provided as either individual CSVs or a single Excel workbook with 5 sheets.</p>
+<h3>B1. SlabBoundary.csv (Required)</h3>
+<p><strong>Source:</strong> MIDAS Gen → Initial Forces → Floor Load → export boundary nodes, with engineer-added slab IDs
+<strong>Rows:</strong> 70 (P1)</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NO</td>
+<td>int</td>
+<td>—</td>
+<td>Load case number</td>
+</tr>
+<tr>
+<td>Load_Type</td>
+<td>string</td>
+<td>—</td>
+<td>Load type</td>
+</tr>
+<tr>
+<td>Distribution Type</td>
+<td>string</td>
+<td>—</td>
+<td>Two Way / One Way</td>
+</tr>
+<tr>
+<td>Nodes for Loading Area</td>
+<td>string</td>
+<td>—</td>
+<td>Comma-separated node numbers defining slab boundary</td>
+</tr>
+<tr>
+<td>Slab NO.</td>
+<td>string</td>
+<td>—</td>
+<td>Engineer-assigned slab ID (e.g., B3S1, 1FS3)</td>
+</tr>
+<tr>
+<td>...</td>
+<td></td>
+<td></td>
+<td>(15 columns total, most from MIDAS export)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Note:</strong> The <code>Slab NO.</code> column (last column) is added by the engineer. Stair entries use SS/ST suffix (e.g., B3SS1) and are filtered out during slab conversion.</p>
+<h3>B2. SlabReinforcement.csv (Required)</h3>
+<p><strong>Source:</strong> Engineer manual input
+<strong>Rows:</strong> 20 (P1)</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Slab ID matching SlabBoundary (e.g., B3S1)</td>
+</tr>
+<tr>
+<td>position</td>
+<td>string</td>
+<td>—</td>
+<td>Level (B3, 1F, etc.)</td>
+</tr>
+<tr>
+<td>slab_type</td>
+<td>string</td>
+<td>—</td>
+<td>Slab type code (C, etc.)</td>
+</tr>
+<tr>
+<td>thickness_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Slab thickness</td>
+</tr>
+<tr>
+<td>X_Top</td>
+<td>string</td>
+<td>—</td>
+<td>X-direction top rebar spec (e.g., D10@200)</td>
+</tr>
+<tr>
+<td>X_Bot.</td>
+<td>string</td>
+<td>—</td>
+<td>X-direction bottom rebar spec</td>
+</tr>
+<tr>
+<td>Y_Top</td>
+<td>string</td>
+<td>—</td>
+<td>Y-direction top rebar spec</td>
+</tr>
+<tr>
+<td>Y_Bot.</td>
+<td>string</td>
+<td>—</td>
+<td>Y-direction bottom rebar spec</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rebar spec format:</strong> <code>Dxx@sss</code> (diameter @ spacing)
+<strong>Composite format:</strong> <code>D13+D16@100</code> (alternating bars, converter splits into 2 rows)</p>
+<h3>B3. StairReinforcement.csv (Required)</h3>
+<p><strong>Source:</strong> Engineer manual input (geometry + reinforcement combined)
+<strong>Rows:</strong> 10 (P1)</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Stair ID (e.g., B3SS1)</td>
+</tr>
+<tr>
+<td>level_start</td>
+<td>string</td>
+<td>—</td>
+<td>Lower level (B4)</td>
+</tr>
+<tr>
+<td>level_end</td>
+<td>string</td>
+<td>—</td>
+<td>Upper level (B3)</td>
+</tr>
+<tr>
+<td>Stair_Thickness_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Flight slab thickness</td>
+</tr>
+<tr>
+<td>Stair_Height_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Total stair height (story height)</td>
+</tr>
+<tr>
+<td>Stair_Width_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Flight width</td>
+</tr>
+<tr>
+<td>Stair_Length_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Flight horizontal length</td>
+</tr>
+<tr>
+<td>landing(Left)_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Lower landing length</td>
+</tr>
+<tr>
+<td>landing(Right)_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Upper (mid) landing length</td>
+</tr>
+<tr>
+<td>riser_height</td>
+<td>float</td>
+<td>mm</td>
+<td>Riser height</td>
+</tr>
+<tr>
+<td>tread depth</td>
+<td>float</td>
+<td>mm</td>
+<td>Tread depth</td>
+</tr>
+<tr>
+<td>landing(Left)_transverse_Top</td>
+<td>string</td>
+<td>—</td>
+<td>Rebar spec (e.g., D13@150)</td>
+</tr>
+<tr>
+<td>landing(Left)_transverse_Bot.</td>
+<td>string</td>
+<td>—</td>
+<td>Rebar spec</td>
+</tr>
+<tr>
+<td>landing(Left)_longitudinal_Top</td>
+<td>string</td>
+<td>—</td>
+<td>Rebar spec</td>
+</tr>
+<tr>
+<td>landing(Left)_longitudinal_Bot.</td>
+<td>string</td>
+<td>—</td>
+<td>Rebar spec</td>
+</tr>
+<tr>
+<td>Stair_transverse_Top</td>
+<td>string</td>
+<td>—</td>
+<td>Flight transverse rebar</td>
+</tr>
+<tr>
+<td>Stair_transverse_Bot.</td>
+<td>string</td>
+<td>—</td>
+<td>Flight transverse rebar</td>
+</tr>
+<tr>
+<td>Stair_longitudinal_Top</td>
+<td>string</td>
+<td>—</td>
+<td>Flight longitudinal rebar</td>
+</tr>
+<tr>
+<td>Stair_longitudinal_Bot.</td>
+<td>string</td>
+<td>—</td>
+<td>Flight longitudinal rebar</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Note:</strong> P2 has additional columns for Stair_Thickness_mm, and may have different bar diameters for landing vs flight (e.g., D13 landing + D10 flight).</p>
+<h3>B4. FootBoundary.csv (Required)</h3>
+<p><strong>Source:</strong> MIDAS Gen → Query → Node Detail Table, with engineer-added footing IDs
+<strong>Encoding:</strong> CP949 (Korean Windows encoding)
+<strong>Rows:</strong> 56 (P1)</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NODE</td>
+<td>int</td>
+<td>—</td>
+<td>Node number</td>
+</tr>
+<tr>
+<td>X_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>X coordinate</td>
+</tr>
+<tr>
+<td>Y_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Y coordinate (header shows X but is actually Y)</td>
+</tr>
+<tr>
+<td>Z_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Z coordinate (header shows X but is actually Z)</td>
+</tr>
+<tr>
+<td>Foot No.</td>
+<td>string</td>
+<td>—</td>
+<td>Footing ID (MF1, MF2)</td>
+</tr>
+<tr>
+<td>Position</td>
+<td>string</td>
+<td>—</td>
+<td>Level (B4, B3)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Note:</strong> Column headers have encoding issues (mm shows as garbled Korean). The actual order is NODE, X, Y, Z, Foot_ID, Level.</p>
+<p><strong>Footing shapes:</strong>
+- 4n nodes → split into n rectangular quads
+- Other counts → polygon (area computed via Shoelace formula)</p>
+<h3>B5. FootReinforcement.csv (Required)</h3>
+<p><strong>Source:</strong> Engineer manual input
+<strong>Rows:</strong> 7 (P1)</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>member_id</td>
+<td>string</td>
+<td>—</td>
+<td>Footing ID (MF1, MF2)</td>
+</tr>
+<tr>
+<td>position</td>
+<td>string</td>
+<td>—</td>
+<td>Level (B4)</td>
+</tr>
+<tr>
+<td>slab_type</td>
+<td>string</td>
+<td>—</td>
+<td>Type code (C)</td>
+</tr>
+<tr>
+<td>thickness_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Foundation thickness</td>
+</tr>
+<tr>
+<td>X_Top</td>
+<td>string</td>
+<td>—</td>
+<td>X-direction top rebar (D19@250)</td>
+</tr>
+<tr>
+<td>X_Bot.</td>
+<td>string</td>
+<td>—</td>
+<td>X-direction bottom rebar</td>
+</tr>
+<tr>
+<td>Y_Top</td>
+<td>string</td>
+<td>—</td>
+<td>Y-direction top rebar</td>
+</tr>
+<tr>
+<td>Y_Bot.</td>
+<td>string</td>
+<td>—</td>
+<td>Y-direction bottom rebar</td>
+</tr>
+<tr>
+<td>STR</td>
+<td>string</td>
+<td>—</td>
+<td>Stirrup spec (e.g., 5-10@200)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Additional reinforcement zones</strong> (R1, R2, etc.) and <strong>stirrup zones</strong> (V1) appear as additional rows with zone-specific rebar.</p>
+<hr />
+<h2>Part C — Basement Wall Data</h2>
+<p>Manually prepared by the structural engineer for basement/retaining walls.
+Provided as a single Excel workbook with 2 sheets.</p>
+<h3>C1. BasementWall Boundary (sheet)</h3>
+<p><strong>Source:</strong> Engineer manual input
+<strong>Rows:</strong> 144 (P1), <strong>Header at row 2</strong> (row 1 is title)
+<strong>Nodes per wall-level:</strong> 4 per panel (multiple panels possible)</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Node</td>
+<td>int</td>
+<td>—</td>
+<td>MIDAS node number at wall corner</td>
+</tr>
+<tr>
+<td>NAME</td>
+<td>string</td>
+<td>—</td>
+<td>Wall name (BW1, BW1A, DW1, FW1)</td>
+</tr>
+<tr>
+<td>Position</td>
+<td>string</td>
+<td>—</td>
+<td>Level (B1, B2, B3, B4)</td>
+</tr>
+<tr>
+<td>Length_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Wall plan length</td>
+</tr>
+<tr>
+<td>Height_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Wall story height</td>
+</tr>
+<tr>
+<td>Left_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Left zone width</td>
+</tr>
+<tr>
+<td>Middle_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Middle zone width</td>
+</tr>
+<tr>
+<td>Right_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Right zone width</td>
+</tr>
+<tr>
+<td>Top_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Top zone height</td>
+</tr>
+<tr>
+<td>Middle_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Middle zone height</td>
+</tr>
+<tr>
+<td>Bottom_mm</td>
+<td>int</td>
+<td>mm</td>
+<td>Bottom zone height</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Structure:</strong> Each wall-level has 4 rows (4 corner nodes). Zone dimensions may be null in the first row and filled in subsequent rows.</p>
+<p><strong>Wall naming:</strong>
+- BW = Basement Wall (exterior)
+- DW = Division Wall (interior partition)
+- FW = Foundation Wall (at footing level)</p>
+<p><strong>Full-height walls:</strong> Position = "B4~B1" means the wall spans all basement levels as a single panel (not split per level).</p>
+<h3>C2. BasementWall Reinforcement (sheet)</h3>
+<p><strong>Source:</strong> Engineer manual input
+<strong>Rows:</strong> 27 (P1), <strong>Header at row 2</strong> (row 1 is title)</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>NAME</td>
+<td>string</td>
+<td>—</td>
+<td>Wall name</td>
+</tr>
+<tr>
+<td>Position</td>
+<td>string</td>
+<td>—</td>
+<td>Level</td>
+</tr>
+<tr>
+<td>TYP</td>
+<td>string</td>
+<td>—</td>
+<td>Wall type (A, B)</td>
+</tr>
+<tr>
+<td>THK.</td>
+<td>int</td>
+<td>mm</td>
+<td>Wall thickness</td>
+</tr>
+<tr>
+<td>H_Int.(Left)</td>
+<td>string</td>
+<td>—</td>
+<td>Horizontal, Interior face, Left zone</td>
+</tr>
+<tr>
+<td>H_Ext.(Left)</td>
+<td>string</td>
+<td>—</td>
+<td>Horizontal, Exterior face, Left zone</td>
+</tr>
+<tr>
+<td>H_Int.(Middle)</td>
+<td>string</td>
+<td>—</td>
+<td>Horizontal, Interior face, Middle zone</td>
+</tr>
+<tr>
+<td>H_Ext.(Middle)</td>
+<td>string</td>
+<td>—</td>
+<td>Horizontal, Exterior face, Middle zone</td>
+</tr>
+<tr>
+<td>H_Int.(Right)</td>
+<td>string</td>
+<td>—</td>
+<td>Horizontal, Interior face, Right zone</td>
+</tr>
+<tr>
+<td>H_Ext.(Right)</td>
+<td>string</td>
+<td>—</td>
+<td>Horizontal, Exterior face, Right zone</td>
+</tr>
+<tr>
+<td>V,Int.(Top)</td>
+<td>string</td>
+<td>—</td>
+<td>Vertical, Interior face, Top zone</td>
+</tr>
+<tr>
+<td>V,Ext.(Top)</td>
+<td>string</td>
+<td>—</td>
+<td>Vertical, Exterior face, Top zone</td>
+</tr>
+<tr>
+<td>V,Int.(Middle)</td>
+<td>string</td>
+<td>—</td>
+<td>Vertical, Interior face, Middle zone</td>
+</tr>
+<tr>
+<td>V,Ext.(Middle)</td>
+<td>string</td>
+<td>—</td>
+<td>Vertical, Exterior face, Middle zone</td>
+</tr>
+<tr>
+<td>V,Int.(Bottom)</td>
+<td>string</td>
+<td>—</td>
+<td>Vertical, Interior face, Bottom zone</td>
+</tr>
+<tr>
+<td>V,Ext.(Bottom)</td>
+<td>string</td>
+<td>—</td>
+<td>Vertical, Exterior face, Bottom zone</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rebar spec format:</strong> <code>Dxx@sss</code> (e.g., D13@200)
+<strong>Composite format:</strong> <code>D13+D16@100</code> → alternating bars, split into 2 rows with doubled spacing</p>
+<p><strong>3×3 zone grid:</strong></p>
+<pre><code>             LEFT        MIDDLE       RIGHT
+          ┌───────────┬───────────┬───────────┐
+  TOP     │ V,Int/Ext │ V,Int/Ext │ V,Int/Ext │  ← zone_height_top
+          ├───────────┼───────────┼───────────┤
+  MIDDLE  │ V,Int/Ext │ V,Int/Ext │ V,Int/Ext │  ← zone_height_middle
+          ├───────────┼───────────┼───────────┤
+  BOTTOM  │ V,Int/Ext │ V,Int/Ext │ V,Int/Ext │  ← zone_height_bottom
+          └───────────┴───────────┴───────────┘
+            zone_w_L    zone_w_M    zone_w_R
+
+  Horizontal bars: LEFT / MIDDLE / RIGHT zones (same height)
+  Vertical bars: TOP / MIDDLE / BOTTOM zones (same width)
+  Each zone has Interior + Exterior face reinforcement
+</code></pre>
+<hr />
+<h2>Grid Definition (Manual Entry or CSV)</h2>
+<p>Not part of the structural data — entered by the user in the converter UI or uploaded as CSV.</p>
+<h3>Grid CSV Format (Optional)</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Type</th>
+<th>Unit</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>axis</td>
+<td>string</td>
+<td>—</td>
+<td>X or Y</td>
+</tr>
+<tr>
+<td>label</td>
+<td>string</td>
+<td>—</td>
+<td>Grid label (X1, X2, Y1, Y2, ...)</td>
+</tr>
+<tr>
+<td>position_mm</td>
+<td>float</td>
+<td>mm</td>
+<td>Coordinate position</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Alternative:</strong> User enters grid positions directly in the Streamlit UI text fields:</p>
+<pre><code>X-axis: X1=0, X2=6360, X3=11600
+Y-axis: Y1=0, Y2=7800, Y3=15000
+</code></pre>
+<p>If no grid is provided, Phase 3 auto-detects from column positions.</p>
+<hr />
+<h2>File Organization</h2>
+<p>Recommended folder structure for raw data delivery:</p>
+<pre><code>Project_Name/
+├── Part_A/                          ← MIDAS Gen exports
+│   ├── Nodes.csv                    (required)
+│   ├── Materials.csv                (required)
+│   ├── Sections.csv                 (required)
+│   ├── Elements.csv                 (required)
+│   ├── Thickness.csv                (required)
+│   ├── StoryDefinition.csv          (required)
+│   ├── DesignBeam.csv               (required)
+│   ├── DesignColumn.csv             (required)
+│   ├── DesignWall.csv               (conditional — if walls designed)
+│   └── project.mgt                  (optional — for rebar grades, wall marks)
+│
+├── Part_B/                          ← Engineer input
+│   ├── SlabBoundary.csv             (required)
+│   ├── SlabReinforcement.csv        (required)
+│   ├── StairReinforcement.csv       (required)
+│   ├── FootBoundary.csv             (required)
+│   └── FootReinforcement.csv        (required)
+│
+└── Part_C_BasementWall.xlsx         ← Basement walls (conditional)
+    ├── BasementWall Boundary        (sheet)
+    └── BasementWall Reinforcement   (sheet)
+</code></pre>
+<p><strong>Encoding:</strong>
+- Part A CSVs: UTF-8 with BOM (utf-8-sig) — MIDAS default
+- Part B CSVs: UTF-8 or CP949 (Korean Windows)
+- Part C Excel: .xlsx (openpyxl compatible)
+- project.mgt: UTF-8 text</p>
+<p><strong>Note:</strong> Part B may also be delivered as a single Excel workbook (<code>Part_B_수평부재 입력 Data.xlsx</code>) with 5 sheets matching the 5 CSV files.</p>
+</body>
+</html>
