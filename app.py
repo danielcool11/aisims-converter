@@ -31,6 +31,7 @@ from converters.reinforcement_stair import convert_reinforcement_stair
 from converters.footings import convert_footings
 from converters.basement_walls import convert_basement_walls
 from converters.validation import validate_outputs, format_report
+from converters.wall_dedup import deduplicate_walls
 from tier2.rebar_lengths_beam import calculate_beam_rebar_lengths
 from tier2.rebar_lengths_column import calculate_column_rebar_lengths
 from tier2.rebar_lengths_slab import calculate_slab_rebar_lengths
@@ -391,6 +392,16 @@ if st.button("CONVERT", type="primary", use_container_width=True):
             reinf_stair_df = convert_reinforcement_stair(stair_raw)
             outputs['reinf_stair'] = reinf_stair_df
             log(f"ReinfStair: {len(reinf_stair_df)} rows")
+
+        # ── Wall deduplication (remove elements covered by Part C) ──
+        if 'walls' in outputs and outputs['walls'] is not None:
+            outputs['walls'] = deduplicate_walls(
+                outputs['walls'],
+                outputs.get('reinf_wall'),
+                outputs.get('bwall_members'),
+                outputs.get('nodes'),
+            )
+            log(f"Wall dedup: {len(outputs['walls'])} elements after dedup")
 
         # ── Phase 5: Validation ──
         progress.progress(85, text="Phase 5: Validation...")
