@@ -204,31 +204,36 @@ class ColumnDataAdapter:
             if not z_vals.empty:
                 self.level_z[str(level)] = float(z_vals.mean())
 
-        # Parse reinforcement — strip level prefix from member_id
-        self.main_cfg = {}    # base_member_id → {dia, n_bars}
-        self.hoop_cfg = {}    # base_member_id → {end: {dia, spacing}, mid: {dia, spacing}}
+        # Parse reinforcement — keyed by raw_mid to support per-level configs
+        # (e.g. P2: 'TC1 (B5-B1)' vs 'TC1 (1-P)' have different bar counts)
+        self._main_cfg_raw = {}   # raw_mid → {dia, n_bars}
+        self._hoop_cfg_raw = {}   # raw_mid → {end: {dia, spacing}, mid: {…}}
+        self.base_to_raw = {}     # base_mid → set of raw_mids
 
         for _, row in self.reinf_df.iterrows():
             raw_mid = str(row.get('member_id', '')).strip()
             mid = _extract_base_member_id(raw_mid)
 
+            if mid not in self.base_to_raw:
+                self.base_to_raw[mid] = set()
+            self.base_to_raw[mid].add(raw_mid)
+
             # Main bars
             main_dia = row.get('main_dia_mm')
             main_total = row.get('main_total')
             if pd.notna(main_dia) and pd.notna(main_total) and int(main_total) > 0:
-                if mid not in self.main_cfg:
-                    self.main_cfg[mid] = {
-                        'dia': float(main_dia),
-                        'n_bars': int(main_total),
-                    }
+                self._main_cfg_raw[raw_mid] = {
+                    'dia': float(main_dia),
+                    'n_bars': int(main_total),
+                }
 
             # Tie end
             tie_end_dia = row.get('tie_end_dia_mm')
             tie_end_spacing = row.get('tie_end_spacing_mm')
             if pd.notna(tie_end_dia) and pd.notna(tie_end_spacing):
-                if mid not in self.hoop_cfg:
-                    self.hoop_cfg[mid] = {}
-                self.hoop_cfg[mid]['end'] = {
+                if raw_mid not in self._hoop_cfg_raw:
+                    self._hoop_cfg_raw[raw_mid] = {}
+                self._hoop_cfg_raw[raw_mid]['end'] = {
                     'dia_mm': float(tie_end_dia),
                     'spacing_mm': float(tie_end_spacing),
                 }
@@ -237,12 +242,146 @@ class ColumnDataAdapter:
             tie_mid_dia = row.get('tie_mid_dia_mm')
             tie_mid_spacing = row.get('tie_mid_spacing_mm')
             if pd.notna(tie_mid_dia) and pd.notna(tie_mid_spacing):
-                if mid not in self.hoop_cfg:
-                    self.hoop_cfg[mid] = {}
-                self.hoop_cfg[mid]['mid'] = {
+                if raw_mid not in self._hoop_cfg_raw:
+                    self._hoop_cfg_raw[raw_mid] = {}
+                self._hoop_cfg_raw[raw_mid]['mid'] = {
                     'dia_mm': float(tie_mid_dia),
                     'spacing_mm': float(tie_mid_spacing),
                 }
+
+        # Build level_range_map: raw_mid → set of levels it covers
+        # Parses parenthetical ranges like '(B5-B1)', '(1-P)' and also
+        # generic prefixes like '-1', 'R', '-1~-4' via beam helpers.
+        self._level_range_map = {}  # raw_mid → set of level names
+        self._build_level_range_map()
+
+        # Legacy flat lookups (for single-config members / fallback)
+        self.main_cfg = {}
+        self.hoop_cfg = {}
+        for mid, raw_ids in self.base_to_raw.items():
+            for raw_mid in raw_ids:
+                if raw_mid in self._main_cfg_raw and mid not in self.main_cfg:
+                    self.main_cfg[mid] = self._main_cfg_raw[raw_mid]
+                if raw_mid in self._hoop_cfg_raw and mid not in self.hoop_cfg:
+                    self.hoop_cfg[mid] = self._hoop_cfg_raw[raw_mid]
+
+    def _build_level_range_map(self):
+        """Build raw_mid → set of level names from column level_from/level_to."""
+        # Collect all unique levels from columns_df, ordered by z
+        level_z = {}
+        for _, row in self.columns_df.iterrows():
+            lf = str(row.get('level_from', '')).strip()
+            lt = str(row.get('level_to', '')).strip()
+            z = row.get('z_mm', None)
+            if lf and z is not None and pd.notna(z):
+                if lf not in level_z or float(z) < level_z[lf]:
+                    level_z[lf] = float(z)
+            if lt:
+                zt = self.level_z.get(lt)
+                if zt is not None and (lt not in level_z or zt < level_z[lt]):
+                    level_z[lt] = zt
+
+        level_order = sorted(level_z.keys(), key=lambda lv: level_z.get(lv, 0))
+
+        for base_mid, raw_ids in self.base_to_raw.items():
+            for raw_mid in raw_ids:
+                levels = self._parse_raw_mid_levels(raw_mid, base_mid, level_order)
+                if levels:
+                    self._level_range_map[raw_mid] = levels
+
+        # Assign uncovered column levels to unassigned raw_mids
+        for base_mid, raw_ids in self.base_to_raw.items():
+            if len(raw_ids) <= 1:
+                continue
+            col_levels = set()
+            for _, row in self.columns_df[
+                self.columns_df['member_id'] == base_mid
+            ].iterrows():
+                lf = str(row.get('level_from', '')).strip()
+                if lf:
+                    col_levels.add(lf)
+            covered = set()
+            for raw_mid in raw_ids:
+                covered |= self._level_range_map.get(raw_mid, set())
+            uncovered = col_levels - covered
+            if not uncovered:
+                continue
+            assigned_raws = {r for r in raw_ids if r in self._level_range_map}
+            unassigned = [r for r in raw_ids if r not in assigned_raws]
+            if len(unassigned) == 1:
+                existing = self._level_range_map.get(unassigned[0], set())
+                self._level_range_map[unassigned[0]] = existing | uncovered
+
+    @staticmethod
+    def _parse_raw_mid_levels(raw_mid, base_mid, level_order):
+        """Parse a raw reinforcement member_id to determine which levels it covers.
+
+        Handles:
+        - P2 parenthetical: 'TC1 (B5-B1)' → {B5,B4,B3,B2,B1}
+        - P2 space+range:   '-1~-4 C1' → {B1,B2,B3,B4}
+        - P1 concatenated:  '-1C1' → {B1}, 'RC1' → {Roof}
+        """
+        from tier2.rebar_lengths_beam import (
+            _extract_raw_prefix, _prefix_token_to_level, _expand_level_prefix)
+
+        # Strategy 1: Parenthetical range like '(B5-B1)' or '(1-P)'
+        paren_match = re.search(r'\(([^)]+)\)', raw_mid)
+        if paren_match:
+            inner = paren_match.group(1)  # e.g. 'B5-B1', '1-P'
+            # Split on '-' but handle negative numbers: 'B5-B1' → ['B5','B1']
+            # For '1-P' → ['1','P']
+            tokens = re.split(r'(?<=[A-Za-z0-9])-(?=[A-Za-z0-9])', inner)
+            if len(tokens) == 2:
+                start = _prefix_token_to_level(
+                    tokens[0].replace('B', '-') if tokens[0].startswith('B') and tokens[0][1:].isdigit()
+                    else tokens[0])
+                end = _prefix_token_to_level(
+                    tokens[1].replace('B', '-') if tokens[1].startswith('B') and tokens[1][1:].isdigit()
+                    else tokens[1])
+                if (start and end
+                        and start in level_order and end in level_order):
+                    i1 = level_order.index(start)
+                    i2 = level_order.index(end)
+                    lo, hi = min(i1, i2), max(i1, i2)
+                    return set(level_order[lo:hi + 1])
+            return None
+
+        # Strategy 2: Use beam-style prefix parsing
+        prefix = _extract_raw_prefix(raw_mid, base_mid)
+        return _expand_level_prefix(prefix, level_order)
+
+    def get_main_cfg(self, member_id, level_from=None):
+        """Get main bar config for a column, level-aware.
+
+        For multi-range members (P2: TC1 has different configs at B5-B1 vs 1-P),
+        returns the config matching the segment's level_from.
+        Falls back to the legacy flat lookup for single-config members.
+        """
+        raw_ids = self.base_to_raw.get(member_id, set())
+        if len(raw_ids) <= 1:
+            return self.main_cfg.get(member_id)
+
+        if level_from:
+            for raw_mid in raw_ids:
+                levels = self._level_range_map.get(raw_mid, set())
+                if level_from in levels and raw_mid in self._main_cfg_raw:
+                    return self._main_cfg_raw[raw_mid]
+
+        return self.main_cfg.get(member_id)
+
+    def get_hoop_cfg(self, member_id, level_from=None):
+        """Get hoop/tie config for a column, level-aware."""
+        raw_ids = self.base_to_raw.get(member_id, set())
+        if len(raw_ids) <= 1:
+            return self.hoop_cfg.get(member_id)
+
+        if level_from:
+            for raw_mid in raw_ids:
+                levels = self._level_range_map.get(raw_mid, set())
+                if level_from in levels and raw_mid in self._hoop_cfg_raw:
+                    return self._hoop_cfg_raw[raw_mid]
+
+        return self.hoop_cfg.get(member_id)
 
     def get_section_dims(self, member_id, level_from, level_to):
         """Get (b_mm, h_mm, shape) for a column segment."""
@@ -275,8 +414,9 @@ def calculate_column_rebar_lengths(
 
     print('[RebarColumn] Building data adapter...')
     adapter = ColumnDataAdapter(columns_df, reinf_df, sections_df, nodes_df)
-    print(f'[RebarColumn] {len(adapter.main_cfg)} main configs, '
-          f'{len(adapter.hoop_cfg)} hoop configs')
+    print(f'[RebarColumn] {len(adapter._main_cfg_raw)} main configs '
+          f'({len(adapter.base_to_raw)} members), '
+          f'{len(adapter._hoop_cfg_raw)} hoop configs')
 
     results = []
 
@@ -354,15 +494,11 @@ def calculate_column_rebar_lengths(
         grp['_lv_idx'] = grp['level_from'].apply(_level_sort_key)
         grp = grp.sort_values('_lv_idx').reset_index(drop=True)
 
-        # Get rebar config
-        main = adapter.main_cfg.get(member_id)
-        if main is None:
+        # Check if any rebar config exists for this member
+        first_level = str(grp.iloc[0]['level_from'])
+        main_check = adapter.get_main_cfg(member_id, first_level)
+        if main_check is None:
             continue
-
-        dia_main = main['dia']
-        n_bars = main['n_bars']
-        fy = _steel_grade(dia_main)
-        Ldh, Lpc = lookup.get(fy, dia_main, fc)
 
         # Build story info
         story_info = []
@@ -435,29 +571,35 @@ def calculate_column_rebar_lengths(
             # ── DOWEL BAR ──
             first = group[0]
             if _is_basement(first['level_from']):
-                dowel_len = Lpc + Ldh
-                col_z_bottom = first['z_start']
-                footing_z = col_z_bottom - FOOTING_DEPTH_MM
-                rebar_z_start = footing_z + COVER_MM
-                rebar_z_end = rebar_z_start + dowel_len
+                main_d = adapter.get_main_cfg(member_id, first['level_from'])
+                if main_d:
+                    dia_d = main_d['dia']
+                    n_d = main_d['n_bars']
+                    fy_d = _steel_grade(dia_d)
+                    Ldh_d, Lpc_d = lookup.get(fy_d, dia_d, fc)
+                    dowel_len = Lpc_d + Ldh_d
+                    col_z_bottom = first['z_start']
+                    footing_z = col_z_bottom - FOOTING_DEPTH_MM
+                    rebar_z_start = footing_z + COVER_MM
+                    rebar_z_end = rebar_z_start + dowel_len
 
-                results.append({
-                    'member_id': member_id, 'start_grid': grid,
-                    'level_from': 'FOOTING', 'level_to': first['level_from'],
-                    'bar_position': 'MAIN', 'bar_role': 'DOWEL', 'bar_type': 'MAIN',
-                    'dia_mm': dia_main, 'n_bars': n_bars,
-                    'length_mm': int(round(dowel_len)),
-                    'splice_start_mm': None, 'splice_start_end_mm': None,
-                    'splice_end_mm': round(col_z_bottom, 1),
-                    'splice_end_end_mm': round(col_z_bottom + Lpc, 1),
-                    'x_start_mm': first['col_x'], 'y_start_mm': first['col_y'],
-                    'z_start_mm': round(rebar_z_start, 1),
-                    'x_end_mm': first['col_x'], 'y_end_mm': first['col_y'],
-                    'z_end_mm': round(rebar_z_end, 1),
-                    'segment_id': first['segment_id'],
-                    'b_mm': first['b_mm'], 'h_mm': first['h_mm'],
-                    'shape': first['shape'],
-                })
+                    results.append({
+                        'member_id': member_id, 'start_grid': grid,
+                        'level_from': 'FOOTING', 'level_to': first['level_from'],
+                        'bar_position': 'MAIN', 'bar_role': 'DOWEL', 'bar_type': 'MAIN',
+                        'dia_mm': dia_d, 'n_bars': n_d,
+                        'length_mm': int(round(dowel_len)),
+                        'splice_start_mm': None, 'splice_start_end_mm': None,
+                        'splice_end_mm': round(col_z_bottom, 1),
+                        'splice_end_end_mm': round(col_z_bottom + Lpc_d, 1),
+                        'x_start_mm': first['col_x'], 'y_start_mm': first['col_y'],
+                        'z_start_mm': round(rebar_z_start, 1),
+                        'x_end_mm': first['col_x'], 'y_end_mm': first['col_y'],
+                        'z_end_mm': round(rebar_z_end, 1),
+                        'segment_id': first['segment_id'],
+                        'b_mm': first['b_mm'], 'h_mm': first['h_mm'],
+                        'shape': first['shape'],
+                    })
 
             # ── MAIN BARS (story by story within group) ──
             for j, s in enumerate(group):
@@ -466,6 +608,15 @@ def calculate_column_rebar_lengths(
                 h = s['height_mm']
                 L = s['length_mm']
                 z_start = s['z_start']
+
+                # Per-segment config (handles P2 range-specific rebar)
+                main_s = adapter.get_main_cfg(member_id, s['level_from'])
+                if main_s is None:
+                    continue
+                dia_main = main_s['dia']
+                n_bars = main_s['n_bars']
+                fy = _steel_grade(dia_main)
+                Ldh, Lpc = lookup.get(fy, dia_main, fc)
 
                 if is_top:
                     L_bar = L + Ldh
@@ -510,8 +661,10 @@ def calculate_column_rebar_lengths(
                 })
 
             # ── HOOPS (3 zones per story within group) ──
-            hoop = adapter.hoop_cfg.get(member_id)
-            if hoop:
+            for s in group:
+                hoop = adapter.get_hoop_cfg(member_id, s['level_from'])
+                if not hoop:
+                    continue
                 end_cfg = hoop.get('end')
                 mid_cfg = hoop.get('mid')
                 if not end_cfg:
@@ -520,53 +673,51 @@ def calculate_column_rebar_lengths(
                     mid_cfg = end_cfg
 
                 if end_cfg and mid_cfg:
-                    for s in group:
-                        H_clear = s['length_mm']  # Use 3D length for hoop distribution
-                        b_mm = s['b_mm']
-                        h_mm = s['h_mm']
-                        b_clear = b_mm - 2 * COVER_MM
-                        h_clear = h_mm - 2 * COVER_MM
+                    H_clear = s['length_mm']
+                    b_mm = s['b_mm']
+                    h_mm = s['h_mm']
+                    b_clear = b_mm - 2 * COVER_MM
+                    h_clear = h_mm - 2 * COVER_MM
 
-                        zones = [
-                            ('HOOP_END_BOTTOM', 0.25 * H_clear, end_cfg),
-                            ('HOOP_MID', 0.50 * H_clear, mid_cfg),
-                            ('HOOP_END_TOP', 0.25 * H_clear, end_cfg),
-                        ]
+                    zones = [
+                        ('HOOP_END_BOTTOM', 0.25 * H_clear, end_cfg),
+                        ('HOOP_MID', 0.50 * H_clear, mid_cfg),
+                        ('HOOP_END_TOP', 0.25 * H_clear, end_cfg),
+                    ]
 
-                        z_cursor = s['z_start']
+                    z_cursor = s['z_start']
 
-                        for zone_role, zone_length, cfg in zones:
-                            dia = cfg['dia_mm']
-                            spacing = cfg['spacing_mm']
+                    for zone_role, zone_length, cfg in zones:
+                        dia = cfg['dia_mm']
+                        spacing = cfg['spacing_mm']
 
-                            # Hoop perimeter length
-                            L_hoop = 2 * (b_clear + h_clear) + 2 * HOOK_EXTENSION_FACTOR * dia
-                            n_hoops = int(zone_length / spacing) + 1
-                            total_len = L_hoop * n_hoops
+                        L_hoop = 2 * (b_clear + h_clear) + 2 * HOOK_EXTENSION_FACTOR * dia
+                        n_hoops = int(zone_length / spacing) + 1
+                        total_len = L_hoop * n_hoops
 
-                            results.append({
-                                'member_id': member_id, 'start_grid': grid,
-                                'level_from': s['level_from'], 'level_to': s['level_to'],
-                                'bar_position': 'HOOP', 'bar_role': zone_role,
-                                'bar_type': 'HOOP',
-                                'dia_mm': int(dia), 'n_bars': 0,
-                                'length_mm': int(round(L_hoop)),
-                                'spacing_mm': int(spacing),
-                                'zone_length_mm': int(round(zone_length)),
-                                'quantity_pieces': n_hoops,
-                                'total_length_mm': int(round(total_len)),
-                                'splice_start_mm': None, 'splice_start_end_mm': None,
-                                'splice_end_mm': None, 'splice_end_end_mm': None,
-                                'x_start_mm': s['col_x'], 'y_start_mm': s['col_y'],
-                                'z_start_mm': round(z_cursor, 1),
-                                'x_end_mm': s['col_x'], 'y_end_mm': s['col_y'],
-                                'z_end_mm': round(z_cursor + zone_length, 1),
-                                'segment_id': s['segment_id'],
-                                'b_mm': int(b_mm), 'h_mm': int(h_mm),
-                                'shape': s['shape'],
-                            })
+                        results.append({
+                            'member_id': member_id, 'start_grid': grid,
+                            'level_from': s['level_from'], 'level_to': s['level_to'],
+                            'bar_position': 'HOOP', 'bar_role': zone_role,
+                            'bar_type': 'HOOP',
+                            'dia_mm': int(dia), 'n_bars': 0,
+                            'length_mm': int(round(L_hoop)),
+                            'spacing_mm': int(spacing),
+                            'zone_length_mm': int(round(zone_length)),
+                            'quantity_pieces': n_hoops,
+                            'total_length_mm': int(round(total_len)),
+                            'splice_start_mm': None, 'splice_start_end_mm': None,
+                            'splice_end_mm': None, 'splice_end_end_mm': None,
+                            'x_start_mm': s['col_x'], 'y_start_mm': s['col_y'],
+                            'z_start_mm': round(z_cursor, 1),
+                            'x_end_mm': s['col_x'], 'y_end_mm': s['col_y'],
+                            'z_end_mm': round(z_cursor + zone_length, 1),
+                            'segment_id': s['segment_id'],
+                            'b_mm': int(b_mm), 'h_mm': int(h_mm),
+                            'shape': s['shape'],
+                        })
 
-                            z_cursor += zone_length
+                        z_cursor += zone_length
 
     # Build output
     df = pd.DataFrame(results)
