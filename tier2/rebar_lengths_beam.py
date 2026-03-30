@@ -59,6 +59,28 @@ def _beam_direction(x_from, y_from, x_to, y_to):
     return 'X' if dx >= dy else 'Y'
 
 
+def _level_to_raw_mid(level, base_member_id):
+    """Reconstruct the prefixed member_id used in ReinforcementBeam.
+
+    Level encoding: B1→'-1', B2→'-2', 1F→'1', 2F→'2', RF→'R', Roof→'R',
+    PHR→'PHR'. Prefix is prepended to the base member_id.
+    """
+    if not level:
+        return base_member_id
+    lv = level.strip().upper()
+    if lv.startswith('B') and len(lv) > 1 and lv[1:].isdigit():
+        prefix = '-' + lv[1:]
+    elif lv == 'ROOF':
+        prefix = 'R'
+    elif lv.endswith('F') and lv[:-1].replace('-', '').isdigit():
+        prefix = lv[:-1]
+    elif lv == 'PHR':
+        prefix = 'PHR'
+    else:
+        prefix = lv
+    return prefix + base_member_id
+
+
 def _bar_z(z_ref, h_mm, cover_mm, position, layer, dia_mm):
     """Calculate bar Z coordinate within beam cross-section."""
     layer_spacing = max(25.0, float(dia_mm))
@@ -276,12 +298,18 @@ class BeamDataAdapter:
         """Parse our flat reinforcement format into per-member rebar config.
 
         ReinforcementBeam member_ids have level prefixes (e.g., '-1B11', '6G1')
-        while MembersBeam uses base IDs ('B11', 'G1'). We strip the prefix
-        and store configs keyed by base member_id.
+        while MembersBeam uses base IDs ('B11', 'G1').
+
+        Configs are stored PER LEVEL (keyed by raw prefixed member_id) to avoid
+        cross-level contamination. A merged fallback keyed by base member_id
+        is also kept for stirrups (which are level-invariant in practice).
         """
         from converters.validation import _extract_base_member_id
 
-        self.long_cfg = {}    # (base_member_id, position) → {dia, main, zones, is_uniform}
+        # Per-level configs: (raw_mid, position) → {dia, main, zones, is_uniform}
+        self.long_cfg = {}
+        # Reverse map: base_mid → set of raw_mids seen in reinforcement data
+        self.base_to_raw = {}
         self.stirrup_cfg = {} # base_member_id → {zone: {dia_mm, n_legs, spacing_mm}}
 
         for _, row in self.reinf_df.iterrows():
@@ -291,16 +319,19 @@ class BeamDataAdapter:
             if not raw_mid or not pos:
                 continue
 
-            # Strip level prefix: '-1B11' → 'B11', '6G1' → 'G1', 'LB1' → 'LB1'
-            mid = _extract_base_member_id(raw_mid)
+            # Track base → raw mapping for fallback lookup
+            base_mid = _extract_base_member_id(raw_mid)
+            if base_mid not in self.base_to_raw:
+                self.base_to_raw[base_mid] = set()
+            self.base_to_raw[base_mid].add(raw_mid)
 
             # Map I/M/J to zones: I=EXT, M=INT (or CTR), J=EXT
-            # TOP bars
+            # TOP bars — keyed by RAW member_id (level-specific)
             top_total = row.get('top_total')
             top_dia = row.get('top_dia_mm')
             if pd.notna(top_total) and pd.notna(top_dia) and int(top_total) > 0:
                 zone = 'EXT' if pos in ('I', 'J') else 'INT'
-                key = (mid, 'TOP')
+                key = (raw_mid, 'TOP')
                 if key not in self.long_cfg:
                     self.long_cfg[key] = {
                         'dia': float(top_dia),
@@ -311,12 +342,12 @@ class BeamDataAdapter:
                     self.long_cfg[key]['zones'].get(zone, 0), int(top_total)
                 )
 
-            # BOT bars
+            # BOT bars — keyed by RAW member_id (level-specific)
             bot_total = row.get('bot_total')
             bot_dia = row.get('bot_dia_mm')
             if pd.notna(bot_total) and pd.notna(bot_dia) and int(bot_total) > 0:
                 zone = 'EXT' if pos in ('I', 'J') else 'CTR'
-                key = (mid, 'BOT')
+                key = (raw_mid, 'BOT')
                 if key not in self.long_cfg:
                     self.long_cfg[key] = {
                         'dia': float(bot_dia),
@@ -327,19 +358,63 @@ class BeamDataAdapter:
                     self.long_cfg[key]['zones'].get(zone, 0), int(bot_total)
                 )
 
-            # Stirrups (from any position — typically same across I/M/J)
+            # Stirrups — keyed by BASE member_id (level-invariant in practice)
             st_dia = row.get('stirrup_dia_mm')
             st_legs = row.get('stirrup_legs')
             st_spacing = row.get('stirrup_spacing_mm')
             if pd.notna(st_dia) and pd.notna(st_spacing):
                 zone = 'EXT' if pos in ('I', 'J') else 'INT'
-                if mid not in self.stirrup_cfg:
-                    self.stirrup_cfg[mid] = {}
-                self.stirrup_cfg[mid][zone] = {
+                if base_mid not in self.stirrup_cfg:
+                    self.stirrup_cfg[base_mid] = {}
+                self.stirrup_cfg[base_mid][zone] = {
                     'dia_mm': float(st_dia),
                     'n_legs': int(st_legs) if pd.notna(st_legs) else 2,
                     'spacing_mm': float(st_spacing),
                 }
+
+        # Build level → prefix map by matching raw_mids to beams_df levels.
+        # Strategy: (1) section_id suffix hint (most reliable), (2) standard
+        # prefix heuristic, (3) last-resort unmatched fallback.
+        #
+        # Section naming: RC_{base_mid}_{suffix} where suffix encodes level:
+        #   _Roof → R prefix, _PHR → PHR prefix, _5T → 5T prefix, etc.
+        self.level_prefix_map = {}  # (base_mid, level) → raw_mid
+
+        # Map section suffixes to prefixes for non-trivial cases
+        _SUFFIX_TO_PREFIX = {'Roof': 'R', 'PHR': 'PHR'}
+
+        for _, brow in self.beams_df.iterrows():
+            mid = brow['member_id']
+            lv = str(brow.get('level', '') or '')
+            if not lv or mid not in self.base_to_raw:
+                continue
+            key = (mid, lv)
+            if key in self.level_prefix_map:
+                continue
+
+            # Strategy 1: Derive prefix from section_id suffix
+            sec_id = str(brow.get('section_id', '') or '')
+            sec_suffix_match = re.match(rf'^RC_{re.escape(mid)}_(.+)$', sec_id)
+            if sec_suffix_match:
+                suffix = sec_suffix_match.group(1)
+                prefix = _SUFFIX_TO_PREFIX.get(suffix, suffix)
+                candidate = prefix + mid
+                if candidate in self.base_to_raw[mid]:
+                    self.level_prefix_map[key] = candidate
+                    continue
+
+            # Strategy 2: Standard level→prefix heuristic
+            candidate = _level_to_raw_mid(lv, mid)
+            if candidate in self.base_to_raw[mid]:
+                self.level_prefix_map[key] = candidate
+                continue
+
+            # Strategy 3: If exactly one raw_mid is still unmatched, use it
+            mapped_raws = set(self.level_prefix_map.values())
+            unmatched = [r for r in self.base_to_raw[mid]
+                         if r not in mapped_raws]
+            if len(unmatched) == 1:
+                self.level_prefix_map[key] = unmatched[0]
 
         # Finalize: compute 'main' count (minimum across zones) and is_uniform
         for key, cfg in self.long_cfg.items():
@@ -362,8 +437,49 @@ class BeamDataAdapter:
     def get_section(self, section_id):
         return self.section_props.get(str(section_id))
 
-    def get_long_cfg(self, member_id, position):
-        return self.long_cfg.get((member_id, position.upper()))
+    def get_long_cfg(self, member_id, position, level=None):
+        """Look up longitudinal rebar config for a beam.
+
+        Uses level to find the correct level-specific config (raw prefixed
+        member_id). Falls back to closest uniform config if the exact level
+        isn't found (prevents cross-level contamination while still covering
+        data gaps like missing 7F entries).
+        """
+        pos = position.upper()
+        raw_ids = self.base_to_raw.get(member_id, set())
+
+        # Level-specific lookup: use empirical map first, then prefix heuristic
+        if level:
+            mapped = self.level_prefix_map.get((member_id, level))
+            if mapped:
+                cfg = self.long_cfg.get((mapped, pos))
+                if cfg:
+                    return cfg
+            # Heuristic fallback
+            raw_mid = _level_to_raw_mid(level, member_id)
+            if raw_mid != mapped:  # avoid duplicate lookup
+                cfg = self.long_cfg.get((raw_mid, pos))
+                if cfg:
+                    return cfg
+            # Level provided but no config found — don't contaminate from other levels
+            if len(raw_ids) != 1:
+                # Multi-level: use uniform fallback below
+                pass
+            else:
+                return self.long_cfg.get((next(iter(raw_ids)), pos))
+
+        # Fallback: if only one raw_mid for this base, use it directly
+        if len(raw_ids) == 1:
+            return self.long_cfg.get((next(iter(raw_ids)), pos))
+
+        # Multi-level with missing level data: use a UNIFORM config from
+        # another level as fallback (safe — uniform means no ADD bars).
+        # Skip variable configs to avoid cross-level contamination.
+        for raw_id in raw_ids:
+            cfg = self.long_cfg.get((raw_id, pos))
+            if cfg and cfg.get('is_uniform', False):
+                return cfg
+        return None
 
     def get_stirrup_zones(self, member_id):
         return list(self.stirrup_cfg.get(member_id, {}).keys())
@@ -681,8 +797,9 @@ def _calculate_main_bars(adapter, lookup):
         span_info = []
         for i, sp in enumerate(spans):
             mid = sp['member_id']
-            cfg_top = adapter.get_long_cfg(mid, 'TOP')
-            cfg_bot = adapter.get_long_cfg(mid, 'BOT')
+            sp_level = sp.get('level', '')
+            cfg_top = adapter.get_long_cfg(mid, 'TOP', level=sp_level)
+            cfg_bot = adapter.get_long_cfg(mid, 'BOT', level=sp_level)
             if cfg_top is None or cfg_bot is None:
                 span_info.append(None)
                 continue
