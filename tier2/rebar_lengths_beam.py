@@ -13,7 +13,7 @@ Reads Tier 1 output from AISIMS converter.
 
 Input:  MembersBeam.csv, MembersColumn.csv, Sections.csv,
         ReinforcementBeam.csv, Nodes.csv,
-        beam_development_lengths.csv, beam_lap_splice.csv
+        development_lengths.csv, lap_splice.csv
 Output: RebarLengthsBeam.csv
 """
 
@@ -60,7 +60,7 @@ def _beam_direction(x_from, y_from, x_to, y_to):
 
 
 def _level_to_raw_mid(level, base_member_id):
-    """Reconstruct the prefixed member_id used in ReinforcementBeam.
+    """Reconstruct the prefixed member_id used in ReinforcementBeam (P1 style).
 
     Level encoding: B1→'-1', B2→'-2', 1F→'1', 2F→'2', RF→'R', Roof→'R',
     PHR→'PHR'. Prefix is prepended to the base member_id.
@@ -79,6 +79,68 @@ def _level_to_raw_mid(level, base_member_id):
     else:
         prefix = lv
     return prefix + base_member_id
+
+
+def _extract_raw_prefix(raw_mid, base_mid):
+    """Extract level prefix from a raw reinforcement member_id.
+
+    P2 space-separated: '-1~-4 B1' → '-1~-4', 'P G7' → 'P'
+    P1 concatenated:    '-1B11' → '-1', 'RB13' → 'R'
+    No prefix:          'TG0' (base='TG0') → ''
+    """
+    if ' ' in raw_mid:
+        return raw_mid.rsplit(' ', 1)[0]
+    if raw_mid.endswith(base_mid) and len(raw_mid) > len(base_mid):
+        return raw_mid[:-len(base_mid)]
+    return ''
+
+
+def _prefix_token_to_level(token):
+    """Convert a single prefix token to a MembersBeam level name.
+
+    '-1' → 'B1', '1' → '1F', 'R' → 'Roof', 'P' → 'PIT', 'PHR' → 'PHR'.
+    Returns None for unrecognised tokens.
+    """
+    t = token.strip()
+    if not t:
+        return None
+    if t.startswith('-') and t[1:].isdigit():
+        return f'B{t[1:]}'
+    if t.isdigit():
+        return f'{t}F'
+    up = t.upper()
+    if up in ('R', 'ROOF'):
+        return 'Roof'
+    if up == 'P':
+        return 'PIT'
+    if up == 'PHR':
+        return 'PHR'
+    return None
+
+
+def _expand_level_prefix(prefix, level_order):
+    """Expand a prefix (possibly a range) into a set of level names.
+
+    '1' → {'1F'}, '-1~-4' → {'B1','B2','B3','B4'}, '3~R' → {'3F',...,'Roof'}
+    Returns None if prefix is empty or contains unrecognised tokens.
+    """
+    if not prefix:
+        return None
+    if '~' in prefix:
+        parts = prefix.split('~', 1)
+        start = _prefix_token_to_level(parts[0])
+        end = _prefix_token_to_level(parts[1])
+        if (start and end
+                and start in level_order and end in level_order):
+            i1 = level_order.index(start)
+            i2 = level_order.index(end)
+            lo, hi = min(i1, i2), max(i1, i2)
+            return set(level_order[lo:hi + 1])
+        return None
+    lv = _prefix_token_to_level(prefix)
+    if lv and lv in level_order:
+        return {lv}
+    return None
 
 
 def _bar_z(z_ref, h_mm, cover_mm, position, layer, dia_mm):
@@ -372,17 +434,37 @@ class BeamDataAdapter:
                     'spacing_mm': float(st_spacing),
                 }
 
-        # Build level → prefix map by matching raw_mids to beams_df levels.
-        # Strategy: (1) section_id suffix hint (most reliable), (2) standard
-        # prefix heuristic, (3) last-resort unmatched fallback.
+        # ── Build level_prefix_map: (base_mid, level) → raw_mid ──────────
         #
-        # Section naming: RC_{base_mid}_{suffix} where suffix encodes level:
-        #   _Roof → R prefix, _PHR → PHR prefix, _5T → 5T prefix, etc.
+        # Must handle two reinforcement naming conventions:
+        #   P1 concatenated:       '-1B11', '6G1', 'RB13'
+        #   P2 space + ranges:     '-1~-4 B1', '1 G7', 'P G7', '3~R LB1'
+        #
+        # Strategy order (first match wins per (base_mid, level)):
+        #   Phase 1 — Parse raw_mid prefix → expand level range
+        #   Phase 2 — Section_id suffix hint (handles P1 7F→Roof etc.)
+        #   Phase 3 — P1 _level_to_raw_mid heuristic (concatenated prefix)
+        #   Phase 4 — Assign remaining uncovered levels to unassigned raw_mids
+
+        # Level ordering by z_mm (needed for range expansion)
+        _level_z = self.beams_df.groupby('level')['z_mm'].first().sort_values()
+        _level_order = list(_level_z.index)
+
         self.level_prefix_map = {}  # (base_mid, level) → raw_mid
 
-        # Map section suffixes to prefixes for non-trivial cases
-        _SUFFIX_TO_PREFIX = {'Roof': 'R', 'PHR': 'PHR'}
+        # Phase 1: Expand parsed prefixes into level sets
+        for base_mid, raw_ids in self.base_to_raw.items():
+            for raw_mid in raw_ids:
+                prefix = _extract_raw_prefix(raw_mid, base_mid)
+                levels = _expand_level_prefix(prefix, _level_order)
+                if levels:
+                    for lv in levels:
+                        key = (base_mid, lv)
+                        if key not in self.level_prefix_map:
+                            self.level_prefix_map[key] = raw_mid
 
+        # Phase 2: Section_id suffix (e.g. RC_B13_Roof → R prefix → RB13)
+        _SUFFIX_TO_PREFIX = {'Roof': 'R', 'PHR': 'PHR'}
         for _, brow in self.beams_df.iterrows():
             mid = brow['member_id']
             lv = str(brow.get('level', '') or '')
@@ -391,30 +473,41 @@ class BeamDataAdapter:
             key = (mid, lv)
             if key in self.level_prefix_map:
                 continue
-
-            # Strategy 1: Derive prefix from section_id suffix
             sec_id = str(brow.get('section_id', '') or '')
-            sec_suffix_match = re.match(rf'^RC_{re.escape(mid)}_(.+)$', sec_id)
-            if sec_suffix_match:
-                suffix = sec_suffix_match.group(1)
+            sec_match = re.match(rf'^RC_{re.escape(mid)}_(.+)$', sec_id)
+            if sec_match:
+                suffix = sec_match.group(1)
                 prefix = _SUFFIX_TO_PREFIX.get(suffix, suffix)
                 candidate = prefix + mid
                 if candidate in self.base_to_raw[mid]:
                     self.level_prefix_map[key] = candidate
                     continue
 
-            # Strategy 2: Standard level→prefix heuristic
+            # Phase 3: P1 concatenated prefix heuristic
             candidate = _level_to_raw_mid(lv, mid)
             if candidate in self.base_to_raw[mid]:
                 self.level_prefix_map[key] = candidate
-                continue
 
-            # Strategy 3: If exactly one raw_mid is still unmatched, use it
-            mapped_raws = set(self.level_prefix_map.values())
-            unmatched = [r for r in self.base_to_raw[mid]
-                         if r not in mapped_raws]
-            if len(unmatched) == 1:
-                self.level_prefix_map[key] = unmatched[0]
+        # Phase 4: Assign uncovered levels to unassigned raw_mids
+        # Handles ambiguous prefixes like 'P' that Phase 1 couldn't parse,
+        # and also P1 edge cases with only one unmatched raw_mid.
+        for base_mid, raw_ids in self.base_to_raw.items():
+            covered = {lv for (m, lv) in self.level_prefix_map
+                       if m == base_mid}
+            beam_levels = set(
+                self.beams_df.loc[
+                    self.beams_df['member_id'] == base_mid, 'level'
+                ]
+            )
+            uncovered = beam_levels - covered
+            if not uncovered:
+                continue
+            assigned = {self.level_prefix_map[k]
+                        for k in self.level_prefix_map if k[0] == base_mid}
+            unassigned = [r for r in raw_ids if r not in assigned]
+            if len(unassigned) == 1:
+                for lv in uncovered:
+                    self.level_prefix_map[(base_mid, lv)] = unassigned[0]
 
         # Finalize: compute 'main' count (minimum across zones) and is_uniform
         for key, cfg in self.long_cfg.items():
@@ -1008,8 +1101,8 @@ def calculate_beam_rebar_lengths(
         sections_df: Sections.csv
         reinf_df: ReinforcementBeam.csv
         nodes_df: Nodes.csv
-        dev_lengths_path: path to beam_development_lengths.csv
-        lap_splice_path: path to beam_lap_splice.csv
+        dev_lengths_path: path to development_lengths.csv
+        lap_splice_path: path to lap_splice.csv
 
     Returns:
         DataFrame for RebarLengthsBeam.csv

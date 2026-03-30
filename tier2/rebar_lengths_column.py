@@ -11,7 +11,7 @@ Logic adapted from RebarLengthsColumnCalculator.py
 Reads Tier 1 output from AISIMS converter.
 
 Input:  MembersColumn.csv, ReinforcementColumn.csv, Sections.csv,
-        Nodes.csv, column_development_lengths.csv, column_lap_splice.csv
+        Nodes.csv, development_lengths.csv, lap_splice.csv
 Output: RebarLengthsColumn.csv
 """
 
