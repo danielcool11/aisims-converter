@@ -392,12 +392,18 @@ def calculate_column_rebar_lengths(
             if z_end is None:
                 z_end = adapter.level_z.get(lv_to, z_start + h)
 
-            # Section dimensions
-            b_mm, h_mm, shape = adapter.get_section_dims(member_id, lv_from, lv_to)
-            if b_mm is None:
-                b_mm = seg.get('b_mm', 400) or 400
-                h_mm = seg.get('h_mm', 400) or 400
-                shape = 'RECT'
+            # Section dimensions — priority: exact section match > MembersColumn > generic section > hard fallback
+            sec_key = (member_id, lv_from, lv_to)
+            if sec_key in adapter.section_level:
+                b_mm, h_mm, shape = adapter.section_level[sec_key]
+            elif pd.notna(seg.get('b_mm')) and pd.notna(seg.get('h_mm')):
+                b_mm = float(seg['b_mm'])
+                h_mm = float(seg['h_mm'])
+                shape = str(seg.get('shape', 'RECT')).upper() if pd.notna(seg.get('shape')) else 'RECT'
+            elif member_id in adapter.section_generic:
+                b_mm, h_mm, shape = adapter.section_generic[member_id]
+            else:
+                b_mm, h_mm, shape = 400, 400, 'RECT'
 
             seg_no = len(story_info) + 1
             segment_id = f"{member_id}-SEG{seg_no:03d}"
