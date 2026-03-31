@@ -189,9 +189,63 @@ def _get_zone_z_offset(panel, zone):
     return 0
 
 
+# ── Wall Plan Geometry ──────────────────────────────────────────────────────
+
+def _get_wall_plan(panel, node_coords):
+    """Compute wall start/end in structural XY from quad node coordinates.
+
+    Bottom edge: node_i → node_j defines the wall plan direction.
+    Returns (start_x, start_y, end_x, end_y) in structural mm.
+    Falls back to centroid ± length/2 along X if nodes unavailable.
+    """
+    ni = str(panel.get('node_i', ''))
+    nj = str(panel.get('node_j', ''))
+    ci = node_coords.get(ni)
+    cj = node_coords.get(nj)
+
+    if ci and cj:
+        return ci['x_mm'], ci['y_mm'], cj['x_mm'], cj['y_mm']
+
+    # Fallback: assume wall along X (no rotation)
+    cx = float(panel.get('centroid_x_mm', 0) or 0)
+    cy = float(panel.get('centroid_y_mm', 0) or 0)
+    length = float(panel.get('length_mm', 0) or 0)
+    return cx - length / 2, cy, cx + length / 2, cy
+
+
+def _actual_panel_length(panel, node_coords):
+    """Get the actual plan length of a panel from its quad nodes.
+
+    For L-shaped walls, each panel may have a different length even though
+    the boundary data reports the same length_mm for all panels.
+    """
+    sx, sy, ex, ey = _get_wall_plan(panel, node_coords)
+    return math.sqrt((ex - sx) ** 2 + (ey - sy) ** 2)
+
+
+def _wall_plan_origin(panel, node_coords, cover, offset_along=0.0):
+    """Compute a world-frame XY position along the wall plan direction.
+
+    offset_along: distance from wall start along the plan direction (mm).
+    Returns (world_x, world_y) in structural mm.
+    """
+    sx, sy, ex, ey = _get_wall_plan(panel, node_coords)
+    dx = ex - sx
+    dy = ey - sy
+    length = math.sqrt(dx * dx + dy * dy)
+    if length < 1:
+        return sx + offset_along, sy
+
+    # Unit direction along wall
+    ux = dx / length
+    uy = dy / length
+
+    return sx + ux * offset_along, sy + uy * offset_along
+
+
 # ── Main Processing ─────────────────────────────────────────────────────────
 
-def _process_vertical_bars(panel, reinf_rows, lookup, cover, fc, role_prefix, results):
+def _process_vertical_bars(panel, reinf_rows, lookup, cover, fc, role_prefix, results, node_coords=None):
     """Process vertical bars for a single panel.
 
     Vertical bars: distributed along wall length, within each vertical zone.
@@ -201,11 +255,16 @@ def _process_vertical_bars(panel, reinf_rows, lookup, cover, fc, role_prefix, re
     level = panel['level']
     thickness = float(panel['thickness_mm'])
     height = float(panel['height_mm'])
-    length = float(panel['length_mm'])
+    nominal_length = float(panel['length_mm'])
     z_center = float(panel['z_mm'])
     z_bottom = z_center - height / 2
     cx = float(panel.get('centroid_x_mm', 0) or 0)
     cy = float(panel.get('centroid_y_mm', 0) or 0)
+
+    # Use actual panel length from quad nodes (may differ from nominal for L-shapes)
+    length = _actual_panel_length(panel, node_coords) if node_coords else nominal_length
+    if length < 100:
+        length = nominal_length  # fallback
 
     for _, r in reinf_rows.iterrows():
         zone = str(r['zone']).strip()
@@ -227,33 +286,31 @@ def _process_vertical_bars(panel, reinf_rows, lookup, cover, fc, role_prefix, re
         # Bar length depends on role
         zone_upper = zone.upper()
         if role_prefix == 'SINGLE':
-            # Single-level wall: hook at top, anchored at bottom
             L_bar = zone_h + Ldh
         elif role_prefix == 'BOTTOM':
-            # Bottom of stack: lap at top for continuity
             L_bar = zone_h + Lpc
         elif role_prefix == 'TOP':
-            # Top of stack: hook at top
             L_bar = zone_h + Ldh
         elif role_prefix == 'INTERMEDIATE':
-            # Middle of stack: lap at top
             L_bar = zone_h + Lpc
         elif role_prefix == 'FULL_HEIGHT':
-            # Full-height wall: hook at top
             L_bar = zone_h + Ldh
         else:
             L_bar = zone_h + Ldh
 
-        # Number of vertical bars in this zone
-        zone_w = _get_zone_width(panel, _width_zone_for_vertical(zone))
-        # Vertical bars span the full wall length, distributed by spacing
-        # But the zone here is vertical (TOP/MIDDLE/BOTTOM) — bars in each zone
-        # have the same length but span the full wall width
+        # Number of vertical bars: use actual panel length (not nominal)
         n_bars = int(math.floor((length - 2 * cover) / spacing)) + 1 if spacing > 0 else 0
 
-        # Mesh coordinates
+        # Mesh coordinates — compute in WORLD structural frame
         bar_z_bot = z_bottom + zone_z_off + cover
         bar_z_top = z_bottom + zone_z_off + zone_h
+
+        # First bar position: at wall start + cover along wall plan direction
+        if node_coords:
+            ox, oy = _wall_plan_origin(panel, node_coords, cover, offset_along=cover)
+        else:
+            ox = cx - length / 2 + cover
+            oy = cy
 
         bar_record = {
             'wall_mark': wall_mark,
@@ -274,11 +331,11 @@ def _process_vertical_bars(panel, reinf_rows, lookup, cover, fc, role_prefix, re
             'Ldh_mm': round(Ldh, 1),
             'Lpc_mm': round(Lpc, 1),
             'cover_mm': cover,
-            'mesh_origin_x_mm': round(cx - length / 2 + cover, 1),
-            'mesh_origin_y_mm': round(cy, 1),
+            'mesh_origin_x_mm': round(ox, 1),
+            'mesh_origin_y_mm': round(oy, 1),
             'mesh_origin_z_mm': round(bar_z_bot, 1),
-            'mesh_terminus_x_mm': round(cx - length / 2 + cover, 1),
-            'mesh_terminus_y_mm': round(cy, 1),
+            'mesh_terminus_x_mm': round(ox, 1),
+            'mesh_terminus_y_mm': round(oy, 1),
             'mesh_terminus_z_mm': round(bar_z_top, 1),
             'mesh_distribution_axis': 'ALONG_WALL_LENGTH',
         }
@@ -293,7 +350,7 @@ def _width_zone_for_vertical(zone):
     return None
 
 
-def _process_horizontal_bars(panel, reinf_rows, lookup, cover, fc, results):
+def _process_horizontal_bars(panel, reinf_rows, lookup, cover, fc, results, node_coords=None):
     """Process horizontal bars for a single panel.
 
     Horizontal bars: distributed along wall height, within each horizontal zone.
@@ -303,11 +360,16 @@ def _process_horizontal_bars(panel, reinf_rows, lookup, cover, fc, results):
     level = panel['level']
     thickness = float(panel['thickness_mm'])
     height = float(panel['height_mm'])
-    length = float(panel['length_mm'])
+    nominal_length = float(panel['length_mm'])
     z_center = float(panel['z_mm'])
     z_bottom = z_center - height / 2
     cx = float(panel.get('centroid_x_mm', 0) or 0)
     cy = float(panel.get('centroid_y_mm', 0) or 0)
+
+    # Use actual panel length from quad nodes
+    actual_length = _actual_panel_length(panel, node_coords) if node_coords else nominal_length
+    if actual_length < 100:
+        actual_length = nominal_length
 
     for _, r in reinf_rows.iterrows():
         zone = str(r['zone']).strip()
@@ -325,6 +387,12 @@ def _process_horizontal_bars(panel, reinf_rows, lookup, cover, fc, results):
 
         zone_x_off = _get_zone_x_offset(panel, zone)
 
+        # Clamp zone offset + width to actual panel length
+        if zone_x_off + zone_w > actual_length:
+            zone_w = max(0, actual_length - zone_x_off)
+        if zone_x_off >= actual_length:
+            continue  # entire zone is beyond this panel's extent
+
         # U-bar: bar runs along zone width + U-turn at end
         U_turn = thickness - 2 * cover
         L_h_bar = zone_w + U_turn
@@ -332,9 +400,18 @@ def _process_horizontal_bars(panel, reinf_rows, lookup, cover, fc, results):
         # Number of horizontal bars along wall height
         n_bars = int(math.floor((height - 2 * cover) / spacing)) + 1 if spacing > 0 else 0
 
-        # Mesh coordinates
-        x_start = cx - length / 2 + zone_x_off + cover
-        x_end = cx - length / 2 + zone_x_off + zone_w - cover
+        # Mesh coordinates — compute in WORLD structural frame
+        # H-bar runs along wall plan direction within the zone
+        if node_coords:
+            ox_start, oy_start = _wall_plan_origin(
+                panel, node_coords, cover, offset_along=zone_x_off + cover)
+            ox_end, oy_end = _wall_plan_origin(
+                panel, node_coords, cover, offset_along=zone_x_off + zone_w - cover)
+        else:
+            ox_start = cx - length / 2 + zone_x_off + cover
+            oy_start = cy
+            ox_end = cx - length / 2 + zone_x_off + zone_w - cover
+            oy_end = cy
 
         bar_record = {
             'wall_mark': wall_mark,
@@ -349,17 +426,17 @@ def _process_horizontal_bars(panel, reinf_rows, lookup, cover, fc, results):
             'length_mm': int(round(L_h_bar)),
             'total_length_mm': int(round(L_h_bar * n_bars)),
             'height_mm': height,
-            'length_wall_mm': length,
+            'length_wall_mm': actual_length,
             'thickness_mm': thickness,
             'zone_width_mm': round(zone_w, 1),
             'Ldh_mm': round(Ldh, 1),
             'Lpc_mm': None,
             'cover_mm': cover,
-            'mesh_origin_x_mm': round(x_start, 1),
-            'mesh_origin_y_mm': round(cy, 1),
+            'mesh_origin_x_mm': round(ox_start, 1),
+            'mesh_origin_y_mm': round(oy_start, 1),
             'mesh_origin_z_mm': round(z_bottom + cover, 1),
-            'mesh_terminus_x_mm': round(x_end, 1),
-            'mesh_terminus_y_mm': round(cy, 1),
+            'mesh_terminus_x_mm': round(ox_end, 1),
+            'mesh_terminus_y_mm': round(oy_end, 1),
             'mesh_terminus_z_mm': round(z_bottom + cover, 1),
             'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
         }
@@ -446,14 +523,14 @@ def calculate_basement_wall_rebar_lengths(
             v_rows = reinf_lookup.get(v_key, [])
             if v_rows:
                 v_df = pd.DataFrame(v_rows)
-                _process_vertical_bars(panel, v_df, lookup, cover, fc, 'FULL_HEIGHT', results)
+                _process_vertical_bars(panel, v_df, lookup, cover, fc, 'FULL_HEIGHT', results, node_coords)
 
             # Horizontal bars
             h_key = (wm, level, 'HORIZONTAL')
             h_rows = reinf_lookup.get(h_key, [])
             if h_rows:
                 h_df = pd.DataFrame(h_rows)
-                _process_horizontal_bars(panel, h_df, lookup, cover, fc, results)
+                _process_horizontal_bars(panel, h_df, lookup, cover, fc, results, node_coords)
 
         # Process per-level panels with continuity stacking
         if per_level:
@@ -478,14 +555,14 @@ def calculate_basement_wall_rebar_lengths(
                     v_rows = reinf_lookup.get(v_key, [])
                     if v_rows:
                         v_df = pd.DataFrame(v_rows)
-                        _process_vertical_bars(panel, v_df, lookup, cover, fc, role, results)
+                        _process_vertical_bars(panel, v_df, lookup, cover, fc, role, results, node_coords)
 
                     # Horizontal bars
                     h_key = (wm, level, 'HORIZONTAL')
                     h_rows = reinf_lookup.get(h_key, [])
                     if h_rows:
                         h_df = pd.DataFrame(h_rows)
-                        _process_horizontal_bars(panel, h_df, lookup, cover, fc, results)
+                        _process_horizontal_bars(panel, h_df, lookup, cover, fc, results, node_coords)
 
     df = pd.DataFrame(results)
 

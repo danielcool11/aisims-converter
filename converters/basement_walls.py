@@ -235,7 +235,10 @@ def convert_basement_walls(
                     base_z = candidate_base
                 break
 
-    # Compute Z centroid for each wall×level via stacking from base_z
+    # Compute Z centroid for each wall×level via stacking from its OWN base_z.
+    # Each wall may start at a different level (e.g. BW4 starts at B3, not B4).
+    # Use per-wall node Z to find each wall's own base, falling back to
+    # the global base_z only if no node data is available.
     wall_z_map = {}  # (wall_mark, level) → z_centroid
     for wm in all_walls:
         wm_levels = {}
@@ -246,10 +249,27 @@ def convert_basement_walls(
         sorted_lvs = sorted(wm_levels.keys(), key=_level_sort_key)
         total_h = sum(wm_levels.get(lv, 0) for lv in sorted_lvs)
 
-        if base_z is not None:
+        # Compute this wall's own base Z from its deepest level's nodes
+        own_base_z = None
+        for lv in sorted_lvs:
+            entry = wall_entries.get((wm, lv))
+            if not entry:
+                continue
+            node_zs = [node_coords[n]['z_mm'] for n in entry['nodes'] if n in node_coords]
+            if len(node_zs) >= 4:
+                z_centroid = sum(node_zs) / len(node_zs)
+                h = wm_levels[lv]
+                panel_bottom = z_centroid - h / 2
+                idx = sorted_lvs.index(lv)
+                below_h = sum(wm_levels.get(sorted_lvs[i], 0) for i in range(idx))
+                own_base_z = panel_bottom - below_h
+                break
+
+        if own_base_z is not None:
+            current_z = own_base_z
+        elif base_z is not None:
             current_z = base_z
         else:
-            # Fallback: assume bottom at -total_h
             current_z = -total_h
 
         for lv in sorted_lvs:
@@ -261,10 +281,8 @@ def convert_basement_walls(
         for (w, lv), e in wall_entries.items():
             if w == wm and '~' in lv:
                 h = e.get('height_mm') or total_h
-                if base_z is not None:
-                    wall_z_map[(wm, lv)] = round(base_z + h / 2, 1)
-                else:
-                    wall_z_map[(wm, lv)] = round(-h / 2, 1)
+                wall_base = own_base_z if own_base_z is not None else (base_z if base_z is not None else -total_h)
+                wall_z_map[(wm, lv)] = round(wall_base + h / 2, 1)
 
     # ── Build MembersBasementWall: one row per quad panel ──
     members = []
