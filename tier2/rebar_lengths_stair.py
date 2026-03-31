@@ -297,29 +297,47 @@ def calculate_stair_rebar_lengths(
              mid_travel, C - 2*c)
 
         # ── #7/#8: Flight slope TOP and BOT (per flight) ──
+        # Flight 1 is on the P1 (wall-left) side: distribute from wall → gap
+        # Flight 2 is on the P4 (wall-right) side: distribute from wall → gap (reversed)
         sl_dia = stair_long['dia'] if stair_long else dist_dia
         sl_sp = stair_long['spacing'] if stair_long else dist_sp
 
-        for zone, Fs, Fe, Lf in [('FLIGHT1', F1s, F1e, L1), ('FLIGHT2', F2s, F2e, L2)]:
+        # Wall-side start for each flight's width distribution
+        # Flight 1: wall at P1 side, distribute along +width_dir
+        # Flight 2: wall at P4 side, distribute along -width_dir
+        f1_w_start = P[1] + width_dir * c       # wall side + cover
+        f2_w_start = P[4] - width_dir * c       # wall side + cover (from right)
+
+        for zone, Fs, Fe, Lf, w_origin, w_dir in [
+            ('FLIGHT1', F1s, F1e, L1, f1_w_start, width_dir),
+            ('FLIGHT2', F2s, F2e, L2, f2_w_start, -width_dir),
+        ]:
+            # Longitudinal bars: along slope, distributed across flight width from wall side
+            # Replace Fs/Fe x-coord with the wall-side origin's x (keep y,z from flight)
             for layer_name, lap in [('TOP', sl_dev['Lpt']), ('BOTTOM', sl_dev['Lpb'])]:
+                ls_start = _vec(w_origin[0], Fs[1], Fs[2])
+                ls_end = _vec(w_origin[0], Fe[1], Fe[2])
                 emit(zone, f'{layer_name}_ALONG_SLOPE', layer_name, 'LONGITUDINAL',
                      Lf + lap, _n_bars(W_flight - 2*c, sl_sp),
-                     sl_dia, sl_sp, Fs, Fe,
-                     width_dir, W_flight - 2*c)
+                     sl_dia, sl_sp, ls_start, ls_end,
+                     w_dir, W_flight - 2*c)
 
         # ── #9: Flight transverse (per flight) ──
         st_dia = stair_trans['dia'] if stair_trans else dist_dia
         st_sp = stair_trans['spacing'] if stair_trans else dist_sp
         bar9_len = W_flight - 2*c + 2 * HOOK_EXT_FACTOR * st_dia
 
-        for zone, Fs, Fe, Lf, slope_u in [
-            ('FLIGHT1', F1s, F1e, L1, slope1),
-            ('FLIGHT2', F2s, F2e, L2, slope2),
+        for zone, Fs, Fe, Lf, slope_u, w_origin, w_dir in [
+            ('FLIGHT1', F1s, F1e, L1, slope1, f1_w_start, width_dir),
+            ('FLIGHT2', F2s, F2e, L2, slope2, f2_w_start, -width_dir),
         ]:
+            # Transverse bar: spans flight width from wall side
+            t_start = _vec(w_origin[0], Fs[1], Fs[2])
+            t_end = t_start + w_dir * (W_flight - 2*c)
             emit(zone, 'TRANSVERSE', 'BOTH', 'TRANSVERSE',
                  bar9_len, _n_bars(Lf - 2*c, st_sp),
                  st_dia, st_sp,
-                 Fs, Fs + width_dir * W_flight,
+                 t_start, t_end,
                  slope_u, Lf - 2*c)
 
     df = pd.DataFrame(results)
