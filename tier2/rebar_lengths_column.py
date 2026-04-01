@@ -568,38 +568,39 @@ def calculate_column_rebar_lengths(
         groups = _split_continuous_groups(story_info)
 
         for group in groups:
-            # ── DOWEL BAR ──
+            # ── DOWEL BAR at the bottom of each continuous group ──
+            # Any column that's the first in its stack needs dowels into
+            # the slab/footing below (Ldh embedment + Lpc lap above).
             first = group[0]
-            if _is_basement(first['level_from']):
-                main_d = adapter.get_main_cfg(member_id, first['level_from'])
-                if main_d:
-                    dia_d = main_d['dia']
-                    n_d = main_d['n_bars']
-                    fy_d = _steel_grade(dia_d)
-                    Ldh_d, Lpc_d = lookup.get(fy_d, dia_d, fc)
-                    dowel_len = Lpc_d + Ldh_d
-                    col_z_bottom = first['z_start']
-                    footing_z = col_z_bottom - FOOTING_DEPTH_MM
-                    rebar_z_start = footing_z + COVER_MM
-                    rebar_z_end = rebar_z_start + dowel_len
+            main_d = adapter.get_main_cfg(member_id, first['level_from'])
+            if main_d:
+                dia_d = main_d['dia']
+                n_d = main_d['n_bars']
+                fy_d = _steel_grade(dia_d)
+                Ldh_d, Lpc_d = lookup.get(fy_d, dia_d, fc)
+                dowel_len = Lpc_d + Ldh_d
+                col_z_bottom = first['z_start']
+                # Dowel Z: Ldh below column base (into slab/footing) → Lpc above (lap)
+                rebar_z_start = col_z_bottom - Ldh_d + COVER_MM
+                rebar_z_end = col_z_bottom + Lpc_d
 
-                    results.append({
-                        'member_id': member_id, 'start_grid': grid,
-                        'level_from': 'FOOTING', 'level_to': first['level_from'],
-                        'bar_position': 'MAIN', 'bar_role': 'DOWEL', 'bar_type': 'MAIN',
-                        'dia_mm': dia_d, 'n_bars': n_d,
-                        'length_mm': int(round(dowel_len)),
-                        'splice_start_mm': None, 'splice_start_end_mm': None,
-                        'splice_end_mm': round(col_z_bottom, 1),
-                        'splice_end_end_mm': round(col_z_bottom + Lpc_d, 1),
-                        'x_start_mm': first['col_x'], 'y_start_mm': first['col_y'],
-                        'z_start_mm': round(rebar_z_start, 1),
-                        'x_end_mm': first['col_x'], 'y_end_mm': first['col_y'],
-                        'z_end_mm': round(rebar_z_end, 1),
-                        'segment_id': first['segment_id'],
-                        'b_mm': first['b_mm'], 'h_mm': first['h_mm'],
-                        'shape': first['shape'],
-                    })
+                results.append({
+                    'member_id': member_id, 'start_grid': grid,
+                    'level_from': first['level_from'], 'level_to': first['level_from'],
+                    'bar_position': 'MAIN', 'bar_role': 'DOWEL', 'bar_type': 'MAIN',
+                    'dia_mm': dia_d, 'n_bars': n_d,
+                    'length_mm': int(round(dowel_len)),
+                    'splice_start_mm': None, 'splice_start_end_mm': None,
+                    'splice_end_mm': round(col_z_bottom, 1),
+                    'splice_end_end_mm': round(col_z_bottom + Lpc_d, 1),
+                    'x_start_mm': first['col_x'], 'y_start_mm': first['col_y'],
+                    'z_start_mm': round(rebar_z_start, 1),
+                    'x_end_mm': first['col_x'], 'y_end_mm': first['col_y'],
+                    'z_end_mm': round(rebar_z_end, 1),
+                    'segment_id': first['segment_id'],
+                    'b_mm': first['b_mm'], 'h_mm': first['h_mm'],
+                    'shape': first['shape'],
+                })
 
             # ── MAIN BARS (story by story within group) ──
             for j, s in enumerate(group):
