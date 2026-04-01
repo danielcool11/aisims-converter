@@ -224,10 +224,11 @@ def calculate_stair_rebar_lengths(
         else:
             sl_dev = dev
 
-        # Emit helper
+        # Emit helper — now with optional bend points
         def emit(zone, sub_zone, layer, direction, length_mm, n,
-                 dia, spacing, start, end, w_dir, w_span):
-            results.append({
+                 dia, spacing, start, end, w_dir, w_span,
+                 bend1=None, bend2=None):
+            rec = {
                 'segment_id': sid, 'member_id': mid, 'story_group': story,
                 'zone': zone, 'sub_zone': sub_zone,
                 'direction': direction, 'layer': layer,
@@ -246,50 +247,85 @@ def calculate_stair_rebar_lengths(
                 'width_dir_y': round(w_dir[1], 4),
                 'width_dir_z': round(w_dir[2], 4),
                 'width_span_mm': round(w_span, 1),
-            })
+            }
+            if bend1 is not None:
+                rec['bend1_x'] = round(bend1[0], 1)
+                rec['bend1_y'] = round(bend1[1], 1)
+                rec['bend1_z'] = round(bend1[2], 1)
+            if bend2 is not None:
+                rec['bend2_x'] = round(bend2[0], 1)
+                rec['bend2_y'] = round(bend2[1], 1)
+                rec['bend2_z'] = round(bend2[2], 1)
+            results.append(rec)
+
+        # Landing-flight junction points (flight starts/ends at landing edge)
+        # Lower landing edge = P[2] line (where flight 1 starts)
+        # Mid landing edge near flight 1 = P[5] line (where flight 1 ends)
+        # Mid landing edge near flight 2 = P[8] line (where flight 2 starts)
+        # Note: P[2] and P[5] are at flight 1 side, P[8] is at flight 2 side
+
+        lower_travel = _vunit(P[2] - P[1])  # direction along lower landing
+        mid_travel = _vunit(P[6] - P[5])    # direction along mid landing
 
         # ── #1: Floor landing TOP along A ──
+        # Straight bar along landing surface (no slope transition)
         emit('LOWER_LANDING', 'TOP_ALONG_A', 'TOP', 'LONGITUDINAL',
              A, _n_bars(W_flight - 2*c, dist_sp),
              dist_dia, dist_sp,
              P[1] + width_dir * c, P[2] + width_dir * c,
              width_dir, W_flight - 2*c)
 
-        # ── #2: Floor landing BOT along A + lap into flight ──
-        bend2 = P[2] + width_dir * c
-        end2 = bend2 + slope1 * lap_bot
+        # ── #2: Floor landing BOT along A + lap into flight slope ──
+        # start = landing start, bend1 = flight junction, end = along slope
+        lower_junc = P[2] + width_dir * c  # junction where landing meets flight 1
+        end2 = lower_junc + slope1 * lap_bot
         emit('LOWER_LANDING', 'BOT_ALONG_A', 'BOTTOM', 'LONGITUDINAL',
              A + lap_bot, _n_bars(W_flight - 2*c, dist_sp),
              dist_dia, dist_sp,
              P[1] + width_dir * c, end2,
-             width_dir, W_flight - 2*c)
+             width_dir, W_flight - 2*c,
+             bend1=lower_junc)
 
-        # ── #3: Floor landing DIST span B ──
-        lower_travel = _vunit(P[2] - P[1])
+        # ── #3: Floor landing DIST span B (transverse) ──
         emit('LOWER_LANDING', 'DIST_SPAN_B', 'BOTH', 'TRANSVERSE',
              B + Ldh + dist_dia, _n_bars(A - 2*c, dist_sp),
              dist_dia, dist_sp,
              P[1] + lower_travel * c, P[4] + lower_travel * c,
              lower_travel, A - 2*c)
 
-        # ── #4: Mid landing TOP along C + lap from flight ──
-        bend4 = P[5] + width_dir * c
-        start4 = bend4 - slope1 * lap_top
-        emit('MID_LANDING', 'TOP_ALONG_C', 'TOP', 'LONGITUDINAL',
-             C + lap_top, _n_bars(W_flight - 2*c, dist_sp),
-             dist_dia, dist_sp,
-             start4, P[6] + width_dir * c,
-             width_dir, W_flight - 2*c)
+        # ── #4: Mid landing TOP along C + lap from flight slope ──
+        # Emit per flight side (V1 has 2 rows at different X positions)
+        for f_name, Fs, Fe, slope_u, w_start in [
+            ('F1', F1s, F1e, slope1, P[1] + width_dir * c),
+            ('F2', F2s, F2e, slope2, P[4] - width_dir * c),
+        ]:
+            mid_junc = P[5] + width_dir * c if f_name == 'F1' else P[8] - width_dir * c
+            start4 = mid_junc - slope_u * lap_top  # extend back along slope
+            # Use flight center X for this flight's bars
+            fx = w_start[0]
+            s4 = _vec(fx, start4[1], start4[2])
+            b4 = _vec(fx, mid_junc[1], mid_junc[2])
+            e4 = _vec(fx, P[6][1] if f_name == 'F1' else P[7][1], P[6][2])
+            emit('MID_LANDING', 'TOP_ALONG_C', 'TOP', 'LONGITUDINAL',
+                 C + lap_top, _n_bars(W_flight - 2*c, dist_sp),
+                 dist_dia, dist_sp,
+                 s4, e4,
+                 width_dir if f_name == 'F1' else -width_dir, W_flight - 2*c,
+                 bend1=b4)
 
         # ── #5: Mid landing BOT along C ──
-        emit('MID_LANDING', 'BOT_ALONG_C', 'BOTTOM', 'LONGITUDINAL',
-             C, _n_bars(W_flight - 2*c, dist_sp),
-             dist_dia, dist_sp,
-             P[5] + width_dir * c, P[6] + width_dir * c,
-             width_dir, W_flight - 2*c)
+        # Emit per flight side
+        for f_name, w_start in [('F1', P[1] + width_dir * c), ('F2', P[4] - width_dir * c)]:
+            fx = w_start[0]
+            s5 = _vec(fx, P[5][1], P[5][2])
+            e5 = _vec(fx, P[6][1] if f_name == 'F1' else P[7][1], P[6][2])
+            emit('MID_LANDING', 'BOT_ALONG_C', 'BOTTOM', 'LONGITUDINAL',
+                 C, _n_bars(W_flight - 2*c, dist_sp),
+                 dist_dia, dist_sp,
+                 s5, e5,
+                 width_dir if f_name == 'F1' else -width_dir, W_flight - 2*c)
 
-        # ── #6: Mid landing DIST span B ──
-        mid_travel = _vunit(P[6] - P[5])
+        # ── #6: Mid landing DIST span B (transverse) ──
         emit('MID_LANDING', 'DIST_SPAN_B', 'BOTH', 'TRANSVERSE',
              B + Ldh + dist_dia, _n_bars(C - 2*c, dist_sp),
              dist_dia, dist_sp,
@@ -308,19 +344,23 @@ def calculate_stair_rebar_lengths(
         f1_w_start = P[1] + width_dir * c       # wall side + cover
         f2_w_start = P[4] - width_dir * c       # wall side + cover (from right)
 
-        for zone, Fs, Fe, Lf, w_origin, w_dir in [
-            ('FLIGHT1', F1s, F1e, L1, f1_w_start, width_dir),
-            ('FLIGHT2', F2s, F2e, L2, f2_w_start, -width_dir),
+        for zone, Fs, Fe, Lf, slope_u, w_origin, w_dir in [
+            ('FLIGHT1', F1s, F1e, L1, slope1, f1_w_start, width_dir),
+            ('FLIGHT2', F2s, F2e, L2, slope2, f2_w_start, -width_dir),
         ]:
-            # Longitudinal bars: along slope, distributed across flight width from wall side
-            # Replace Fs/Fe x-coord with the wall-side origin's x (keep y,z from flight)
+            # Longitudinal bars: lap extension → bend1 at flight start → along slope
             for layer_name, lap in [('TOP', sl_dev['Lpt']), ('BOTTOM', sl_dev['Lpb'])]:
-                ls_start = _vec(w_origin[0], Fs[1], Fs[2])
-                ls_end = _vec(w_origin[0], Fe[1], Fe[2])
+                fx = w_origin[0]
+                # Flight start/end with wall-side X
+                f_start = _vec(fx, Fs[1], Fs[2])
+                f_end = _vec(fx, Fe[1], Fe[2])
+                # Extend start back by lap (into landing)
+                lap_start = f_start - slope_u * lap
                 emit(zone, f'{layer_name}_ALONG_SLOPE', layer_name, 'LONGITUDINAL',
                      Lf + lap, _n_bars(W_flight - 2*c, sl_sp),
-                     sl_dia, sl_sp, ls_start, ls_end,
-                     w_dir, W_flight - 2*c)
+                     sl_dia, sl_sp, lap_start, f_end,
+                     w_dir, W_flight - 2*c,
+                     bend1=f_start)
 
         # ── #9: Flight transverse (per flight) ──
         st_dia = stair_trans['dia'] if stair_trans else dist_dia
