@@ -156,14 +156,7 @@ def calculate_stair_rebar_lengths(
         # Geometry
         W_flight = float(seg['stair_width_mm'])
         gap = float(seg.get('gap_mm', 50) or 50)
-        waist = float(seg.get('waist_thickness_mm', 180) or 180)
         B = 2 * W_flight + gap
-
-        # Layer Z offsets from slab surface (P-point Z = top of slab)
-        # TOP bars: cover below top surface
-        # BOT bars: waist - cover below top surface (near bottom face)
-        z_off_top = -c           # e.g. -30mm from surface
-        z_off_bot = -(waist - c) # e.g. -150mm from surface
 
         # 8-point model
         P = {}
@@ -277,37 +270,27 @@ def calculate_stair_rebar_lengths(
         # Hook tail length = 12d (90° hook into wall)
         hook_tail = 12 * dist_dia
 
-        # Helper: shift a point's Z for TOP/BOT layer
-        def _z_shift(pt, layer_name):
-            """Shift point Z based on layer: TOP near top face, BOT near bottom."""
-            if layer_name == 'TOP':
-                return pt + _vec(0, 0, z_off_top)
-            elif layer_name == 'BOTTOM':
-                return pt + _vec(0, 0, z_off_bot)
-            else:
-                return pt  # BOTH — use surface Z as-is
-
         # ── #1: Floor landing TOP along A ──
         # 90° hook at wall end (P1): bar starts below landing, bends up at wall edge
-        wall_pt_1 = _z_shift(P[1] + width_dir * c, 'TOP')
+        wall_pt_1 = P[1] + width_dir * c
         hook_start_1 = wall_pt_1 + _vec(0, 0, -hook_tail)
         emit('LOWER_LANDING', 'TOP_ALONG_A', 'TOP', 'LONGITUDINAL',
              A, _n_bars(W_flight - 2*c, dist_sp),
              dist_dia, dist_sp,
-             hook_start_1, _z_shift(P[2] + width_dir * c, 'TOP'),
+             hook_start_1, P[2] + width_dir * c,
              width_dir, W_flight - 2*c,
              bend1=wall_pt_1)
 
         # ── #2: Floor landing BOT along A + lap into flight slope ──
-        # start = landing start (BOT face), bend1 = flight junction, end = along slope
-        lower_junc_bot = _z_shift(P[2] + width_dir * c, 'BOTTOM')
-        end2 = lower_junc_bot + slope1 * lap_bot
+        # start = landing start, bend1 = flight junction, end = along slope
+        lower_junc = P[2] + width_dir * c  # junction where landing meets flight 1
+        end2 = lower_junc + slope1 * lap_bot
         emit('LOWER_LANDING', 'BOT_ALONG_A', 'BOTTOM', 'LONGITUDINAL',
              A + lap_bot, _n_bars(W_flight - 2*c, dist_sp),
              dist_dia, dist_sp,
-             _z_shift(P[1] + width_dir * c, 'BOTTOM'), end2,
+             P[1] + width_dir * c, end2,
              width_dir, W_flight - 2*c,
-             bend1=lower_junc_bot)
+             bend1=lower_junc)
 
         # ── #3: Floor landing DIST span B (transverse) ──
         # 90° hook at wall side: bar starts below landing, bends up at wall edge
@@ -333,13 +316,13 @@ def calculate_stair_rebar_lengths(
             ('F2', F2s, F2e, slope2, P[4] - width_dir * c),
         ]:
             if f_name == 'F1':
-                mid_junc = _z_shift(P[5] + width_dir * c, 'TOP')
+                mid_junc = P[5] + width_dir * c
                 start4 = mid_junc - slope_u * lap_top
-                e4 = _z_shift(P[6] + width_dir * c, 'TOP')
+                e4 = P[6] + width_dir * c
             else:
-                mid_junc = _z_shift(F2s + width_dir * c, 'TOP')
+                mid_junc = F2s + width_dir * c
                 start4 = mid_junc + slope_u * lap_top
-                e4 = _z_shift(P[6] + f2_off + width_dir * c, 'TOP')
+                e4 = P[6] + f2_off + width_dir * c
             fx = w_start[0]
             s4 = _vec(fx, start4[1], start4[2])
             b4 = _vec(fx, mid_junc[1], mid_junc[2])
@@ -355,11 +338,11 @@ def calculate_stair_rebar_lengths(
         for f_name, w_start in [('F1', P[1] + width_dir * c), ('F2', P[4] - width_dir * c)]:
             fx = w_start[0]
             if f_name == 'F1':
-                s5 = _z_shift(_vec(fx, P[5][1], P[5][2]), 'BOTTOM')
-                wall_pt_5 = _z_shift(_vec(fx, P[6][1], P[6][2]), 'BOTTOM')
+                s5 = _vec(fx, P[5][1], P[5][2])
+                wall_pt_5 = _vec(fx, P[6][1], P[6][2])
             else:
-                s5 = _z_shift(_vec(fx, F2s[1], F2s[2]), 'BOTTOM')
-                wall_pt_5 = _z_shift(_vec(fx, (P[6] + f2_off)[1], P[6][2]), 'BOTTOM')
+                s5 = _vec(fx, F2s[1], F2s[2])
+                wall_pt_5 = _vec(fx, (P[6] + f2_off)[1], P[6][2])
             hook_end_5 = wall_pt_5 + _vec(0, 0, -hook_tail)
             emit('MID_LANDING', 'BOT_ALONG_C', 'BOTTOM', 'LONGITUDINAL',
                  C, _n_bars(W_flight - 2*c, dist_sp),
