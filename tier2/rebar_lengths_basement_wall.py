@@ -138,7 +138,7 @@ def _split_into_continuous_groups(stack):
 # ── Zone Dimension Helpers ───────────────────────────────────────────────────
 
 def _get_zone_width(panel, zone):
-    """Get width of a horizontal zone (LEFT/MIDDLE/RIGHT)."""
+    """Get width of a horizontal zone (LEFT/MIDDLE/RIGHT/FULL)."""
     zone_upper = str(zone).upper()
     if zone_upper == 'LEFT':
         return float(panel.get('zone_width_left_mm', 0) or 0)
@@ -146,6 +146,8 @@ def _get_zone_width(panel, zone):
         return float(panel.get('zone_width_middle_mm', 0) or 0)
     elif zone_upper == 'RIGHT':
         return float(panel.get('zone_width_right_mm', 0) or 0)
+    elif zone_upper == 'FULL':
+        return float(panel.get('length_mm', 0) or 0)
     return 0
 
 
@@ -164,7 +166,7 @@ def _get_zone_height(panel, zone):
 def _get_zone_x_offset(panel, zone):
     """Get X offset from wall start to zone start (for horizontal zones)."""
     zone_upper = str(zone).upper()
-    if zone_upper == 'LEFT':
+    if zone_upper == 'LEFT' or zone_upper == 'FULL':
         return 0
     elif zone_upper == 'MIDDLE':
         return float(panel.get('zone_width_left_mm', 0) or 0)

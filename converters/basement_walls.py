@@ -51,12 +51,24 @@ def convert_basement_walls(
             }
             raw_to_converted[raw_num] = str(row['node_id'])
 
-    # ── Parse boundary ──
+    # ── Parse boundary — auto-detect Type A (11 cols) vs Type B (7 cols) ──
     bcols = boundary_df.columns.tolist()
-    std_cols = ['node', 'name', 'position', 'length_mm', 'height_mm',
-                'left_mm', 'middle_mm', 'right_mm',
-                'top_mm', 'middle2_mm', 'bottom_mm']
-    boundary_df.columns = std_cols[:len(bcols)]
+    n_cols = len(bcols)
+
+    if n_cols >= 11:
+        # Type A (P1): Node, NAME, Position, Length, Height, Left, Middle, Right, Top, Middle, Bottom
+        std_cols = ['node', 'name', 'position', 'length_mm', 'height_mm',
+                    'left_mm', 'middle_mm', 'right_mm',
+                    'top_mm', 'middle2_mm', 'bottom_mm']
+        has_horizontal_zones = True
+    else:
+        # Type B (P2): Node, NAME, Position, Height, Top, Middle, Bottom
+        std_cols = ['node', 'name', 'position', 'height_mm',
+                    'top_mm', 'middle2_mm', 'bottom_mm']
+        has_horizontal_zones = False
+
+    boundary_df.columns = std_cols[:n_cols]
+    print(f'[BasementWall] Format: {"Type A (with horizontal zones)" if has_horizontal_zones else "Type B (vertical zones only)"}')
 
     # Group boundary by wall name + level, collect nodes
     wall_entries = {}
@@ -73,25 +85,28 @@ def convert_basement_walls(
             wall_entries[key] = {
                 'name': name,
                 'level': level,
-                'length_mm': _safe_float(row.get('length_mm')),
+                'length_mm': _safe_float(row.get('length_mm')) if has_horizontal_zones else None,
                 'height_mm': _safe_float(row.get('height_mm')),
-                'zone_width_left_mm': _safe_float(row.get('left_mm')),
-                'zone_width_middle_mm': _safe_float(row.get('middle_mm')),
-                'zone_width_right_mm': _safe_float(row.get('right_mm')),
+                'zone_width_left_mm': _safe_float(row.get('left_mm')) if has_horizontal_zones else None,
+                'zone_width_middle_mm': _safe_float(row.get('middle_mm')) if has_horizontal_zones else None,
+                'zone_width_right_mm': _safe_float(row.get('right_mm')) if has_horizontal_zones else None,
                 'zone_height_top_mm': _safe_float(row.get('top_mm')),
                 'zone_height_middle_mm': _safe_float(row.get('middle2_mm')),
                 'zone_height_bottom_mm': _safe_float(row.get('bottom_mm')),
+                'has_horizontal_zones': has_horizontal_zones,
                 'nodes': [],
             }
         else:
             # Fill in any missing zone dimensions from subsequent rows
             entry = wall_entries[key]
-            for src, dst in [('left_mm', 'zone_width_left_mm'),
-                             ('middle_mm', 'zone_width_middle_mm'),
-                             ('right_mm', 'zone_width_right_mm'),
-                             ('top_mm', 'zone_height_top_mm'),
-                             ('middle2_mm', 'zone_height_middle_mm'),
-                             ('bottom_mm', 'zone_height_bottom_mm')]:
+            fill_pairs = [('top_mm', 'zone_height_top_mm'),
+                          ('middle2_mm', 'zone_height_middle_mm'),
+                          ('bottom_mm', 'zone_height_bottom_mm')]
+            if has_horizontal_zones:
+                fill_pairs += [('left_mm', 'zone_width_left_mm'),
+                               ('middle_mm', 'zone_width_middle_mm'),
+                               ('right_mm', 'zone_width_right_mm')]
+            for src, dst in fill_pairs:
                 if entry[dst] is None:
                     val = _safe_float(row.get(src))
                     if val is not None:
@@ -348,13 +363,34 @@ def convert_basement_walls(
                     return raw_to_converted[nid]
                 return f'MISSING_{nid}'
 
+            # For Type B: compute per-panel length from quad nodes
+            panel_length = entry['length_mm']
+            if panel_length is None and len(valid_coords) >= 2:
+                import math
+                # Group panel nodes by Z to find bottom edge span
+                z_groups = {}
+                for c in valid_coords:
+                    z_key = round(c['z_mm'])
+                    z_groups.setdefault(z_key, []).append((c['x_mm'], c['y_mm']))
+                for z_key in sorted(z_groups, key=lambda k: len(z_groups[k]), reverse=True):
+                    pts = z_groups[z_key]
+                    if len(pts) >= 2:
+                        max_d = 0
+                        for i in range(len(pts)):
+                            for j in range(i+1, len(pts)):
+                                d = math.sqrt((pts[j][0]-pts[i][0])**2 + (pts[j][1]-pts[i][1])**2)
+                                if d > max_d:
+                                    max_d = d
+                        panel_length = round(max_d, 1)
+                        break
+
             members.append({
                 'wall_mark': name,
                 'level': level,
                 'panel_no': pi,
                 'wall_type': None,  # filled from reinforcement below
                 'thickness_mm': None,  # filled from reinforcement below
-                'length_mm': entry['length_mm'],
+                'length_mm': panel_length,
                 'height_mm': entry['height_mm'],
                 'zone_width_left_mm': entry['zone_width_left_mm'],
                 'zone_width_middle_mm': entry['zone_width_middle_mm'],
@@ -401,6 +437,12 @@ def convert_basement_walls(
             col_map[col] = 'h_int_right'
         elif 'h_ext' in cl and 'right' in cl:
             col_map[col] = 'h_ext_right'
+        elif 'h_int' in cl and 'left' not in cl and 'middle' not in cl and 'right' not in cl:
+            # Type B: single H_Int. column (no zone split)
+            col_map[col] = 'h_int_full'
+        elif 'h_ext' in cl and 'left' not in cl and 'middle' not in cl and 'right' not in cl:
+            # Type B: single H_Ext. column (no zone split)
+            col_map[col] = 'h_ext_full'
         elif 'v' in cl and 'int' in cl and 'top' in cl:
             col_map[col] = 'v_int_top'
         elif 'v' in cl and 'ext' in cl and 'top' in cl:
@@ -437,13 +479,27 @@ def convert_basement_walls(
     members_df = pd.DataFrame(members)
 
     # ── Build ReinforcementBasementWall ──
-    rebar_positions = [
-        ('h_int_left', 'HORIZONTAL', 'INTERIOR', 'LEFT'),
-        ('h_ext_left', 'HORIZONTAL', 'EXTERIOR', 'LEFT'),
-        ('h_int_middle', 'HORIZONTAL', 'INTERIOR', 'MIDDLE'),
-        ('h_ext_middle', 'HORIZONTAL', 'EXTERIOR', 'MIDDLE'),
-        ('h_int_right', 'HORIZONTAL', 'INTERIOR', 'RIGHT'),
-        ('h_ext_right', 'HORIZONTAL', 'EXTERIOR', 'RIGHT'),
+    # Detect if reinforcement has horizontal zone split (Type A) or single H (Type B)
+    reinf_has_h_zones = any(c in reinforcement_df.columns for c in ('h_int_left', 'h_ext_left'))
+
+    rebar_positions = []
+    if reinf_has_h_zones:
+        # Type A: 3 horizontal zones
+        rebar_positions += [
+            ('h_int_left', 'HORIZONTAL', 'INTERIOR', 'LEFT'),
+            ('h_ext_left', 'HORIZONTAL', 'EXTERIOR', 'LEFT'),
+            ('h_int_middle', 'HORIZONTAL', 'INTERIOR', 'MIDDLE'),
+            ('h_ext_middle', 'HORIZONTAL', 'EXTERIOR', 'MIDDLE'),
+            ('h_int_right', 'HORIZONTAL', 'INTERIOR', 'RIGHT'),
+            ('h_ext_right', 'HORIZONTAL', 'EXTERIOR', 'RIGHT'),
+        ]
+    else:
+        # Type B: single horizontal zone (FULL wall length)
+        rebar_positions += [
+            ('h_int_full', 'HORIZONTAL', 'INTERIOR', 'FULL'),
+            ('h_ext_full', 'HORIZONTAL', 'EXTERIOR', 'FULL'),
+        ]
+    rebar_positions += [
         ('v_int_top', 'VERTICAL', 'INTERIOR', 'TOP'),
         ('v_ext_top', 'VERTICAL', 'EXTERIOR', 'TOP'),
         ('v_int_middle', 'VERTICAL', 'INTERIOR', 'MIDDLE'),
