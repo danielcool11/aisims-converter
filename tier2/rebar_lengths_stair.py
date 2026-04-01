@@ -297,22 +297,25 @@ def calculate_stair_rebar_lengths(
         # Emit per flight side (V1 has 2 rows at different X positions)
         # For F1: lap extends back along -slope1 (down from mid-landing into flight 1)
         # For F2: lap extends along +slope2 (up from mid-landing into flight 2)
+        # V1 convention:
+        # F1: bend at P[5] + cover, lap extends along -slope1 (down into flight 1)
+        # F2: bend at F2s + cover, lap extends along +slope2 (up into flight 2)
+        f2_off = width_dir * (W_flight + gap)
         for f_name, Fs, Fe, slope_u, w_start in [
             ('F1', F1s, F1e, slope1, P[1] + width_dir * c),
             ('F2', F2s, F2e, slope2, P[4] - width_dir * c),
         ]:
-            mid_junc = P[5] + width_dir * c if f_name == 'F1' else P[8] - width_dir * c
-            # F1: lap goes back into flight 1 (downward from mid-landing) = -slope1
-            # F2: lap goes into flight 2 (upward from mid-landing) = +slope2
             if f_name == 'F1':
+                mid_junc = P[5] + width_dir * c
                 start4 = mid_junc - slope_u * lap_top
+                e4 = P[6] + width_dir * c
             else:
+                mid_junc = F2s + width_dir * c
                 start4 = mid_junc + slope_u * lap_top
-            # Use flight center X for this flight's bars
+                e4 = P[6] + f2_off + width_dir * c
             fx = w_start[0]
             s4 = _vec(fx, start4[1], start4[2])
             b4 = _vec(fx, mid_junc[1], mid_junc[2])
-            e4 = _vec(fx, P[6][1] if f_name == 'F1' else P[7][1], P[6][2])
             emit('MID_LANDING', 'TOP_ALONG_C', 'TOP', 'LONGITUDINAL',
                  C + lap_top, _n_bars(W_flight - 2*c, dist_sp),
                  dist_dia, dist_sp,
@@ -321,11 +324,15 @@ def calculate_stair_rebar_lengths(
                  bend1=b4)
 
         # ── #5: Mid landing BOT along C ──
-        # Emit per flight side
+        # Emit per flight side (V1: F1 from P5 to P6, F2 from F2s to P6+f2_off)
         for f_name, w_start in [('F1', P[1] + width_dir * c), ('F2', P[4] - width_dir * c)]:
             fx = w_start[0]
-            s5 = _vec(fx, P[5][1], P[5][2])
-            e5 = _vec(fx, P[6][1] if f_name == 'F1' else P[7][1], P[6][2])
+            if f_name == 'F1':
+                s5 = _vec(fx, P[5][1], P[5][2])
+                e5 = _vec(fx, P[6][1], P[6][2])
+            else:
+                s5 = _vec(fx, F2s[1], F2s[2])
+                e5 = _vec(fx, (P[6] + f2_off)[1], P[6][2])
             emit('MID_LANDING', 'BOT_ALONG_C', 'BOTTOM', 'LONGITUDINAL',
                  C, _n_bars(W_flight - 2*c, dist_sp),
                  dist_dia, dist_sp,
@@ -351,25 +358,30 @@ def calculate_stair_rebar_lengths(
         f1_w_start = P[1] + width_dir * c       # wall side + cover
         f2_w_start = P[4] - width_dir * c       # wall side + cover (from right)
 
-        # Flight 1: starts at lower landing edge, ends at mid-landing edge
-        #   lap at start extends flat into lower landing (along -lower_travel)
-        # Flight 2: starts at mid-landing edge, ends at upper landing
-        #   lap at start extends flat into mid-landing (along +mid_travel)
-        for zone, Fs, Fe, Lf, slope_u, w_origin, w_dir, lap_dir in [
-            ('FLIGHT1', F1s, F1e, L1, slope1, f1_w_start, width_dir, -lower_travel),
-            ('FLIGHT2', F2s, F2e, L2, slope2, f2_w_start, -width_dir, mid_travel),
+        # Flight bars: BENT at both ends.
+        # Horizontal flat extensions into adjacent landings, bend at flight junctions.
+        # Uses horizontal travel direction (XY projection of slope) for flat extensions.
+        s1h = F1e - F1s; s1h[2] = 0.0
+        travel1_horiz = _vunit(s1h)
+        s2h = F2e - F2s; s2h[2] = 0.0
+        travel2_horiz = _vunit(s2h)
+
+        for zone, Fs, Fe, Lf, slope_u, w_origin, w_dir, horiz_start, horiz_end in [
+            ('FLIGHT1', F1s, F1e, L1, slope1, f1_w_start, width_dir, -travel1_horiz, travel1_horiz),
+            ('FLIGHT2', F2s, F2e, L2, slope2, f2_w_start, -width_dir, -travel2_horiz, travel2_horiz),
         ]:
             for layer_name, lap in [('TOP', sl_dev['Lpt']), ('BOTTOM', sl_dev['Lpb'])]:
                 fx = w_origin[0]
                 f_start = _vec(fx, Fs[1], Fs[2])
                 f_end = _vec(fx, Fe[1], Fe[2])
-                # Extend start flat into the adjacent landing (not along slope)
-                lap_start = f_start + lap_dir * lap
+                # Flat horizontal extensions into adjacent landings (half lap each side)
+                ext_start = f_start + horiz_start * (lap * 0.5)
+                ext_end = f_end + horiz_end * (lap * 0.5)
                 emit(zone, f'{layer_name}_ALONG_SLOPE', layer_name, 'LONGITUDINAL',
                      Lf + lap, _n_bars(W_flight - 2*c, sl_sp),
-                     sl_dia, sl_sp, lap_start, f_end,
+                     sl_dia, sl_sp, ext_start, ext_end,
                      w_dir, W_flight - 2*c,
-                     bend1=f_start)
+                     bend1=f_start, bend2=f_end)
 
         # ── #9: Flight transverse (per flight) ──
         st_dia = stair_trans['dia'] if stair_trans else dist_dia
