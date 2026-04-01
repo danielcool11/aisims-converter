@@ -267,13 +267,19 @@ def calculate_stair_rebar_lengths(
         lower_travel = _vunit(P[2] - P[1])  # direction along lower landing
         mid_travel = _vunit(P[6] - P[5])    # direction along mid landing
 
+        # Hook tail length = 12d (90° hook into wall)
+        hook_tail = 12 * dist_dia
+
         # ── #1: Floor landing TOP along A ──
-        # Straight bar along landing surface (no slope transition)
+        # 90° hook at wall end (P1): bar starts below landing, bends up at wall edge
+        wall_pt_1 = P[1] + width_dir * c
+        hook_start_1 = wall_pt_1 + _vec(0, 0, -hook_tail)
         emit('LOWER_LANDING', 'TOP_ALONG_A', 'TOP', 'LONGITUDINAL',
              A, _n_bars(W_flight - 2*c, dist_sp),
              dist_dia, dist_sp,
-             P[1] + width_dir * c, P[2] + width_dir * c,
-             width_dir, W_flight - 2*c)
+             hook_start_1, P[2] + width_dir * c,
+             width_dir, W_flight - 2*c,
+             bend1=wall_pt_1)
 
         # ── #2: Floor landing BOT along A + lap into flight slope ──
         # start = landing start, bend1 = flight junction, end = along slope
@@ -287,11 +293,15 @@ def calculate_stair_rebar_lengths(
              bend1=lower_junc)
 
         # ── #3: Floor landing DIST span B (transverse) ──
+        # 90° hook at wall side: bar starts below landing, bends up at wall edge
+        wall_pt_3 = P[1] + lower_travel * c
+        hook_start_3 = wall_pt_3 + _vec(0, 0, -hook_tail)
         emit('LOWER_LANDING', 'DIST_SPAN_B', 'BOTH', 'TRANSVERSE',
              B + Ldh + dist_dia, _n_bars(A - 2*c, dist_sp),
              dist_dia, dist_sp,
-             P[1] + lower_travel * c, P[4] + lower_travel * c,
-             lower_travel, A - 2*c)
+             hook_start_3, P[4] + lower_travel * c,
+             lower_travel, A - 2*c,
+             bend1=wall_pt_3)
 
         # ── #4: Mid landing TOP along C + lap from flight slope ──
         # Emit per flight side (V1 has 2 rows at different X positions)
@@ -324,27 +334,33 @@ def calculate_stair_rebar_lengths(
                  bend1=b4)
 
         # ── #5: Mid landing BOT along C ──
-        # Emit per flight side (V1: F1 from P5 to P6, F2 from F2s to P6+f2_off)
+        # 90° hook at wall end: bar ends below landing, bends up at wall edge
         for f_name, w_start in [('F1', P[1] + width_dir * c), ('F2', P[4] - width_dir * c)]:
             fx = w_start[0]
             if f_name == 'F1':
                 s5 = _vec(fx, P[5][1], P[5][2])
-                e5 = _vec(fx, P[6][1], P[6][2])
+                wall_pt_5 = _vec(fx, P[6][1], P[6][2])
             else:
                 s5 = _vec(fx, F2s[1], F2s[2])
-                e5 = _vec(fx, (P[6] + f2_off)[1], P[6][2])
+                wall_pt_5 = _vec(fx, (P[6] + f2_off)[1], P[6][2])
+            hook_end_5 = wall_pt_5 + _vec(0, 0, -hook_tail)
             emit('MID_LANDING', 'BOT_ALONG_C', 'BOTTOM', 'LONGITUDINAL',
                  C, _n_bars(W_flight - 2*c, dist_sp),
                  dist_dia, dist_sp,
-                 s5, e5,
-                 width_dir if f_name == 'F1' else -width_dir, W_flight - 2*c)
+                 s5, hook_end_5,
+                 width_dir if f_name == 'F1' else -width_dir, W_flight - 2*c,
+                 bend1=wall_pt_5)
 
         # ── #6: Mid landing DIST span B (transverse) ──
+        # 90° hook at wall side: bar starts below landing, bends up at wall edge
+        wall_pt_6 = P[5] + mid_travel * c
+        hook_start_6 = wall_pt_6 + _vec(0, 0, -hook_tail)
         emit('MID_LANDING', 'DIST_SPAN_B', 'BOTH', 'TRANSVERSE',
              B + Ldh + dist_dia, _n_bars(C - 2*c, dist_sp),
              dist_dia, dist_sp,
-             P[5] + mid_travel * c, P[8] + mid_travel * c,
-             mid_travel, C - 2*c)
+             hook_start_6, P[8] + mid_travel * c,
+             mid_travel, C - 2*c,
+             bend1=wall_pt_6)
 
         # ── #7/#8: Flight slope TOP and BOT (per flight) ──
         # Flight 1 is on the P1 (wall-left) side: distribute from wall → gap
