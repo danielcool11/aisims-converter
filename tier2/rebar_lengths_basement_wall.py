@@ -445,6 +445,85 @@ def _process_horizontal_bars(panel, reinf_rows, lookup, cover, fc, results, node
             results.append(piece)
 
 
+# ── Dowel Generation ────────────────────────────────────────────────────────
+
+def _emit_bwall_dowel(panel, reinf_rows, lookup, cover, fc, results, node_coords=None):
+    """Emit dowel bars at the bottom of the wall's lowest level.
+
+    Dowels are short vertical bars: Ldh below wall base (into slab/footing)
+    and Lpc above wall base (lapping with wall's BOTTOM vertical bar).
+    Generated for each face using the BOTTOM zone's vertical bar spec.
+    """
+    wall_mark = panel['wall_mark']
+    level = panel['level']
+    thickness = float(panel['thickness_mm'])
+    nominal_length = float(panel['length_mm'])
+    z_center = float(panel['z_mm'])
+    height = float(panel['height_mm'])
+    z_bottom = z_center - height / 2
+
+    actual_length = _actual_panel_length(panel, node_coords) if node_coords else nominal_length
+    if actual_length < 100:
+        actual_length = nominal_length
+
+    for _, r in reinf_rows.iterrows():
+        zone = str(r['zone']).strip().upper()
+        if zone != 'BOTTOM':
+            continue
+
+        face = str(r['face']).strip()
+        dia = int(r['dia_mm'])
+        spacing = int(r['spacing_mm'])
+
+        fy = _steel_grade(dia)
+        dev = lookup.get(fy, dia, fc)
+        Ldh = dev['Ldh']
+        Lpc = dev['Lpc']
+
+        dowel_len = Ldh + Lpc
+        n_bars = int(math.floor((actual_length - 2 * cover) / spacing)) + 1 if spacing > 0 else 0
+
+        # Dowel Z range: Ldh below wall base → Lpc above wall base
+        z_start = z_bottom - Ldh
+        z_end = z_bottom + Lpc
+
+        # Mesh coordinates in world frame
+        if node_coords:
+            ox, oy = _wall_plan_origin(panel, node_coords, cover, offset_along=cover)
+        else:
+            cx = float(panel.get('centroid_x_mm', 0) or 0)
+            ox = cx - nominal_length / 2 + cover
+            oy = float(panel.get('centroid_y_mm', 0) or 0)
+
+        results.append({
+            'wall_mark': wall_mark,
+            'level': level,
+            'direction': 'VERTICAL',
+            'face': face,
+            'zone': 'DOWEL',
+            'bar_role': 'DOWEL',
+            'dia_mm': dia,
+            'spacing_mm': spacing,
+            'n_bars': n_bars,
+            'length_mm': int(round(dowel_len)),
+            'total_length_mm': int(round(dowel_len * n_bars)),
+            'height_mm': height,
+            'length_wall_mm': actual_length,
+            'thickness_mm': thickness,
+            'zone_height_mm': None,
+            'Ldh_mm': round(Ldh, 1),
+            'Lpc_mm': round(Lpc, 1),
+            'cover_mm': cover,
+            'mesh_origin_x_mm': round(ox, 1),
+            'mesh_origin_y_mm': round(oy, 1),
+            'mesh_origin_z_mm': round(z_start + cover, 1),
+            'mesh_terminus_x_mm': round(ox, 1),
+            'mesh_terminus_y_mm': round(oy, 1),
+            'mesh_terminus_z_mm': round(z_end, 1),
+            'mesh_distribution_axis': 'ALONG_WALL_LENGTH',
+        })
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 def calculate_basement_wall_rebar_lengths(
@@ -525,12 +604,29 @@ def calculate_basement_wall_rebar_lengths(
                 v_df = pd.DataFrame(v_rows)
                 _process_vertical_bars(panel, v_df, lookup, cover, fc, 'FULL_HEIGHT', results, node_coords)
 
+                # Dowels for full-height walls too
+                _emit_bwall_dowel(panel, v_df, lookup, cover, fc, results, node_coords)
+
             # Horizontal bars
             h_key = (wm, level, 'HORIZONTAL')
             h_rows = reinf_lookup.get(h_key, [])
             if h_rows:
                 h_df = pd.DataFrame(h_rows)
                 _process_horizontal_bars(panel, h_df, lookup, cover, fc, results, node_coords)
+
+        # Emit dowels at the lowest level of per-level walls
+        if per_level:
+            # Find the lowest level (deepest Z) among all per-level panels
+            lowest_z = min(p['z_mm'] - p['height_mm'] / 2 for p in per_level)
+            lowest_panels = [p for p in per_level
+                             if abs((p['z_mm'] - p['height_mm'] / 2) - lowest_z) < 100]
+            for panel in lowest_panels:
+                level = panel['level']
+                v_key = (wm, level, 'VERTICAL')
+                v_rows = reinf_lookup.get(v_key, [])
+                if v_rows:
+                    v_df = pd.DataFrame(v_rows)
+                    _emit_bwall_dowel(panel, v_df, lookup, cover, fc, results, node_coords)
 
         # Process per-level panels with continuity stacking
         if per_level:

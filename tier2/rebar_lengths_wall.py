@@ -479,12 +479,13 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
 
 def _emit_dowel(results, wid, wall_mark, level, dia, width, spacing,
                 Lpc, Ldh, cover, z_bottom, face_multiplier, seg=None):
-    """Emit dowel bar record at foundation level."""
+    """Emit dowel bar record at the wall's own level (not hardcoded FOOTING)."""
     dowel_len = Lpc + Ldh
     n_dowels = int(math.floor((width - 2 * cover) / spacing)) + 1 if spacing > 0 else 0
     n_dowels *= face_multiplier
 
-    footing_z = z_bottom - FOOTING_DEPTH_MM
+    # Dowel Z range: Ldh below wall base → Lpc above wall base
+    z_start = z_bottom - Ldh
 
     # Use first story's XY coordinates for dowel mesh
     mesh_dowel = {}
@@ -492,15 +493,15 @@ def _emit_dowel(results, wid, wall_mark, level, dia, width, spacing,
         mesh_dowel = {
             'mesh_origin_x_mm': round(seg['x_min'] + cover, 1),
             'mesh_origin_y_mm': round(seg['y_min'] + cover, 1),
-            'mesh_origin_z_mm': round(footing_z + cover, 1),
+            'mesh_origin_z_mm': round(z_start + cover, 1),
             'mesh_terminus_x_mm': round(seg['x_min'] + cover, 1),
             'mesh_terminus_y_mm': round(seg['y_min'] + cover, 1),
-            'mesh_terminus_z_mm': round(footing_z + dowel_len, 1),
+            'mesh_terminus_z_mm': round(z_start + dowel_len, 1),
             'mesh_distribution_axis': 'ALONG_WALL_LENGTH',
         }
 
     results.append({
-        'wall_id': wid, 'wall_mark': wall_mark, 'level': 'FOOTING',
+        'wall_id': wid, 'wall_mark': wall_mark, 'level': level,
         'direction': 'VERTICAL', 'bar_role': 'DOWEL',
         'dia_mm': dia, 'spacing_mm': spacing,
         'n_bars': n_dowels, 'length_mm': int(round(dowel_len)),
