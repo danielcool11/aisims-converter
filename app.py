@@ -356,6 +356,14 @@ if st.button("CONVERT", type="primary", use_container_width=True):
             outputs['reinf_bwall'] = bwall_reinf_df
             log(f"Basement walls: {len(bwall_members)} panels, {len(bwall_reinf_df)} reinforcement rows")
 
+            # Parse element-to-wall mapping sheet for dedup cross-validation
+            try:
+                bwall_elements = pd.read_excel(bwall_file, sheet_name='BasementWall Boundary (ELEMENT)', header=1)
+                outputs['bwall_elements'] = bwall_elements
+                log(f"Basement wall elements: {len(bwall_elements)} element mappings loaded")
+            except Exception:
+                pass
+
         # ── Phase 3: Reinforcement ──
         if design_beam_file:
             progress.progress(65, text="Phase 3: Beam reinforcement...")
@@ -400,6 +408,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 outputs.get('reinf_wall'),
                 outputs.get('bwall_members'),
                 outputs.get('nodes'),
+                outputs.get('bwall_elements'),
             )
             log(f"Wall dedup: {len(outputs['walls'])} elements after dedup")
 

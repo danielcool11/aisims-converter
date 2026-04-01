@@ -46,7 +46,7 @@ def _midpoint_to_segment_dist(ax1, ay1, ax2, ay2, bx1, by1, bx2, by2):
 
 
 def deduplicate_walls(walls_df, reinf_wall_df, bwall_members_df, nodes_df,
-                      overlap_tolerance=300):
+                      bwall_elements_df=None, overlap_tolerance=300):
     """
     Remove MembersWall elements that overlap with Part C basement walls.
 
@@ -55,6 +55,7 @@ def deduplicate_walls(walls_df, reinf_wall_df, bwall_members_df, nodes_df,
         reinf_wall_df: ReinforcementWall DataFrame (to find designed wall_ids)
         bwall_members_df: MembersBasementWall DataFrame
         nodes_df: Nodes DataFrame (for coordinate lookup)
+        bwall_elements_df: Part C element-to-wall mapping (for cross-validation)
         overlap_tolerance: max distance (mm) to consider overlap
 
     Returns:
@@ -127,6 +128,33 @@ def deduplicate_walls(walls_df, reinf_wall_df, bwall_members_df, nodes_df,
     covered = len(walls_df[walls_df['wall_status'] == 'COVERED_BY_PART_C'])
     no_design = len(walls_df[walls_df['wall_status'] == 'NO_DESIGN'])
     designed = len(walls_df[walls_df['wall_status'] == 'DESIGNED'])
+
+    # Cross-validate against Part C element sheet before removal
+    if bwall_elements_df is not None and not bwall_elements_df.empty:
+        partc_elem_ids = set(bwall_elements_df['ELEMENT'].astype(int))
+        all_elem_ids = set(walls_df['element_id'].astype(int))
+        geom_covered_ids = set(
+            walls_df[walls_df['wall_status'] == 'COVERED_BY_PART_C']['element_id'].astype(int)
+        )
+
+        # Part C elements that exist in MembersWall but were not caught by dedup
+        # (exclude DESIGNED elements — they have DesignWall rebar and are kept intentionally)
+        designed_elem_ids = set(
+            walls_df[walls_df['wall_status'] == 'DESIGNED']['element_id'].astype(int)
+        )
+        partc_in_model = partc_elem_ids & all_elem_ids
+        missed = partc_in_model - geom_covered_ids - designed_elem_ids
+        extra = geom_covered_ids - partc_elem_ids
+
+        if missed or extra:
+            print(f'[WallDedup] WARNING — CROSS-VALIDATION MISMATCH:')
+            if missed:
+                print(f'[WallDedup]   Part C elements NOT caught by geometric dedup: {sorted(missed)}')
+            if extra:
+                print(f'[WallDedup]   Geometric dedup caught elements NOT in Part C: {sorted(extra)}')
+        else:
+            print(f'[WallDedup] Cross-validation OK: geometric dedup matches Part C element list '
+                  f'({len(partc_in_model)} elements)')
 
     # Remove COVERED_BY_PART_C elements
     walls_df = walls_df[walls_df['wall_status'] != 'COVERED_BY_PART_C'].copy()
