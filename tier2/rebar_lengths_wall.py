@@ -452,26 +452,25 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
             n_h *= face_multiplier
 
             # Mesh coordinates for horizontal bars:
-            # origin at start of wall + cover, terminus at end - cover
-            # distributed along wall height
+            # origin/terminus extend into junction zone when rebar_ext > 0
             if seg['y_max'] - seg['y_min'] > seg['x_max'] - seg['x_min']:
-                # Wall runs along Y
+                # Wall runs along Y — extend Y range
                 mesh_h = {
                     'mesh_origin_x_mm': round(seg['x_min'] + cover, 1),
-                    'mesh_origin_y_mm': round(seg['y_min'] + cover, 1),
+                    'mesh_origin_y_mm': round(seg['y_min'] + cover - rebar_ext_start, 1),
                     'mesh_origin_z_mm': round(seg['z_bottom'] + cover, 1),
                     'mesh_terminus_x_mm': round(seg['x_min'] + cover, 1),
-                    'mesh_terminus_y_mm': round(seg['y_max'] - cover, 1),
+                    'mesh_terminus_y_mm': round(seg['y_max'] - cover + rebar_ext_end, 1),
                     'mesh_terminus_z_mm': round(seg['z_bottom'] + cover, 1),
                     'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
                 }
             else:
-                # Wall runs along X
+                # Wall runs along X — extend X range
                 mesh_h = {
-                    'mesh_origin_x_mm': round(seg['x_min'] + cover, 1),
+                    'mesh_origin_x_mm': round(seg['x_min'] + cover - rebar_ext_start, 1),
                     'mesh_origin_y_mm': round(seg['y_min'] + cover, 1),
                     'mesh_origin_z_mm': round(seg['z_bottom'] + cover, 1),
-                    'mesh_terminus_x_mm': round(seg['x_max'] - cover, 1),
+                    'mesh_terminus_x_mm': round(seg['x_max'] - cover + rebar_ext_end, 1),
                     'mesh_terminus_y_mm': round(seg['y_min'] + cover, 1),
                     'mesh_terminus_z_mm': round(seg['z_bottom'] + cover, 1),
                     'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',

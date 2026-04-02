@@ -418,15 +418,18 @@ def _process_horizontal_bars(panel, reinf_rows, lookup, cover, fc, results, node
 
         # Mesh coordinates — compute in WORLD structural frame
         # H-bar runs along wall plan direction within the zone
+        # Extend mesh into junction zone for LEFT (start) and RIGHT (end) zones
+        ext_offset_start = rebar_ext if zone_upper == 'LEFT' else 0
+        ext_offset_end = rebar_ext if zone_upper == 'RIGHT' else 0
         if node_coords:
             ox_start, oy_start = _wall_plan_origin(
-                panel, node_coords, cover, offset_along=zone_x_off + cover)
+                panel, node_coords, cover, offset_along=zone_x_off + cover - ext_offset_start)
             ox_end, oy_end = _wall_plan_origin(
-                panel, node_coords, cover, offset_along=zone_x_off + zone_w - cover)
+                panel, node_coords, cover, offset_along=zone_x_off + zone_w - cover + ext_offset_end)
         else:
-            ox_start = cx - length / 2 + zone_x_off + cover
+            ox_start = cx - length / 2 + zone_x_off + cover - ext_offset_start
             oy_start = cy
-            ox_end = cx - length / 2 + zone_x_off + zone_w - cover
+            ox_end = cx - length / 2 + zone_x_off + zone_w - cover + ext_offset_end
             oy_end = cy
 
         bar_record = {
