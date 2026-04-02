@@ -404,9 +404,9 @@ def _process_horizontal_bars(panel, reinf_rows, lookup, cover, fc, results, node
         ext_end = float(panel.get('extend_end_mm', 0) or 0)
         zone_upper = str(zone).upper()
         if zone_upper == 'LEFT':
-            rebar_ext = max(0, ext_start * 2 - cover) if ext_start > 0 else 0
+            rebar_ext = max(0, ext_start - cover) if ext_start > 0 else 0
         elif zone_upper == 'RIGHT':
-            rebar_ext = max(0, ext_end * 2 - cover) if ext_end > 0 else 0
+            rebar_ext = max(0, ext_end - cover) if ext_end > 0 else 0
         else:
             rebar_ext = 0  # MIDDLE/FULL zones: no junction extension
 

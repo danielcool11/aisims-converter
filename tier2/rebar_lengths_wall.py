@@ -441,8 +441,8 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
             # At free ends: H-bar stops at wall face (no extension)
             ext_start = seg.get('extend_start_mm', 0)
             ext_end = seg.get('extend_end_mm', 0)
-            rebar_ext_start = max(0, ext_start * 2 - cover) if ext_start > 0 else 0
-            rebar_ext_end = max(0, ext_end * 2 - cover) if ext_end > 0 else 0
+            rebar_ext_start = max(0, ext_start - cover) if ext_start > 0 else 0
+            rebar_ext_end = max(0, ext_end - cover) if ext_end > 0 else 0
 
             # H-bar = straight bar along wall width + junction extensions
             L_h_bar = width + rebar_ext_start + rebar_ext_end
