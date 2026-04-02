@@ -210,6 +210,10 @@ def calculate_wall_rebar_lengths(
             z_min = min(zs) - max(heights) / 2 if zs and heights else 0
             z_max = z_min + max(heights) if heights else 0
 
+        # Junction extensions (max across all elements in this segment)
+        ext_starts = [float(e.get('extend_start_mm', 0) or 0) for e in elems]
+        ext_ends = [float(e.get('extend_end_mm', 0) or 0) for e in elems]
+
         wall_segments[key] = {
             'wall_id': wg['wall_id'],
             'wall_mark': wg['wall_mark'],
@@ -223,6 +227,8 @@ def calculate_wall_rebar_lengths(
             'x_min': x_min, 'x_max': x_max,
             'y_min': y_min, 'y_max': y_max,
             'n_elements': len(elems),
+            'extend_start_mm': max(ext_starts) if ext_starts else 0,
+            'extend_end_mm': max(ext_ends) if ext_ends else 0,
         }
 
     # ── Stack walls by wall_id, detect continuity ──
@@ -364,8 +370,11 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
             role = 'MAIN_INTERMEDIATE'
             L_bar = height + Lpc_v
 
-        # Number of vertical bars along wall width
-        n_v = int(math.floor((width - 2 * cover) / v_spacing)) + 1 if v_spacing > 0 else 0
+        # Number of vertical bars along wall width (including junction extensions)
+        ext_start = seg.get('extend_start_mm', 0)
+        ext_end = seg.get('extend_end_mm', 0)
+        extended_width = width + ext_start + ext_end
+        n_v = int(math.floor((extended_width - 2 * cover) / v_spacing)) + 1 if v_spacing > 0 else 0
         n_v *= face_multiplier
 
         # Splice zones
@@ -426,9 +435,17 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
             h_dev = lookup.get_horizontal(h_fy, h_dia, fc)
             Ldh_h = h_dev['Ldh']
 
-            # U-bar at free edges: bar runs along wall + U-turn at end
-            U_turn = thickness - 2 * cover
-            L_h_bar = width + U_turn  # simplified: U-bar at one end
+            # Junction extensions for H-bar length:
+            # At junction ends: H-bar extends into adjacent wall by (adj_t - cover)
+            #   adj_t ≈ extend_mm * 2 (extension = half adjacent thickness)
+            # At free ends: H-bar stops at wall face (no extension)
+            ext_start = seg.get('extend_start_mm', 0)
+            ext_end = seg.get('extend_end_mm', 0)
+            rebar_ext_start = max(0, ext_start * 2 - cover) if ext_start > 0 else 0
+            rebar_ext_end = max(0, ext_end * 2 - cover) if ext_end > 0 else 0
+
+            # H-bar = straight bar along wall width + junction extensions
+            L_h_bar = width + rebar_ext_start + rebar_ext_end
 
             # Number of horizontal bars along wall height
             n_h = int(math.floor((height - 2 * cover) / h_spacing)) + 1 if h_spacing > 0 else 0
@@ -462,7 +479,7 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
 
             h_record = {
                 'wall_id': wid, 'wall_mark': wall_mark, 'level': level,
-                'direction': 'HORIZONTAL', 'bar_role': 'U_BAR',
+                'direction': 'HORIZONTAL', 'bar_role': 'HORIZONTAL',
                 'dia_mm': h_dia, 'spacing_mm': h_spacing,
                 'n_bars': n_h, 'length_mm': int(round(L_h_bar)),
                 'total_length_mm': int(round(L_h_bar * n_h)),
@@ -475,6 +492,47 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
             }
             for piece in split_bar(h_record, Ldh_h):
                 results.append(piece)
+
+            # ── U-BARS (separate cap pieces at wall endpoints) ──
+            # U-bar wraps around H-bar ends: two legs (Ldh each) + connector
+            # Placed at both start and end of wall segment
+            U_bar_width = thickness - 2 * cover  # connector across wall thickness
+            U_bar_len = 2 * Ldh_h + U_bar_width  # two legs + connector
+
+            # Same number and spacing as H-bars (one U-bar per H-bar at each end)
+            n_ubar_per_end = n_h
+
+            # U-bars at start end
+            ubar_start = {
+                'wall_id': wid, 'wall_mark': wall_mark, 'level': level,
+                'direction': 'HORIZONTAL', 'bar_role': 'U_BAR',
+                'dia_mm': h_dia, 'spacing_mm': h_spacing,
+                'n_bars': n_ubar_per_end, 'length_mm': int(round(U_bar_len)),
+                'total_length_mm': int(round(U_bar_len * n_ubar_per_end)),
+                'height_mm': height, 'width_mm': width, 'thickness_mm': thickness,
+                'bar_layer': bar_layer,
+                'splice_start_mm': None, 'splice_start_end_mm': None,
+                'splice_end_mm': None, 'splice_end_end_mm': None,
+                'cover_mm': cover,
+                **mesh_h,  # same distribution as H-bars
+            }
+            results.append(ubar_start)
+
+            # U-bars at end end
+            ubar_end = {
+                'wall_id': wid, 'wall_mark': wall_mark, 'level': level,
+                'direction': 'HORIZONTAL', 'bar_role': 'U_BAR',
+                'dia_mm': h_dia, 'spacing_mm': h_spacing,
+                'n_bars': n_ubar_per_end, 'length_mm': int(round(U_bar_len)),
+                'total_length_mm': int(round(U_bar_len * n_ubar_per_end)),
+                'height_mm': height, 'width_mm': width, 'thickness_mm': thickness,
+                'bar_layer': bar_layer,
+                'splice_start_mm': None, 'splice_start_end_mm': None,
+                'splice_end_mm': None, 'splice_end_end_mm': None,
+                'cover_mm': cover,
+                **mesh_h,
+            }
+            results.append(ubar_end)
 
 
 def _emit_dowel(results, wid, wall_mark, level, dia, width, spacing,

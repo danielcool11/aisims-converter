@@ -300,8 +300,11 @@ def _process_vertical_bars(panel, reinf_rows, lookup, cover, fc, role_prefix, re
         else:
             L_bar = zone_h + Ldh
 
-        # Number of vertical bars: use actual panel length (not nominal)
-        n_bars = int(math.floor((length - 2 * cover) / spacing)) + 1 if spacing > 0 else 0
+        # Number of vertical bars: use extended panel length (including junctions)
+        ext_start = float(panel.get('extend_start_mm', 0) or 0)
+        ext_end = float(panel.get('extend_end_mm', 0) or 0)
+        extended_length = length + ext_start + ext_end
+        n_bars = int(math.floor((extended_length - 2 * cover) / spacing)) + 1 if spacing > 0 else 0
 
         # Mesh coordinates — compute in WORLD structural frame
         bar_z_bot = z_bottom + zone_z_off + cover
@@ -395,9 +398,20 @@ def _process_horizontal_bars(panel, reinf_rows, lookup, cover, fc, results, node
         if zone_x_off >= actual_length:
             continue  # entire zone is beyond this panel's extent
 
-        # U-bar: bar runs along zone width + U-turn at end
-        U_turn = thickness - 2 * cover
-        L_h_bar = zone_w + U_turn
+        # Junction extensions for H-bar at wall endpoints:
+        # LEFT zone gets extend_start, RIGHT zone gets extend_end
+        ext_start = float(panel.get('extend_start_mm', 0) or 0)
+        ext_end = float(panel.get('extend_end_mm', 0) or 0)
+        zone_upper = str(zone).upper()
+        if zone_upper == 'LEFT':
+            rebar_ext = max(0, ext_start * 2 - cover) if ext_start > 0 else 0
+        elif zone_upper == 'RIGHT':
+            rebar_ext = max(0, ext_end * 2 - cover) if ext_end > 0 else 0
+        else:
+            rebar_ext = 0  # MIDDLE/FULL zones: no junction extension
+
+        # H-bar = straight bar along zone width + junction extension
+        L_h_bar = zone_w + rebar_ext
 
         # Number of horizontal bars along wall height
         n_bars = int(math.floor((height - 2 * cover) / spacing)) + 1 if spacing > 0 else 0
@@ -445,6 +459,42 @@ def _process_horizontal_bars(panel, reinf_rows, lookup, cover, fc, results, node
 
         for piece in split_bar(bar_record, Ldh):
             results.append(piece)
+
+        # ── U-BAR (separate cap piece at zone endpoints) ──
+        # U-bar at LEFT zone = wall start, RIGHT zone = wall end
+        # MIDDLE zone gets no U-bars (internal to wall)
+        if zone_upper in ('LEFT', 'RIGHT', 'FULL'):
+            U_bar_width = thickness - 2 * cover
+            U_bar_len = 2 * Ldh + U_bar_width
+
+            ubar_record = {
+                'wall_mark': wall_mark,
+                'level': level,
+                'direction': 'HORIZONTAL',
+                'face': face,
+                'zone': zone,
+                'bar_role': 'U_BAR',
+                'dia_mm': dia,
+                'spacing_mm': spacing,
+                'n_bars': n_bars,
+                'length_mm': int(round(U_bar_len)),
+                'total_length_mm': int(round(U_bar_len * n_bars)),
+                'height_mm': height,
+                'length_wall_mm': actual_length,
+                'thickness_mm': thickness,
+                'zone_width_mm': round(zone_w, 1),
+                'Ldh_mm': round(Ldh, 1),
+                'Lpc_mm': None,
+                'cover_mm': cover,
+                'mesh_origin_x_mm': round(ox_start, 1),
+                'mesh_origin_y_mm': round(oy_start, 1),
+                'mesh_origin_z_mm': round(z_bottom + cover, 1),
+                'mesh_terminus_x_mm': round(ox_end, 1),
+                'mesh_terminus_y_mm': round(oy_end, 1),
+                'mesh_terminus_z_mm': round(z_bottom + cover, 1),
+                'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
+            }
+            results.append(ubar_record)
 
 
 # ── Dowel Generation ────────────────────────────────────────────────────────
