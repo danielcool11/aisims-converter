@@ -98,6 +98,128 @@ class SlabDevLapLookup:
         return Ldh, Lpt, Lpb
 
 
+# ── Polygon scan-line clipping ───────────────────────────────────────────────
+
+def _scanline_intersect(polygon, scan_val, scan_axis='Y'):
+    """Find intersection spans of a horizontal/vertical line with a polygon.
+
+    scan_axis='Y': horizontal line at y=scan_val → returns X spans
+    scan_axis='X': vertical line at x=scan_val → returns Y spans
+
+    Returns sorted list of (min, max) tuples representing inside spans.
+    """
+    n = len(polygon)
+    if n < 3:
+        return []
+
+    intersections = []
+    for i in range(n):
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[(i + 1) % n]
+
+        if scan_axis == 'Y':
+            a1, b1 = y1, x1
+            a2, b2 = y2, x2
+        else:
+            a1, b1 = x1, y1
+            a2, b2 = x2, y2
+
+        # Check if edge crosses the scan line
+        if (a1 - scan_val) * (a2 - scan_val) < 0:
+            # Linear interpolation for intersection
+            t = (scan_val - a1) / (a2 - a1)
+            b_int = b1 + t * (b2 - b1)
+            intersections.append(b_int)
+        elif abs(a1 - scan_val) < 0.01 and abs(a2 - scan_val) < 0.01:
+            # Edge lies on the scan line — add both endpoints
+            intersections.append(b1)
+            intersections.append(b2)
+
+    intersections.sort()
+
+    # Pair up intersections into spans (inside polygon)
+    spans = []
+    i = 0
+    while i + 1 < len(intersections):
+        span_min = intersections[i]
+        span_max = intersections[i + 1]
+        if span_max - span_min > 1.0:  # ignore degenerate spans < 1mm
+            spans.append((span_min, span_max))
+        i += 2
+
+    return spans
+
+
+def _group_bar_spans(bar_positions, polygon, bar_direction, cover, beam_w1, beam_w2):
+    """Compute bar spans at each position, then group adjacent same-length bars.
+
+    bar_positions: list of coordinate values along the distribution axis
+    polygon: list of (x, y) vertices
+    bar_direction: 'X' or 'Y' — which axis the bars run along
+    cover, beam_w1, beam_w2: adjustments for clear span
+
+    Returns list of groups: [{
+        'span_min': float, 'span_max': float,  # bar extent (bar direction)
+        'dist_start': float, 'dist_end': float,  # distribution range
+        'n_bars': int,
+        'l_cl': float,  # clear span length
+    }]
+    """
+    if not bar_positions:
+        return []
+
+    # scan_axis is the distribution direction (perpendicular to bar)
+    # bar_direction='X' → bars run along X, distributed along Y → scan Y
+    scan_axis = 'Y' if bar_direction == 'X' else 'X'
+
+    groups = []
+    current_group = None
+
+    for pos in bar_positions:
+        spans = _scanline_intersect(polygon, pos, scan_axis=scan_axis)
+        if not spans:
+            # No intersection at this position — close current group
+            if current_group:
+                groups.append(current_group)
+                current_group = None
+            continue
+
+        # Use the widest span (for slabs with holes, take the main span)
+        span = max(spans, key=lambda s: s[1] - s[0])
+        span_min = span[0] + beam_w1 / 2
+        span_max = span[1] - beam_w2 / 2
+        l_cl = span_max - span_min
+
+        if l_cl < 10:  # skip degenerate spans
+            if current_group:
+                groups.append(current_group)
+                current_group = None
+            continue
+
+        # Check if this bar has the same span as current group (within tolerance)
+        if current_group and abs(l_cl - current_group['l_cl']) < 50:  # 50mm tolerance
+            # Same group — extend
+            current_group['dist_end'] = pos
+            current_group['n_bars'] += 1
+        else:
+            # New group
+            if current_group:
+                groups.append(current_group)
+            current_group = {
+                'span_min': span_min,
+                'span_max': span_max,
+                'dist_start': pos,
+                'dist_end': pos,
+                'n_bars': 1,
+                'l_cl': l_cl,
+            }
+
+    if current_group:
+        groups.append(current_group)
+
+    return groups
+
+
 # ── Data Adapter ─────────────────────────────────────────────────────────────
 
 class SlabDataAdapter:
@@ -128,7 +250,7 @@ class SlabDataAdapter:
         self._build_reinf_config()
 
     def _build_panel_bounds(self):
-        """Extract bounding box for each slab panel from boundary nodes."""
+        """Extract bounding box and polygon for each slab panel from boundary nodes."""
         self.panel_bounds = {}
         for _, s in self.slabs_df.iterrows():
             mid = s['member_id']
@@ -141,6 +263,9 @@ class SlabDataAdapter:
             ys = [c['y_mm'] for c in coords]
             zs = [c['z_mm'] for c in coords]
 
+            # Polygon vertices for scan-line clipping (plan XY coordinates)
+            polygon = [(c['x_mm'], c['y_mm']) for c in coords]
+
             self.panel_bounds[mid] = {
                 'x_min': min(xs), 'x_max': max(xs),
                 'y_min': min(ys), 'y_max': max(ys),
@@ -149,6 +274,8 @@ class SlabDataAdapter:
                 'thickness': float(s['thickness_mm']) if pd.notna(s['thickness_mm']) else 200,
                 'Lx_mm': float(s['Lx_mm']),
                 'Ly_mm': float(s['Ly_mm']),
+                'polygon': polygon,
+                'n_nodes': len(coords),
             }
 
     def _build_beam_lookup(self):
@@ -435,17 +562,91 @@ def calculate_slab_rebar_lengths(
                 bar_role, start_type, end_type = _determine_anchorage(
                     role, mismatch_before, mismatch_after, layer)
 
-                # Bar length
-                L_bar = _compute_bar_length(l_cl, Wg1, Wg2, Ldh, Llap, start_type, end_type)
-
-                # Number of bars (distributed along perpendicular direction)
-                dist_width = dist_span - 0.5 * (dist_Wg1 + dist_Wg2)
-                n_bars = int(dist_width / spacing) + 1 if spacing > 0 else 0
-
                 # Z coordinate
                 z_bar = _bar_z(z_panel, thickness, layer, dia)
 
-                # Mesh coordinates
+                polygon = bounds.get('polygon', [])
+                n_nodes = bounds.get('n_nodes', 4)
+
+                # ── Polygon slabs (5+ nodes): scan-line grouped bars ──
+                if n_nodes > 4 and len(polygon) >= 5 and spacing > 0:
+                    # Generate bar positions along distribution direction
+                    if direction == 'X':
+                        dist_start = bounds['y_min'] + dist_Wg1 / 2
+                        dist_end = bounds['y_max'] - dist_Wg2 / 2
+                        beam_w1, beam_w2 = Wg1, Wg2
+                    else:
+                        dist_start = bounds['x_min'] + dist_Wg1 / 2
+                        dist_end = bounds['x_max'] - dist_Wg2 / 2
+                        beam_w1, beam_w2 = Wg1, Wg2
+
+                    n_pos = int((dist_end - dist_start) / spacing) + 1
+                    bar_positions = [dist_start + i * spacing for i in range(n_pos)]
+
+                    groups = _group_bar_spans(
+                        bar_positions, polygon, direction,
+                        COVER_MM, beam_w1, beam_w2)
+
+                    for grp in groups:
+                        grp_l_cl = grp['l_cl']
+                        L_bar = _compute_bar_length(
+                            grp_l_cl, Wg1, Wg2, Ldh, Llap, start_type, end_type)
+
+                        if direction == 'X':
+                            mesh_origin_x = grp['span_min']
+                            mesh_terminus_x = grp['span_max']
+                            mesh_origin_y = grp['dist_start']
+                            mesh_terminus_y = mesh_origin_y
+                            mesh_dist_axis = 'Y'
+                        else:
+                            mesh_origin_y = grp['span_min']
+                            mesh_terminus_y = grp['span_max']
+                            mesh_origin_x = grp['dist_start']
+                            mesh_terminus_x = mesh_origin_x
+                            mesh_dist_axis = 'X'
+
+                        bar_record = {
+                            'member_id': mid, 'level': level,
+                            'slab_type': slab.get('slab_type', ''),
+                            'thickness_mm': thickness,
+                            'direction': direction, 'layer': layer,
+                            'bar_role': bar_role,
+                            'start_type': start_type, 'end_type': end_type,
+                            'dia_mm': int(dia), 'spacing_mm': int(spacing),
+                            'n_bars': grp['n_bars'],
+                            'length_mm': int(round(L_bar)),
+                            'l_cl_mm': round(grp_l_cl, 1),
+                            'Wg1_mm': round(Wg1, 1), 'Wg2_mm': round(Wg2, 1),
+                            'Ldh_mm': round(Ldh, 1), 'Llap_mm': round(Llap, 1),
+                            'Lx_mm': round(Lx, 1), 'Ly_mm': round(Ly, 1),
+                            'short_direction': short_dir,
+                            'panel_role': role,
+                            'mismatch_before': mismatch_before,
+                            'mismatch_after': mismatch_after,
+                            'adj_thickness_before_mm': adj_thk_before,
+                            'adj_thickness_after_mm': adj_thk_after,
+                            'centroid_x_mm': round(slab['centroid_x_mm'], 1) if pd.notna(slab.get('centroid_x_mm')) else None,
+                            'centroid_y_mm': round(slab['centroid_y_mm'], 1) if pd.notna(slab.get('centroid_y_mm')) else None,
+                            'z_mm': round(z_panel, 1),
+                            'mesh_origin_x_mm': round(mesh_origin_x, 1),
+                            'mesh_origin_y_mm': round(mesh_origin_y, 1),
+                            'mesh_origin_z_mm': round(z_bar, 1),
+                            'mesh_terminus_x_mm': round(mesh_terminus_x, 1),
+                            'mesh_terminus_y_mm': round(mesh_terminus_y, 1),
+                            'mesh_terminus_z_mm': round(z_bar, 1),
+                            'mesh_distribution_axis': mesh_dist_axis,
+                        }
+                        for piece in split_bar(bar_record, Llap):
+                            results.append(piece)
+
+                    continue  # skip rectangular fallback
+
+                # ── Rectangular slabs (4 nodes): original logic ──
+                L_bar = _compute_bar_length(l_cl, Wg1, Wg2, Ldh, Llap, start_type, end_type)
+
+                dist_width = dist_span - 0.5 * (dist_Wg1 + dist_Wg2)
+                n_bars = int(dist_width / spacing) + 1 if spacing > 0 else 0
+
                 if direction == 'X':
                     mesh_origin_x = bounds['x_min'] + Wg1 / 2
                     mesh_terminus_x = bounds['x_max'] - Wg2 / 2
