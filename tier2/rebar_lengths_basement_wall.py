@@ -464,8 +464,34 @@ def _process_horizontal_bars(panel, reinf_rows, lookup, cover, fc, results, node
         # U-bar at LEFT zone = wall start, RIGHT zone = wall end
         # MIDDLE zone gets no U-bars (internal to wall)
         if zone_upper in ('LEFT', 'RIGHT', 'FULL'):
-            U_bar_width = thickness - 2 * cover
-            U_bar_len = 2 * Ldh + U_bar_width
+            U_bar_width = max(0, thickness - 2 * cover)
+            leg_len = min(Ldh, actual_length / 2)  # cap leg at half wall length
+            U_bar_len = 2 * leg_len + U_bar_width
+
+            # U-bar mesh: origin at wall endpoint, terminus points toward wall center
+            # (leg direction). Renderer computes connector perpendicular to this.
+            sx, sy, ex, ey = _get_wall_plan(panel, node_coords) if node_coords else (
+                cx - nominal_length / 2, cy, cx + nominal_length / 2, cy)
+            wall_dx = ex - sx
+            wall_dy = ey - sy
+            wlen = math.sqrt(wall_dx * wall_dx + wall_dy * wall_dy)
+            if wlen > 0.001:
+                uwx, uwy = wall_dx / wlen, wall_dy / wlen
+            else:
+                uwx, uwy = 1.0, 0.0
+
+            if zone_upper == 'LEFT' or zone_upper == 'FULL':
+                # U-bar at wall start: legs point toward wall center (+direction)
+                ubar_ox = sx
+                ubar_oy = sy
+                ubar_tx = sx + uwx * leg_len
+                ubar_ty = sy + uwy * leg_len
+            else:
+                # RIGHT: U-bar at wall end: legs point toward wall center (-direction)
+                ubar_ox = ex
+                ubar_oy = ey
+                ubar_tx = ex - uwx * leg_len
+                ubar_ty = ey - uwy * leg_len
 
             ubar_record = {
                 'wall_mark': wall_mark,
@@ -486,11 +512,11 @@ def _process_horizontal_bars(panel, reinf_rows, lookup, cover, fc, results, node
                 'Ldh_mm': round(Ldh, 1),
                 'Lpc_mm': None,
                 'cover_mm': cover,
-                'mesh_origin_x_mm': round(ox_start, 1),
-                'mesh_origin_y_mm': round(oy_start, 1),
+                'mesh_origin_x_mm': round(ubar_ox, 1),
+                'mesh_origin_y_mm': round(ubar_oy, 1),
                 'mesh_origin_z_mm': round(z_bottom + cover, 1),
-                'mesh_terminus_x_mm': round(ox_end, 1),
-                'mesh_terminus_y_mm': round(oy_end, 1),
+                'mesh_terminus_x_mm': round(ubar_tx, 1),
+                'mesh_terminus_y_mm': round(ubar_ty, 1),
                 'mesh_terminus_z_mm': round(z_bottom + cover, 1),
                 'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
             }

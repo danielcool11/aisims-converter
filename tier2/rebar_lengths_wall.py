@@ -498,7 +498,10 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
             # Mesh origin→terminus defines the connector line (across thickness)
             # Legs extend perpendicular to connector, along wall direction
             U_bar_width = thickness - 2 * cover  # connector across wall thickness
-            U_bar_len = 2 * Ldh_h + U_bar_width  # two legs + connector
+            if U_bar_width < 0:
+                U_bar_width = 0
+            leg_len = min(Ldh_h, width / 2)  # cap leg at half wall width
+            U_bar_len = 2 * leg_len + U_bar_width  # two legs + connector
 
             n_ubar_per_end = n_h
 
