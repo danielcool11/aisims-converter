@@ -794,6 +794,43 @@ def calculate_column_rebar_lengths(
                 rebar_z_start = z_start
                 rebar_z_end = z_start + L_bar
 
+                # Start/end XY coordinates
+                x_start = s['col_x']
+                y_start = s['col_y']
+                x_end = s['col_x_top']
+                y_end = s['col_y_top']
+
+                # ── Adjust end coords when lap extends into adjacent slanted column ──
+                # Non-top bars extend Lpc above current column into the next story.
+                # If next story is slanted, the end must follow its axis.
+                if upper_bend and not is_top:
+                    next_s = group[j + 1]
+                    u_next = _column_axis(next_s)
+                    # Lap extends from column top (z_end of this segment) upward
+                    col_top_z = s['z_end']
+                    lap_above = rebar_z_end - col_top_z  # how far above column top
+                    if lap_above > 0:
+                        # Project along next column's axis for the lap distance
+                        # u_next is unit vector; lap_above ≈ vertical distance
+                        # actual distance along axis = lap_above / u_next[2]
+                        if abs(u_next[2]) > 0.01:
+                            dist_along = lap_above / u_next[2]
+                            x_end = next_s['col_x'] + u_next[0] * dist_along
+                            y_end = next_s['col_y'] + u_next[1] * dist_along
+
+                # Similarly, if bar extends below into a previous slanted column
+                if lower_bend and not is_first:
+                    prev_s = group[j - 1]
+                    u_prev = _column_axis(prev_s)
+                    col_bot_z = s['z_start']
+                    # Bar starts at rebar_z_start which may be below col_bot_z (lap from below)
+                    lap_below = col_bot_z - rebar_z_start
+                    if lap_below > 0:
+                        if abs(u_prev[2]) > 0.01:
+                            dist_along = lap_below / u_prev[2]
+                            x_start = prev_s['col_x_top'] - u_prev[0] * dist_along
+                            y_start = prev_s['col_y_top'] - u_prev[1] * dist_along
+
                 record = {
                     'member_id': member_id, 'start_grid': grid,
                     'level_from': s['level_from'], 'level_to': s['level_to'],
@@ -802,9 +839,9 @@ def calculate_column_rebar_lengths(
                     'length_mm': int(round(L_bar)),
                     'splice_start_mm': sp_start, 'splice_start_end_mm': sp_start_end,
                     'splice_end_mm': sp_end, 'splice_end_end_mm': sp_end_end,
-                    'x_start_mm': s['col_x'], 'y_start_mm': s['col_y'],
+                    'x_start_mm': round(x_start, 1), 'y_start_mm': round(y_start, 1),
                     'z_start_mm': round(rebar_z_start, 1),
-                    'x_end_mm': s['col_x_top'], 'y_end_mm': s['col_y_top'],
+                    'x_end_mm': round(x_end, 1), 'y_end_mm': round(y_end, 1),
                     'z_end_mm': round(rebar_z_end, 1),
                     'segment_id': s['segment_id'],
                     'b_mm': s['b_mm'], 'h_mm': s['h_mm'],
