@@ -494,32 +494,58 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
                 results.append(piece)
 
             # ── U-BARS (separate cap pieces at wall endpoints) ──
-            # U-bar wraps around H-bar ends: two legs (Ldh each) + connector
-            # Placed at both start and end of wall segment
+            # U-bar: connector across thickness + two legs (Ldh each) along wall
+            # Mesh origin→terminus defines the connector line (across thickness)
+            # Legs extend perpendicular to connector, along wall direction
             U_bar_width = thickness - 2 * cover  # connector across wall thickness
             U_bar_len = 2 * Ldh_h + U_bar_width  # two legs + connector
 
-            # Same number and spacing as H-bars (one U-bar per H-bar at each end)
             n_ubar_per_end = n_h
 
-            # U-bars at start end
-            ubar_start = {
-                'wall_id': wid, 'wall_mark': wall_mark, 'level': level,
-                'direction': 'HORIZONTAL', 'bar_role': 'U_BAR',
-                'dia_mm': h_dia, 'spacing_mm': h_spacing,
-                'n_bars': n_ubar_per_end, 'length_mm': int(round(U_bar_len)),
-                'total_length_mm': int(round(U_bar_len * n_ubar_per_end)),
-                'height_mm': height, 'width_mm': width, 'thickness_mm': thickness,
-                'bar_layer': bar_layer,
-                'splice_start_mm': None, 'splice_start_end_mm': None,
-                'splice_end_mm': None, 'splice_end_end_mm': None,
-                'cover_mm': cover,
-                **mesh_h,  # same distribution as H-bars
-            }
-            results.append(ubar_start)
+            runs_along_y = seg['y_max'] - seg['y_min'] > seg['x_max'] - seg['x_min']
 
-            # U-bars at end end
-            ubar_end = {
+            # U-bar mesh: connector line across thickness at wall endpoint
+            # Start end
+            if runs_along_y:
+                mesh_ubar_s = {
+                    'mesh_origin_x_mm': round(seg['x_min'] + cover, 1),
+                    'mesh_origin_y_mm': round(seg['y_min'], 1),
+                    'mesh_origin_z_mm': round(seg['z_bottom'] + cover, 1),
+                    'mesh_terminus_x_mm': round(seg['x_max'] - cover, 1),
+                    'mesh_terminus_y_mm': round(seg['y_min'], 1),
+                    'mesh_terminus_z_mm': round(seg['z_bottom'] + cover, 1),
+                    'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
+                }
+                mesh_ubar_e = {
+                    'mesh_origin_x_mm': round(seg['x_min'] + cover, 1),
+                    'mesh_origin_y_mm': round(seg['y_max'], 1),
+                    'mesh_origin_z_mm': round(seg['z_bottom'] + cover, 1),
+                    'mesh_terminus_x_mm': round(seg['x_max'] - cover, 1),
+                    'mesh_terminus_y_mm': round(seg['y_max'], 1),
+                    'mesh_terminus_z_mm': round(seg['z_bottom'] + cover, 1),
+                    'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
+                }
+            else:
+                mesh_ubar_s = {
+                    'mesh_origin_x_mm': round(seg['x_min'], 1),
+                    'mesh_origin_y_mm': round(seg['y_min'] + cover, 1),
+                    'mesh_origin_z_mm': round(seg['z_bottom'] + cover, 1),
+                    'mesh_terminus_x_mm': round(seg['x_min'], 1),
+                    'mesh_terminus_y_mm': round(seg['y_max'] - cover, 1),
+                    'mesh_terminus_z_mm': round(seg['z_bottom'] + cover, 1),
+                    'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
+                }
+                mesh_ubar_e = {
+                    'mesh_origin_x_mm': round(seg['x_max'], 1),
+                    'mesh_origin_y_mm': round(seg['y_min'] + cover, 1),
+                    'mesh_origin_z_mm': round(seg['z_bottom'] + cover, 1),
+                    'mesh_terminus_x_mm': round(seg['x_max'], 1),
+                    'mesh_terminus_y_mm': round(seg['y_max'] - cover, 1),
+                    'mesh_terminus_z_mm': round(seg['z_bottom'] + cover, 1),
+                    'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
+                }
+
+            ubar_base = {
                 'wall_id': wid, 'wall_mark': wall_mark, 'level': level,
                 'direction': 'HORIZONTAL', 'bar_role': 'U_BAR',
                 'dia_mm': h_dia, 'spacing_mm': h_spacing,
@@ -530,9 +556,9 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
                 'splice_start_mm': None, 'splice_start_end_mm': None,
                 'splice_end_mm': None, 'splice_end_end_mm': None,
                 'cover_mm': cover,
-                **mesh_h,
             }
-            results.append(ubar_end)
+            results.append({**ubar_base, **mesh_ubar_s})
+            results.append({**ubar_base, **mesh_ubar_e})
 
 
 def _emit_dowel(results, wid, wall_mark, level, dia, width, spacing,
