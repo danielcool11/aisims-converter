@@ -888,6 +888,10 @@ def calculate_column_rebar_lengths(
 
                     z_cursor = s['z_start']
 
+                    # For slanted columns, interpolate X/Y along column axis
+                    u = _column_axis(s)
+                    col_len = s['length_mm']
+
                     for zone_role, zone_length, cfg in zones:
                         dia = cfg['dia_mm']
                         spacing = cfg['spacing_mm']
@@ -895,6 +899,17 @@ def calculate_column_rebar_lengths(
                         L_hoop = 2 * (b_clear + h_clear) + 2 * HOOK_EXTENSION_FACTOR * dia
                         n_hoops = int(zone_length / spacing) + 1
                         total_len = L_hoop * n_hoops
+
+                        # Interpolate XY along column axis for zone start/end
+                        t_start = (z_cursor - s['z_start']) / (s['z_end'] - s['z_start']) if abs(s['z_end'] - s['z_start']) > 0.01 else 0
+                        t_end = (z_cursor + zone_length - s['z_start']) / (s['z_end'] - s['z_start']) if abs(s['z_end'] - s['z_start']) > 0.01 else 0
+                        t_start = max(0, min(1, t_start))
+                        t_end = max(0, min(1, t_end))
+
+                        hx_start = s['col_x'] + (s['col_x_top'] - s['col_x']) * t_start
+                        hy_start = s['col_y'] + (s['col_y_top'] - s['col_y']) * t_start
+                        hx_end = s['col_x'] + (s['col_x_top'] - s['col_x']) * t_end
+                        hy_end = s['col_y'] + (s['col_y_top'] - s['col_y']) * t_end
 
                         results.append({
                             'member_id': member_id, 'start_grid': grid,
@@ -909,9 +924,9 @@ def calculate_column_rebar_lengths(
                             'total_length_mm': int(round(total_len)),
                             'splice_start_mm': None, 'splice_start_end_mm': None,
                             'splice_end_mm': None, 'splice_end_end_mm': None,
-                            'x_start_mm': s['col_x'], 'y_start_mm': s['col_y'],
+                            'x_start_mm': round(hx_start, 1), 'y_start_mm': round(hy_start, 1),
                             'z_start_mm': round(z_cursor, 1),
-                            'x_end_mm': s['col_x'], 'y_end_mm': s['col_y'],
+                            'x_end_mm': round(hx_end, 1), 'y_end_mm': round(hy_end, 1),
                             'z_end_mm': round(z_cursor + zone_length, 1),
                             'segment_id': s['segment_id'],
                             'b_mm': int(b_mm), 'h_mm': int(h_mm),
