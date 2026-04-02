@@ -18,6 +18,7 @@ Output: RebarLengthsColumn.csv
 import pandas as pd
 import numpy as np
 import re
+import math
 from pathlib import Path
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -25,6 +26,135 @@ from pathlib import Path
 FOOTING_DEPTH_MM = 450
 COVER_MM = 50
 HOOK_EXTENSION_FACTOR = 10
+
+
+# ── Slanted Column Bend Point Computation ───────────────────────────────────
+
+def _column_axis(s):
+    """Get unit direction vector for a column segment in structural coords (mm)."""
+    dx = s['col_x_top'] - s['col_x']
+    dy = s['col_y_top'] - s['col_y']
+    dz = s['z_end'] - s['z_start']
+    length = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if length < 0.001:
+        return (0, 0, 1)  # default vertical
+    return (dx / length, dy / length, dz / length)
+
+
+def _is_slant_transition(s1, s2):
+    """Check if two adjacent segments have different directions (> 1 degree)."""
+    u1 = _column_axis(s1)
+    u2 = _column_axis(s2)
+    dot = u1[0] * u2[0] + u1[1] * u2[1] + u1[2] * u2[2]
+    dot = max(-1.0, min(1.0, dot))
+    angle = math.acos(dot)
+    return angle > math.radians(1)
+
+
+def _line_intersect_3d(P1, u1, P2, u2):
+    """Find closest point between two 3D lines (approximate intersection).
+    Line 1: P1 + t*u1, Line 2: P2 + s*u2.
+    Returns the midpoint of the closest approach."""
+    # d = P2 - P1
+    dx = P2[0] - P1[0]
+    dy = P2[1] - P1[1]
+    dz = P2[2] - P1[2]
+
+    a = u1[0] * u1[0] + u1[1] * u1[1] + u1[2] * u1[2]  # |u1|^2
+    b = u1[0] * u2[0] + u1[1] * u2[1] + u1[2] * u2[2]  # u1·u2
+    c = u2[0] * u2[0] + u2[1] * u2[1] + u2[2] * u2[2]  # |u2|^2
+    d_val = u1[0] * dx + u1[1] * dy + u1[2] * dz  # u1·d
+    e = u2[0] * dx + u2[1] * dy + u2[2] * dz  # u2·d
+
+    denom = a * c - b * b
+    if abs(denom) < 1e-12:
+        # Parallel lines — use midpoint of P1 and P2
+        return ((P1[0] + P2[0]) / 2, (P1[1] + P2[1]) / 2, (P1[2] + P2[2]) / 2)
+
+    t = (b * e - c * d_val) / denom
+    s = (a * e - b * d_val) / denom
+
+    # Closest points on each line
+    c1 = (P1[0] + t * u1[0], P1[1] + t * u1[1], P1[2] + t * u1[2])
+    c2 = (P2[0] + s * u2[0], P2[1] + s * u2[1], P2[2] + s * u2[2])
+
+    return ((c1[0] + c2[0]) / 2, (c1[1] + c2[1]) / 2, (c1[2] + c2[2]) / 2)
+
+
+def _compute_bend_points(s_lower, s_upper, cover, hoop_dia, main_dia):
+    """Compute bend points (BP1, BP2) at transition between two column segments.
+
+    Returns dict with bend point coords or None if no significant angle change.
+    """
+    u1 = _column_axis(s_lower)
+    u2 = _column_axis(s_upper)
+
+    dot = u1[0] * u2[0] + u1[1] * u2[1] + u1[2] * u2[2]
+    dot = max(-1.0, min(1.0, dot))
+    theta = math.acos(dot)
+
+    if theta < math.radians(1):
+        return None  # no significant direction change
+
+    # Bend radius: 3d for dia ≤ 25mm, 4d for dia > 25mm
+    r_b = (3 * main_dia) if main_dia <= 25 else (4 * main_dia)
+
+    # Tangent distance from intersection to bend points
+    d = r_b * math.tan(theta / 2)
+
+    # Bar centerline offset from column corner
+    e = cover + hoop_dia + main_dia / 2
+
+    # Intersection point of the two bar centerlines
+    # Use column centerline intersection (simplified — same for all bars,
+    # per-bar offset applied in viewer)
+    P1 = (s_lower['col_x_top'], s_lower['col_y_top'], s_lower['z_end'])
+    P2 = (s_upper['col_x'], s_upper['col_y'], s_upper['z_start'])
+    I = _line_intersect_3d(P1, u1, P2, u2)
+
+    # BP1 = I - d * u1 (end of lower straight)
+    bp1 = (I[0] - d * u1[0], I[1] - d * u1[1], I[2] - d * u1[2])
+    # BP2 = I + d * u2 (start of upper straight)
+    bp2 = (I[0] + d * u2[0], I[1] + d * u2[1], I[2] + d * u2[2])
+
+    # Arc length
+    arc_len = r_b * theta
+
+    return {
+        'bp1': bp1,  # end of lower straight, start of bend
+        'bp2': bp2,  # end of bend, start of upper straight
+        'intersection': I,
+        'theta': theta,
+        'd': d,
+        'r_b': r_b,
+        'arc_len': arc_len,
+    }
+
+
+def _compute_group_transitions(group, cover=COVER_MM, hoop_dia=10, main_dia=22):
+    """Compute all transitions in a column group.
+
+    Returns dict: segment_index → {
+        'lower': bend info at bottom (transition from segment below), or None
+        'upper': bend info at top (transition to segment above), or None
+    }
+    """
+    transitions = {}
+    for j in range(len(group)):
+        lower_bend = None
+        upper_bend = None
+
+        if j > 0 and _is_slant_transition(group[j - 1], group[j]):
+            lower_bend = _compute_bend_points(
+                group[j - 1], group[j], cover, hoop_dia, main_dia)
+
+        if j < len(group) - 1 and _is_slant_transition(group[j], group[j + 1]):
+            upper_bend = _compute_bend_points(
+                group[j], group[j + 1], cover, hoop_dia, main_dia)
+
+        transitions[j] = {'lower': lower_bend, 'upper': upper_bend}
+
+    return transitions
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -602,6 +732,15 @@ def calculate_column_rebar_lengths(
                     'shape': first['shape'],
                 })
 
+            # ── Compute slant transitions for this group ──
+            # Get hoop dia from first segment for bend point computation
+            hoop_cfg_0 = adapter.get_hoop_cfg(member_id, group[0]['level_from'])
+            hoop_dia_0 = hoop_cfg_0['end']['dia_mm'] if hoop_cfg_0 and hoop_cfg_0.get('end') else 10
+            main_cfg_0 = adapter.get_main_cfg(member_id, group[0]['level_from'])
+            main_dia_0 = main_cfg_0['dia'] if main_cfg_0 else 22
+            transitions = _compute_group_transitions(
+                group, COVER_MM, hoop_dia_0, main_dia_0)
+
             # ── MAIN BARS (story by story within group) ──
             for j, s in enumerate(group):
                 is_first = (j == 0)
@@ -641,10 +780,21 @@ def calculate_column_rebar_lengths(
                     sp_end = round(z_start + h, 1)
                     sp_end_end = round(z_start + h + Lpc, 1)
 
+                # Adjust bar length for bend arcs at transitions
+                trans = transitions.get(j, {})
+                lower_bend = trans.get('lower')
+                upper_bend = trans.get('upper')
+                bend_extra = 0
+                if lower_bend:
+                    bend_extra += lower_bend['arc_len']
+                if upper_bend:
+                    bend_extra += upper_bend['arc_len']
+                L_bar += bend_extra
+
                 rebar_z_start = z_start
                 rebar_z_end = z_start + L_bar
 
-                results.append({
+                record = {
                     'member_id': member_id, 'start_grid': grid,
                     'level_from': s['level_from'], 'level_to': s['level_to'],
                     'bar_position': 'MAIN', 'bar_role': role, 'bar_type': 'MAIN',
@@ -659,7 +809,27 @@ def calculate_column_rebar_lengths(
                     'segment_id': s['segment_id'],
                     'b_mm': s['b_mm'], 'h_mm': s['h_mm'],
                     'shape': s['shape'],
-                })
+                }
+
+                # Add bend point fields for viewer rendering
+                if lower_bend:
+                    bp = lower_bend
+                    record['bend1_x_mm'] = round(bp['bp1'][0], 1)
+                    record['bend1_y_mm'] = round(bp['bp1'][1], 1)
+                    record['bend1_z_mm'] = round(bp['bp1'][2], 1)
+                    record['bend1_end_x_mm'] = round(bp['bp2'][0], 1)
+                    record['bend1_end_y_mm'] = round(bp['bp2'][1], 1)
+                    record['bend1_end_z_mm'] = round(bp['bp2'][2], 1)
+                if upper_bend:
+                    bp = upper_bend
+                    record['bend2_x_mm'] = round(bp['bp1'][0], 1)
+                    record['bend2_y_mm'] = round(bp['bp1'][1], 1)
+                    record['bend2_z_mm'] = round(bp['bp1'][2], 1)
+                    record['bend2_end_x_mm'] = round(bp['bp2'][0], 1)
+                    record['bend2_end_y_mm'] = round(bp['bp2'][1], 1)
+                    record['bend2_end_z_mm'] = round(bp['bp2'][2], 1)
+
+                results.append(record)
 
             # ── HOOPS (3 zones per story within group) ──
             for s in group:
@@ -743,6 +913,10 @@ def calculate_column_rebar_lengths(
         'splice_end_mm', 'splice_end_end_mm',
         'x_start_mm', 'y_start_mm', 'z_start_mm',
         'x_end_mm', 'y_end_mm', 'z_end_mm',
+        'bend1_x_mm', 'bend1_y_mm', 'bend1_z_mm',
+        'bend1_end_x_mm', 'bend1_end_y_mm', 'bend1_end_z_mm',
+        'bend2_x_mm', 'bend2_y_mm', 'bend2_z_mm',
+        'bend2_end_x_mm', 'bend2_end_y_mm', 'bend2_end_z_mm',
         'segment_id', 'b_mm', 'h_mm', 'shape',
     ]
     avail = [c for c in column_order if c in df.columns]
