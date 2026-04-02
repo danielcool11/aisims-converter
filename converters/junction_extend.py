@@ -199,6 +199,12 @@ def compute_extensions(endpoints: List[MemberEndpoint]) -> Dict[str, Tuple[float
                     if angle < 15:  # nearly collinear — same wall/beam continuing
                         continue
 
+            # Skip beam-column junctions: column box already covers the joint
+            # (beam centerline ends at column center, column extends around it)
+            if (ep.member_type == 'BEAM' and other.member_type == 'COLUMN') or \
+               (ep.member_type == 'COLUMN' and other.member_type == 'BEAM'):
+                continue
+
             # Connected member found — extension = other's half-thickness
             ext = other.thickness_perp / 2
             if ext > best_extension:
