@@ -510,43 +510,47 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
             y_mid = (seg['y_min'] + seg['y_max']) / 2
             z_base = seg['z_bottom'] + cover
 
-            # U-bar mesh: origin at wall endpoint, terminus toward wall center
+            # U-bar mesh: origin at extended H-bar end, terminus toward wall center
             # origin→terminus = leg direction (into wall body)
             # Renderer computes connector perpendicular to this
             if runs_along_y:
+                ubar_y_s = seg['y_min'] - rebar_ext_start  # shifted to H-bar endpoint
+                ubar_y_e = seg['y_max'] + rebar_ext_end
                 mesh_ubar_s = {
                     'mesh_origin_x_mm': round(x_mid, 1),
-                    'mesh_origin_y_mm': round(seg['y_min'], 1),
+                    'mesh_origin_y_mm': round(ubar_y_s, 1),
                     'mesh_origin_z_mm': round(z_base, 1),
                     'mesh_terminus_x_mm': round(x_mid, 1),
-                    'mesh_terminus_y_mm': round(seg['y_min'] + leg_len, 1),
+                    'mesh_terminus_y_mm': round(ubar_y_s + leg_len, 1),
                     'mesh_terminus_z_mm': round(z_base, 1),
                     'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
                 }
                 mesh_ubar_e = {
                     'mesh_origin_x_mm': round(x_mid, 1),
-                    'mesh_origin_y_mm': round(seg['y_max'], 1),
+                    'mesh_origin_y_mm': round(ubar_y_e, 1),
                     'mesh_origin_z_mm': round(z_base, 1),
                     'mesh_terminus_x_mm': round(x_mid, 1),
-                    'mesh_terminus_y_mm': round(seg['y_max'] - leg_len, 1),
+                    'mesh_terminus_y_mm': round(ubar_y_e - leg_len, 1),
                     'mesh_terminus_z_mm': round(z_base, 1),
                     'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
                 }
             else:
+                ubar_x_s = seg['x_min'] - rebar_ext_start
+                ubar_x_e = seg['x_max'] + rebar_ext_end
                 mesh_ubar_s = {
-                    'mesh_origin_x_mm': round(seg['x_min'], 1),
+                    'mesh_origin_x_mm': round(ubar_x_s, 1),
                     'mesh_origin_y_mm': round(y_mid, 1),
                     'mesh_origin_z_mm': round(z_base, 1),
-                    'mesh_terminus_x_mm': round(seg['x_min'] + leg_len, 1),
+                    'mesh_terminus_x_mm': round(ubar_x_s + leg_len, 1),
                     'mesh_terminus_y_mm': round(y_mid, 1),
                     'mesh_terminus_z_mm': round(z_base, 1),
                     'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
                 }
                 mesh_ubar_e = {
-                    'mesh_origin_x_mm': round(seg['x_max'], 1),
+                    'mesh_origin_x_mm': round(ubar_x_e, 1),
                     'mesh_origin_y_mm': round(y_mid, 1),
                     'mesh_origin_z_mm': round(z_base, 1),
-                    'mesh_terminus_x_mm': round(seg['x_max'] - leg_len, 1),
+                    'mesh_terminus_x_mm': round(ubar_x_e - leg_len, 1),
                     'mesh_terminus_y_mm': round(y_mid, 1),
                     'mesh_terminus_z_mm': round(z_base, 1),
                     'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',

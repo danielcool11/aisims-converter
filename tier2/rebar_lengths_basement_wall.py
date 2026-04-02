@@ -484,17 +484,17 @@ def _process_horizontal_bars(panel, reinf_rows, lookup, cover, fc, results, node
                 uwx, uwy = 1.0, 0.0
 
             if zone_upper == 'LEFT' or zone_upper == 'FULL':
-                # U-bar at wall start: legs point toward wall center (+direction)
-                ubar_ox = sx
-                ubar_oy = sy
-                ubar_tx = sx + uwx * leg_len
-                ubar_ty = sy + uwy * leg_len
+                # U-bar at extended H-bar start end (shifted into junction zone)
+                ubar_ox = sx - uwx * rebar_ext
+                ubar_oy = sy - uwy * rebar_ext
+                ubar_tx = ubar_ox + uwx * leg_len
+                ubar_ty = ubar_oy + uwy * leg_len
             else:
-                # RIGHT: U-bar at wall end: legs point toward wall center (-direction)
-                ubar_ox = ex
-                ubar_oy = ey
-                ubar_tx = ex - uwx * leg_len
-                ubar_ty = ey - uwy * leg_len
+                # RIGHT: U-bar at extended H-bar end (shifted into junction zone)
+                ubar_ox = ex + uwx * rebar_ext
+                ubar_oy = ey + uwy * rebar_ext
+                ubar_tx = ubar_ox - uwx * leg_len
+                ubar_ty = ubar_oy - uwy * leg_len
 
             ubar_record = {
                 'wall_mark': wall_mark,
