@@ -503,48 +503,53 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
             leg_len = min(Ldh_h, width / 2)  # cap leg at half wall width
             U_bar_len = 2 * leg_len + U_bar_width  # two legs + connector
 
-            n_ubar_per_end = n_h
+            # One U-bar wraps both faces, so don't apply face_multiplier
+            n_ubar_per_end = int(math.floor((height - 2 * cover) / h_spacing)) + 1 if h_spacing > 0 else 0
 
             runs_along_y = seg['y_max'] - seg['y_min'] > seg['x_max'] - seg['x_min']
+            x_mid = (seg['x_min'] + seg['x_max']) / 2
+            y_mid = (seg['y_min'] + seg['y_max']) / 2
+            z_base = seg['z_bottom'] + cover
 
-            # U-bar mesh: connector line across thickness at wall endpoint
-            # Start end
+            # U-bar mesh: origin at wall endpoint, terminus toward wall center
+            # origin→terminus = leg direction (into wall body)
+            # Renderer computes connector perpendicular to this
             if runs_along_y:
                 mesh_ubar_s = {
-                    'mesh_origin_x_mm': round(seg['x_min'] + cover, 1),
+                    'mesh_origin_x_mm': round(x_mid, 1),
                     'mesh_origin_y_mm': round(seg['y_min'], 1),
-                    'mesh_origin_z_mm': round(seg['z_bottom'] + cover, 1),
-                    'mesh_terminus_x_mm': round(seg['x_max'] - cover, 1),
-                    'mesh_terminus_y_mm': round(seg['y_min'], 1),
-                    'mesh_terminus_z_mm': round(seg['z_bottom'] + cover, 1),
+                    'mesh_origin_z_mm': round(z_base, 1),
+                    'mesh_terminus_x_mm': round(x_mid, 1),
+                    'mesh_terminus_y_mm': round(seg['y_min'] + leg_len, 1),
+                    'mesh_terminus_z_mm': round(z_base, 1),
                     'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
                 }
                 mesh_ubar_e = {
-                    'mesh_origin_x_mm': round(seg['x_min'] + cover, 1),
+                    'mesh_origin_x_mm': round(x_mid, 1),
                     'mesh_origin_y_mm': round(seg['y_max'], 1),
-                    'mesh_origin_z_mm': round(seg['z_bottom'] + cover, 1),
-                    'mesh_terminus_x_mm': round(seg['x_max'] - cover, 1),
-                    'mesh_terminus_y_mm': round(seg['y_max'], 1),
-                    'mesh_terminus_z_mm': round(seg['z_bottom'] + cover, 1),
+                    'mesh_origin_z_mm': round(z_base, 1),
+                    'mesh_terminus_x_mm': round(x_mid, 1),
+                    'mesh_terminus_y_mm': round(seg['y_max'] - leg_len, 1),
+                    'mesh_terminus_z_mm': round(z_base, 1),
                     'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
                 }
             else:
                 mesh_ubar_s = {
                     'mesh_origin_x_mm': round(seg['x_min'], 1),
-                    'mesh_origin_y_mm': round(seg['y_min'] + cover, 1),
-                    'mesh_origin_z_mm': round(seg['z_bottom'] + cover, 1),
-                    'mesh_terminus_x_mm': round(seg['x_min'], 1),
-                    'mesh_terminus_y_mm': round(seg['y_max'] - cover, 1),
-                    'mesh_terminus_z_mm': round(seg['z_bottom'] + cover, 1),
+                    'mesh_origin_y_mm': round(y_mid, 1),
+                    'mesh_origin_z_mm': round(z_base, 1),
+                    'mesh_terminus_x_mm': round(seg['x_min'] + leg_len, 1),
+                    'mesh_terminus_y_mm': round(y_mid, 1),
+                    'mesh_terminus_z_mm': round(z_base, 1),
                     'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
                 }
                 mesh_ubar_e = {
                     'mesh_origin_x_mm': round(seg['x_max'], 1),
-                    'mesh_origin_y_mm': round(seg['y_min'] + cover, 1),
-                    'mesh_origin_z_mm': round(seg['z_bottom'] + cover, 1),
-                    'mesh_terminus_x_mm': round(seg['x_max'], 1),
-                    'mesh_terminus_y_mm': round(seg['y_max'] - cover, 1),
-                    'mesh_terminus_z_mm': round(seg['z_bottom'] + cover, 1),
+                    'mesh_origin_y_mm': round(y_mid, 1),
+                    'mesh_origin_z_mm': round(z_base, 1),
+                    'mesh_terminus_x_mm': round(seg['x_max'] - leg_len, 1),
+                    'mesh_terminus_y_mm': round(y_mid, 1),
+                    'mesh_terminus_z_mm': round(z_base, 1),
                     'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
                 }
 
