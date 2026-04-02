@@ -396,17 +396,17 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
             'mesh_distribution_axis': 'ALONG_WALL_LENGTH',
         }
 
-        # Determine wall orientation: if Y range > X range, wall runs along Y
+        # Determine wall orientation: shift V-bar origin into junction zone
         if seg['y_max'] - seg['y_min'] > seg['x_max'] - seg['x_min']:
-            # Wall runs along Y axis (constant X)
+            # Wall runs along Y — distribution along Y, shift by ext_start
             mesh_v['mesh_origin_x_mm'] = round(seg['x_min'] + cover, 1)
             mesh_v['mesh_terminus_x_mm'] = round(seg['x_min'] + cover, 1)
-            mesh_v['mesh_origin_y_mm'] = round(seg['y_min'] + cover, 1)
-            mesh_v['mesh_terminus_y_mm'] = round(seg['y_min'] + cover, 1)
+            mesh_v['mesh_origin_y_mm'] = round(seg['y_min'] + cover - ext_start, 1)
+            mesh_v['mesh_terminus_y_mm'] = round(seg['y_min'] + cover - ext_start, 1)
         else:
-            # Wall runs along X axis (constant Y)
-            mesh_v['mesh_origin_x_mm'] = round(seg['x_min'] + cover, 1)
-            mesh_v['mesh_terminus_x_mm'] = round(seg['x_min'] + cover, 1)
+            # Wall runs along X — distribution along X, shift by ext_start
+            mesh_v['mesh_origin_x_mm'] = round(seg['x_min'] + cover - ext_start, 1)
+            mesh_v['mesh_terminus_x_mm'] = round(seg['x_min'] + cover - ext_start, 1)
             mesh_v['mesh_origin_y_mm'] = round(seg['y_min'] + cover, 1)
             mesh_v['mesh_terminus_y_mm'] = round(seg['y_min'] + cover, 1)
 

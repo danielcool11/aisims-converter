@@ -310,11 +310,11 @@ def _process_vertical_bars(panel, reinf_rows, lookup, cover, fc, role_prefix, re
         bar_z_bot = z_bottom + zone_z_off + cover
         bar_z_top = z_bottom + zone_z_off + zone_h
 
-        # First bar position: at wall start + cover along wall plan direction
+        # First bar position: at wall start + cover, shifted into junction zone
         if node_coords:
-            ox, oy = _wall_plan_origin(panel, node_coords, cover, offset_along=cover)
+            ox, oy = _wall_plan_origin(panel, node_coords, cover, offset_along=cover - ext_start)
         else:
-            ox = cx - length / 2 + cover
+            ox = cx - length / 2 + cover - ext_start
             oy = cy
 
         bar_record = {
