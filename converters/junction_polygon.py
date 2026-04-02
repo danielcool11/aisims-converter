@@ -623,19 +623,20 @@ def run_junction_detection(
     if walls_df is not None and nodes:
         result_walls = process_wall_junctions(walls_df, nodes)
 
-    # Beams & Columns: simple extension
+    # Beams: simple half-thickness extension (columns don't need extensions —
+    # they connect vertically through floor levels via node Z coordinates)
     result_cols = columns_df
     result_beams = beams_df
-    if (columns_df is not None or beams_df is not None) and nodes:
+    if beams_df is not None and nodes:
         try:
             from converters.junction_extend import (
                 collect_endpoints, compute_extensions,
-                apply_extensions_to_columns, apply_extensions_to_beams,
+                apply_extensions_to_beams,
             )
-            endpoints = collect_endpoints(columns_df, beams_df, None, nodes)
+            # Include columns + walls in endpoint collection so beams detect
+            # junctions with all member types (but only apply extensions to beams)
+            endpoints = collect_endpoints(columns_df, beams_df, walls_df, nodes)
             extensions = compute_extensions(endpoints)
-            if columns_df is not None:
-                result_cols = apply_extensions_to_columns(columns_df, extensions)
             if beams_df is not None:
                 result_beams = apply_extensions_to_beams(beams_df, extensions)
         except ImportError:
