@@ -122,14 +122,15 @@ def collect_endpoints(
             dx, dy = xt - xf, yt - yf
             direction = _unit_dir(dx, dy)
 
-            # Beam perpendicular thickness = b_mm (width in plan)
+            # Beam perpendicular thickness = b_mm (plan width) at both ends
+            # (h_mm is vertical depth — doesn't affect plan-view junction gap)
             endpoints.append(MemberEndpoint(
                 xf, yf, z, 'BEAM', str(b.get('member_id', '')),
                 str(b.get('element_id', '')), bw,
                 direction, 'start', str(b.get('level', ''))))
             endpoints.append(MemberEndpoint(
                 xt, yt, z, 'BEAM', str(b.get('member_id', '')),
-                str(b.get('element_id', '')), bh,
+                str(b.get('element_id', '')), bw,
                 direction, 'end', str(b.get('level', ''))))
 
     # ── Walls ──
@@ -234,12 +235,20 @@ def apply_extensions_to_walls(walls_df: pd.DataFrame, extensions: Dict) -> pd.Da
 
 
 def apply_extensions_to_beams(beams_df: pd.DataFrame, extensions: Dict) -> pd.DataFrame:
-    """Add extend_start_mm and extend_end_mm columns to beams DataFrame."""
+    """Add extend_start_mm and extend_end_mm columns to beams DataFrame.
+    Extensions are capped at half the beam's own length to prevent
+    short beams from extending disproportionately."""
     ext_start = []
     ext_end = []
     for _, b in beams_df.iterrows():
         eid = str(b.get('element_id', ''))
         s, e = extensions.get(eid, (0.0, 0.0))
+        # Cap each extension at half the beam's plan length
+        beam_len = float(b.get('length_mm', 0) or 0)
+        if beam_len > 0:
+            cap = beam_len / 2
+            s = min(s, cap)
+            e = min(e, cap)
         ext_start.append(round(s, 1))
         ext_end.append(round(e, 1))
 
