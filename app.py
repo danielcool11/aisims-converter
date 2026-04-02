@@ -32,6 +32,7 @@ from converters.footings import convert_footings
 from converters.basement_walls import convert_basement_walls
 from converters.validation import validate_outputs, format_report
 from converters.wall_dedup import deduplicate_walls
+from converters.junction_polygon import run_junction_detection
 from tier2.rebar_lengths_beam import calculate_beam_rebar_lengths
 from tier2.rebar_lengths_column import calculate_column_rebar_lengths
 from tier2.rebar_lengths_slab import calculate_slab_rebar_lengths
@@ -411,6 +412,56 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 outputs.get('bwall_elements'),
             )
             log(f"Wall dedup: {len(outputs['walls'])} elements after dedup")
+
+        # ── Junction Detection (polygon-based) ──
+        if 'nodes' in outputs and outputs['nodes'] is not None:
+            progress.progress(83, text="Junction detection...")
+            try:
+                # Build nodes dict: node_id → {x_mm, y_mm, z_mm}
+                nodes_dict = {}
+                for _, nr in outputs['nodes'].iterrows():
+                    nid = str(nr.get('node_id', ''))
+                    if nid:
+                        nodes_dict[nid] = {
+                            'x_mm': float(nr.get('x_mm', 0) or 0),
+                            'y_mm': float(nr.get('y_mm', 0) or 0),
+                            'z_mm': float(nr.get('z_mm', 0) or 0),
+                        }
+
+                cols_df = outputs.get('columns')
+                beams_df = outputs.get('beams')
+                walls_df = outputs.get('walls')
+
+                result_cols, result_beams, result_walls = run_junction_detection(
+                    columns_df=cols_df,
+                    beams_df=beams_df,
+                    walls_df=walls_df,
+                    nodes=nodes_dict,
+                )
+                if result_cols is not None:
+                    outputs['columns'] = result_cols
+                if result_beams is not None:
+                    outputs['beams'] = result_beams
+                if result_walls is not None:
+                    outputs['walls'] = result_walls
+
+                # Basement walls: each CSV row = one segment (use row index as wall_id)
+                bw_df = outputs.get('bwall_members')
+                if bw_df is not None and len(bw_df) > 0:
+                    from converters.junction_polygon import process_wall_junctions
+                    bw_df = bw_df.copy()
+                    bw_df['element_id'] = range(9000, 9000 + len(bw_df))
+                    bw_df['wall_id'] = range(9000, 9000 + len(bw_df))
+                    result_bw = process_wall_junctions(bw_df, nodes_dict)
+                    # Keep only the extension + polygon columns, drop synthetic IDs
+                    for col in ['extend_start_mm', 'extend_end_mm']:
+                        outputs['bwall_members'][col] = result_bw[col].values
+                    for col in [c for c in result_bw.columns if c.startswith('poly_')]:
+                        outputs['bwall_members'][col] = result_bw[col].values
+
+                log("Junction detection complete")
+            except Exception as e:
+                log(f"Junction detection FAILED: {e}")
 
         # ── Phase 5: Validation ──
         progress.progress(85, text="Phase 5: Validation...")
