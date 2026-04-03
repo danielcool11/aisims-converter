@@ -326,11 +326,26 @@ def _process_vertical_bars(panel, reinf_rows, lookup, cover, fc, role_prefix, re
         bar_z_top = z_bottom + zone_z_off + zone_h
 
         # First bar position: at wall start + cover, shifted into junction zone
+        # Also compute wall plan direction for renderer distribution
         if node_coords:
             ox, oy = _wall_plan_origin(panel, node_coords, cover, offset_along=cover - ext_start)
+            sx, sy, ex, ey = _get_wall_plan(panel, node_coords)
         else:
             ox = cx - length / 2 + cover - ext_start
             oy = cy
+            sx, sy = cx - length / 2, cy
+            ex, ey = cx + length / 2, cy
+
+        # Unit direction along wall plan (for renderer V-bar distribution)
+        wdx = ex - sx
+        wdy = ey - sy
+        wlen = math.sqrt(wdx * wdx + wdy * wdy)
+        if wlen > 0.001:
+            wall_dir_x = round(wdx / wlen * length, 1)  # scaled by panel length
+            wall_dir_y = round(wdy / wlen * length, 1)
+        else:
+            wall_dir_x = round(length, 1)
+            wall_dir_y = 0.0
 
         bar_record = {
             'wall_mark': wall_mark,
@@ -358,6 +373,8 @@ def _process_vertical_bars(panel, reinf_rows, lookup, cover, fc, role_prefix, re
             'mesh_terminus_y_mm': round(oy, 1),
             'mesh_terminus_z_mm': round(bar_z_top, 1),
             'mesh_distribution_axis': 'ALONG_WALL_LENGTH',
+            'wall_dir_x_mm': wall_dir_x,
+            'wall_dir_y_mm': wall_dir_y,
         }
 
         for piece in split_bar(bar_record, Lpc):

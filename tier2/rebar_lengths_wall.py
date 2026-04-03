@@ -410,6 +410,15 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
             mesh_v['mesh_origin_y_mm'] = round(seg['y_min'] + cover, 1)
             mesh_v['mesh_terminus_y_mm'] = round(seg['y_min'] + cover, 1)
 
+        # Wall plan direction for V-bar distribution (explicit for renderer)
+        runs_along_y = seg['y_max'] - seg['y_min'] > seg['x_max'] - seg['x_min']
+        if runs_along_y:
+            wall_dir_x_mm = 0.0
+            wall_dir_y_mm = round(extended_width, 1)
+        else:
+            wall_dir_x_mm = round(extended_width, 1)
+            wall_dir_y_mm = 0.0
+
         v_record = {
             'wall_id': wid, 'wall_mark': wall_mark, 'level': level,
             'direction': 'VERTICAL', 'bar_role': role,
@@ -421,6 +430,8 @@ def _process_wall_group(group, wid, wall_mark, reinf_lookup, lookup,
             'splice_start_mm': sp_start, 'splice_start_end_mm': sp_start_end,
             'splice_end_mm': sp_end, 'splice_end_end_mm': sp_end_end,
             'cover_mm': cover,
+            'wall_dir_x_mm': wall_dir_x_mm,
+            'wall_dir_y_mm': wall_dir_y_mm,
             **mesh_v,
         }
         for piece in split_bar(v_record, Lpc_v):
