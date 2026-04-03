@@ -436,13 +436,20 @@ def _process_horizontal_bars(panel, reinf_rows, lookup, cover, fc, results, node
         ext_end = float(panel.get('extend_end_mm', 0) or 0)
         zone_upper = str(zone).upper()
         if zone_upper == 'LEFT':
-            rebar_ext = max(0, ext_start - cover) if ext_start > 0 else 0
+            rebar_ext_start = max(0, ext_start - cover) if ext_start > 0 else 0
+            rebar_ext_end = 0
         elif zone_upper == 'RIGHT':
-            rebar_ext = max(0, ext_end - cover) if ext_end > 0 else 0
+            rebar_ext_start = 0
+            rebar_ext_end = max(0, ext_end - cover) if ext_end > 0 else 0
+        elif zone_upper == 'FULL':
+            rebar_ext_start = max(0, ext_start - cover) if ext_start > 0 else 0
+            rebar_ext_end = max(0, ext_end - cover) if ext_end > 0 else 0
         else:
-            rebar_ext = 0  # MIDDLE/FULL zones: no junction extension
+            rebar_ext_start = 0
+            rebar_ext_end = 0
 
-        # H-bar = straight bar along zone width + junction extension
+        # H-bar = straight bar along zone width + junction extensions at both ends
+        rebar_ext = rebar_ext_start + rebar_ext_end
         L_h_bar = zone_w + rebar_ext
 
         # Number of horizontal bars along wall height
@@ -451,8 +458,8 @@ def _process_horizontal_bars(panel, reinf_rows, lookup, cover, fc, results, node
         # Mesh coordinates — compute in WORLD structural frame
         # H-bar runs along wall plan direction within the zone
         # Extend mesh into junction zone for LEFT (start) and RIGHT (end) zones
-        ext_offset_start = rebar_ext if zone_upper == 'LEFT' else 0
-        ext_offset_end = rebar_ext if zone_upper == 'RIGHT' else 0
+        ext_offset_start = rebar_ext_start
+        ext_offset_end = rebar_ext_end
         if node_coords:
             ox_start, oy_start = _wall_plan_origin(
                 panel, node_coords, cover, offset_along=zone_x_off + cover - ext_offset_start)
