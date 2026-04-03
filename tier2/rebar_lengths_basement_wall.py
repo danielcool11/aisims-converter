@@ -620,6 +620,12 @@ def _emit_bwall_dowel(panel, reinf_rows, lookup, cover, fc, results, node_coords
             ox = cx - nominal_length / 2 + cover
             oy = float(panel.get('centroid_y_mm', 0) or 0)
 
+        # Wall plan direction for distribution
+        sx, sy, ex, ey = _get_wall_plan(panel, node_coords) if node_coords else (
+            ox, oy, ox + nominal_length, oy)
+        wdir_x = ex - sx
+        wdir_y = ey - sy
+
         results.append({
             'wall_mark': wall_mark,
             'level': level,
@@ -646,6 +652,8 @@ def _emit_bwall_dowel(panel, reinf_rows, lookup, cover, fc, results, node_coords
             'mesh_terminus_y_mm': round(oy, 1),
             'mesh_terminus_z_mm': round(z_end, 1),
             'mesh_distribution_axis': 'ALONG_WALL_LENGTH',
+            'wall_dir_x_mm': round(wdir_x, 1),
+            'wall_dir_y_mm': round(wdir_y, 1),
         })
 
 
