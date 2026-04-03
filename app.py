@@ -545,85 +545,64 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 if result_walls is not None:
                     outputs['walls'] = result_walls
 
-                # Basement walls: each CSV row = one segment
+                # Basement walls: process per-level for correct thickness at junctions
                 bw_df = outputs.get('bwall_members')
                 if bw_df is not None and len(bw_df) > 0:
                     from converters.junction_polygon import process_wall_junctions
                     import math
+
                     bw_df = bw_df.copy()
                     bw_df['element_id'] = range(9000, 9000 + len(bw_df))
                     bw_df['wall_id'] = range(9000, 9000 + len(bw_df))
 
-                    # Create synthetic nodes from actual endpoints (start_x/y, end_x/y
-                    # from ELEMENT sheet) or original nodes if they have horizontal span
-                    synth_count = 0
-                    for idx, row in bw_df.iterrows():
-                        # Check if original nodes already have horizontal span (P1 style)
-                        ni = str(row.get('node_i', ''))
-                        nj = str(row.get('node_j', ''))
-                        ci = nodes_dict.get(ni, {})
-                        cj = nodes_dict.get(nj, {})
-                        if ci and cj:
-                            plan_d = math.sqrt((ci['x_mm']-cj['x_mm'])**2 + (ci['y_mm']-cj['y_mm'])**2)
-                            if plan_d > 10:
-                                continue  # real horizontal nodes — no fix needed
+                    level_results = []
+                    for level in sorted(bw_df['level'].unique()):
+                        lv_df = bw_df[bw_df['level'] == level].copy()
+                        lv_nodes = dict(nodes_dict)
 
-                        # Use ELEMENT sheet endpoints if available
-                        sx = row.get('start_x_mm')
-                        sy = row.get('start_y_mm')
-                        ex = row.get('end_x_mm')
-                        ey = row.get('end_y_mm')
-                        has_endpoints = (pd.notna(sx) and pd.notna(ex)
-                                         and (abs(float(sx) - float(ex)) > 1 or abs(float(sy) - float(ey)) > 1))
-
-                        if has_endpoints:
-                            syn_i = f'_BW_I_{idx}'
-                            syn_j = f'_BW_J_{idx}'
-                            z_mm = float(row.get('z_mm', 0) or 0)
-                            nodes_dict[syn_i] = {'x_mm': float(sx), 'y_mm': float(sy), 'z_mm': z_mm}
-                            nodes_dict[syn_j] = {'x_mm': float(ex), 'y_mm': float(ey), 'z_mm': z_mm}
-                            bw_df.at[idx, 'node_i'] = syn_i
-                            bw_df.at[idx, 'node_j'] = syn_j
-                            synth_count += 1
-
-                    if synth_count:
-                        log(f"Junction: {synth_count} basement wall panels using ELEMENT endpoints")
-
-                        # Merge nearby synthetic nodes (within 500mm) to share node_ids
-                        # Collect ALL node_ids used by basement wall panels
-                        all_bw_node_ids = set()
-                        for idx, row in bw_df.iterrows():
-                            all_bw_node_ids.add(str(row.get('node_i', '')))
-                            all_bw_node_ids.add(str(row.get('node_j', '')))
-                        all_bw_nodes = {k: nodes_dict[k] for k in all_bw_node_ids if k in nodes_dict}
-
-                        # Merge all nearby nodes (synthetic + real) within 500mm
-                        bw_keys = list(all_bw_nodes.keys())
-                        merge_map = {}
-                        for i, ki in enumerate(bw_keys):
-                            if ki in merge_map:
-                                continue
-                            pi = all_bw_nodes[ki]
-                            for j in range(i + 1, len(bw_keys)):
-                                kj = bw_keys[j]
-                                if kj in merge_map:
+                        # Create synthetic nodes for vertical panels
+                        for idx, row in lv_df.iterrows():
+                            ni = str(row.get('node_i', ''))
+                            nj = str(row.get('node_j', ''))
+                            ci = lv_nodes.get(ni, {})
+                            cj = lv_nodes.get(nj, {})
+                            if ci and cj:
+                                if math.sqrt((ci['x_mm']-cj['x_mm'])**2 + (ci['y_mm']-cj['y_mm'])**2) > 10:
                                     continue
-                                pj = all_bw_nodes[kj]
-                                d = math.sqrt((pi['x_mm'] - pj['x_mm'])**2 +
-                                              (pi['y_mm'] - pj['y_mm'])**2)
-                                if d < 500:
-                                    merge_map[kj] = ki
+                            sx, sy = row.get('start_x_mm'), row.get('start_y_mm')
+                            ex, ey = row.get('end_x_mm'), row.get('end_y_mm')
+                            if pd.notna(sx) and pd.notna(ex) and (abs(float(sx)-float(ex)) > 1 or abs(float(sy)-float(ey)) > 1):
+                                si, sj = f'_BW_I_{idx}', f'_BW_J_{idx}'
+                                z = float(row.get('z_mm', 0) or 0)
+                                lv_nodes[si] = {'x_mm': float(sx), 'y_mm': float(sy), 'z_mm': z}
+                                lv_nodes[sj] = {'x_mm': float(ex), 'y_mm': float(ey), 'z_mm': z}
+                                lv_df.at[idx, 'node_i'] = si
+                                lv_df.at[idx, 'node_j'] = sj
 
-                        if merge_map:
-                            for idx, row in bw_df.iterrows():
-                                ni_val = str(row.get('node_i', ''))
-                                nj_val = str(row.get('node_j', ''))
-                                if ni_val in merge_map:
-                                    bw_df.at[idx, 'node_i'] = merge_map[ni_val]
-                                if nj_val in merge_map:
-                                    bw_df.at[idx, 'node_j'] = merge_map[nj_val]
+                        # Merge nearby nodes within this level
+                        nids = set()
+                        for _, r in lv_df.iterrows():
+                            nids.add(str(r.get('node_i', '')))
+                            nids.add(str(r.get('node_j', '')))
+                        an = {k: lv_nodes[k] for k in nids if k in lv_nodes}
+                        ks = list(an.keys())
+                        mm = {}
+                        for i, ki in enumerate(ks):
+                            if ki in mm: continue
+                            for j in range(i+1, len(ks)):
+                                kj = ks[j]
+                                if kj in mm: continue
+                                if math.sqrt((an[ki]['x_mm']-an[kj]['x_mm'])**2 + (an[ki]['y_mm']-an[kj]['y_mm'])**2) < 500:
+                                    mm[kj] = ki
+                        for idx, r in lv_df.iterrows():
+                            ni = str(r.get('node_i', ''))
+                            nj = str(r.get('node_j', ''))
+                            if ni in mm: lv_df.at[idx, 'node_i'] = mm[ni]
+                            if nj in mm: lv_df.at[idx, 'node_j'] = mm[nj]
 
-                    result_bw = process_wall_junctions(bw_df, nodes_dict)
+                        level_results.append(process_wall_junctions(lv_df, lv_nodes))
+
+                    result_bw = pd.concat(level_results).sort_index()
                     # Keep only the extension + polygon columns, drop synthetic IDs
                     for col in ['extend_start_mm', 'extend_end_mm']:
                         outputs['bwall_members'][col] = result_bw[col].values
