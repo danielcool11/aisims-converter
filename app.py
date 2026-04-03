@@ -86,24 +86,36 @@ def _fix_bwall_nodes_from_elements(bwall_df, elem_df, nodes_df, log_fn):
                 xy = (round(node_map[nn][0], 1), round(node_map[nn][1], 1))
                 seg_points[key].add(xy)
 
-    # For each (name, level, wall_id), compute the horizontal bounding endpoints
-    seg_extent = {}  # (name, level, wall_id) → (start_x, start_y, end_x, end_y, centroid_x, centroid_y, length)
-    for (name, level, wid), points in seg_points.items():
-        if len(points) < 2:
+    # For each (name, level, wall_id), build ordered element chain to get start→end
+    seg_edges = {}  # (name, level, wall_id) → [(n1_xy, n2_xy), ...]
+    for _, e in elem_df.iterrows():
+        name = str(e.get('NAME', ''))
+        level = str(e.get('Position', ''))
+        wid = int(e['Wall ID']) if pd.notna(e.get('Wall ID')) else None
+        if not wid:
             continue
-        pts = list(points)
-        # Find the two most distant unique XY points (the endpoints of this wall segment)
-        max_dist = 0
-        p1, p2 = pts[0], pts[-1]
-        for i in range(len(pts)):
-            for j in range(i + 1, len(pts)):
-                d = math.sqrt((pts[i][0] - pts[j][0]) ** 2 + (pts[i][1] - pts[j][1]) ** 2)
-                if d > max_dist:
-                    max_dist = d
-                    p1, p2 = pts[i], pts[j]
-        cx = (p1[0] + p2[0]) / 2
-        cy = (p1[1] + p2[1]) / 2
-        seg_extent[(name, level, wid)] = (p1[0], p1[1], p2[0], p2[1], cx, cy, max_dist)
+        n1 = node_map.get(int(e['Node 1'])) if pd.notna(e.get('Node 1')) else None
+        n2 = node_map.get(int(e['Node 2'])) if pd.notna(e.get('Node 2')) else None
+        if n1 and n2:
+            key = (name, level, wid)
+            if key not in seg_edges:
+                seg_edges[key] = []
+            seg_edges[key].append(((n1[0], n1[1]), (n2[0], n2[1])))
+
+    # Chain edges to get ordered start→end for each segment
+    seg_extent = {}
+    for (name, level, wid), edges in seg_edges.items():
+        if not edges:
+            continue
+        # First element's n1 = chain start, last element's n2 = chain end
+        chain_start = edges[0][0]
+        chain_end = edges[-1][1]
+        cx = (chain_start[0] + chain_end[0]) / 2
+        cy = (chain_start[1] + chain_end[1]) / 2
+        length = math.sqrt((chain_end[0]-chain_start[0])**2 + (chain_end[1]-chain_start[1])**2)
+        seg_extent[(name, level, wid)] = (chain_start[0], chain_start[1],
+                                           chain_end[0], chain_end[1],
+                                           cx, cy, length)
 
     # Match each bwall panel to its closest segment extent by centroid proximity
     fixed = 0
