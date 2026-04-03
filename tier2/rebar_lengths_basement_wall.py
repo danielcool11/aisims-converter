@@ -515,47 +515,52 @@ def _process_horizontal_bars(panel, reinf_rows, lookup, cover, fc, results, node
             else:
                 uwx, uwy = 1.0, 0.0
 
-            if zone_upper == 'LEFT' or zone_upper == 'FULL':
-                # U-bar at extended H-bar start end (shifted into junction zone)
-                ubar_ox = sx - uwx * rebar_ext
-                ubar_oy = sy - uwy * rebar_ext
-                ubar_tx = ubar_ox + uwx * leg_len
-                ubar_ty = ubar_oy + uwy * leg_len
-            else:
-                # RIGHT: U-bar at extended H-bar end (shifted into junction zone)
-                ubar_ox = ex + uwx * rebar_ext
-                ubar_oy = ey + uwy * rebar_ext
-                ubar_tx = ubar_ox - uwx * leg_len
-                ubar_ty = ubar_oy - uwy * leg_len
+            # Generate U-bars at both ends for FULL zone, one end for LEFT/RIGHT
+            ubar_positions = []
+            if zone_upper in ('LEFT', 'FULL'):
+                # Start end
+                uox = sx - uwx * rebar_ext
+                uoy = sy - uwy * rebar_ext
+                utx = uox + uwx * leg_len
+                uty = uoy + uwy * leg_len
+                ubar_positions.append((uox, uoy, utx, uty))
+            if zone_upper in ('RIGHT', 'FULL'):
+                # End end
+                uox = ex + uwx * rebar_ext
+                uoy = ey + uwy * rebar_ext
+                utx = uox - uwx * leg_len
+                uty = uoy - uwy * leg_len
+                ubar_positions.append((uox, uoy, utx, uty))
 
-            ubar_record = {
-                'wall_mark': wall_mark,
-                'level': level,
-                'direction': 'HORIZONTAL',
-                'face': face,
-                'zone': zone,
-                'bar_role': 'U_BAR',
-                'dia_mm': dia,
-                'spacing_mm': spacing,
-                'n_bars': n_bars,
-                'length_mm': int(round(U_bar_len)),
-                'total_length_mm': int(round(U_bar_len * n_bars)),
-                'height_mm': height,
-                'length_wall_mm': actual_length,
-                'thickness_mm': thickness,
-                'zone_width_mm': round(zone_w, 1),
-                'Ldh_mm': round(Ldh, 1),
-                'Lpc_mm': None,
-                'cover_mm': cover,
-                'mesh_origin_x_mm': round(ubar_ox, 1),
-                'mesh_origin_y_mm': round(ubar_oy, 1),
-                'mesh_origin_z_mm': round(z_bottom + cover, 1),
-                'mesh_terminus_x_mm': round(ubar_tx, 1),
-                'mesh_terminus_y_mm': round(ubar_ty, 1),
-                'mesh_terminus_z_mm': round(z_bottom + cover, 1),
-                'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
-            }
-            results.append(ubar_record)
+            for ubar_ox, ubar_oy, ubar_tx, ubar_ty in ubar_positions:
+                ubar_record = {
+                    'wall_mark': wall_mark,
+                    'level': level,
+                    'direction': 'HORIZONTAL',
+                    'face': face,
+                    'zone': zone,
+                    'bar_role': 'U_BAR',
+                    'dia_mm': dia,
+                    'spacing_mm': spacing,
+                    'n_bars': n_bars,
+                    'length_mm': int(round(U_bar_len)),
+                    'total_length_mm': int(round(U_bar_len * n_bars)),
+                    'height_mm': height,
+                    'length_wall_mm': actual_length,
+                    'thickness_mm': thickness,
+                    'zone_width_mm': round(zone_w, 1),
+                    'Ldh_mm': round(Ldh, 1),
+                    'Lpc_mm': None,
+                    'cover_mm': cover,
+                    'mesh_origin_x_mm': round(ubar_ox, 1),
+                    'mesh_origin_y_mm': round(ubar_oy, 1),
+                    'mesh_origin_z_mm': round(z_bottom + cover, 1),
+                    'mesh_terminus_x_mm': round(ubar_tx, 1),
+                    'mesh_terminus_y_mm': round(ubar_ty, 1),
+                    'mesh_terminus_z_mm': round(z_bottom + cover, 1),
+                    'mesh_distribution_axis': 'ALONG_WALL_HEIGHT',
+                }
+                results.append(ubar_record)
 
 
 # ── Dowel Generation ────────────────────────────────────────────────────────
