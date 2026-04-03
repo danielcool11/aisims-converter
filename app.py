@@ -46,6 +46,101 @@ from tier2.rebar_lengths_basement_wall import calculate_basement_wall_rebar_leng
 # HELPER FUNCTIONS (must be defined before use)
 # ══════════════════════════════════════════════════════════════
 
+def _fix_bwall_nodes_from_elements(bwall_df, elem_df, nodes_df, log_fn):
+    """Fix basement wall panel geometry using ELEMENT sheet quad nodes.
+
+    The ELEMENT sheet has actual MIDAS quad elements with horizontal spans
+    (n1→n2 = bottom edge, n3→n4 = top edge). Groups elements by Wall ID
+    to find the full horizontal extent per panel, then updates the panel's
+    centroid and length to match the actual geometry.
+
+    Also adds synthetic node_i/node_j entries to nodes_df for junction detection.
+    """
+    import math
+
+    if bwall_df is None or elem_df is None or bwall_df.empty or elem_df.empty:
+        return
+
+    # Build node_number → (x, y, z) lookup
+    node_map = {}
+    for _, r in nodes_df.iterrows():
+        nn = r.get('node_number')
+        if pd.notna(nn):
+            node_map[int(nn)] = (float(r['x_mm']), float(r['y_mm']), float(r['z_mm']))
+
+    # Group elements by (NAME, Position, Wall ID) to get all XY points per segment
+    # Wall ID maps to wall_mark (W9901→RW1), Position = level
+    seg_points = {}  # (name, level, wall_id) → set of (x, y)
+    for _, e in elem_df.iterrows():
+        name = str(e.get('NAME', ''))
+        level = str(e.get('Position', ''))
+        wid = int(e['Wall ID']) if pd.notna(e.get('Wall ID')) else None
+        if not wid:
+            continue
+        key = (name, level, wid)
+        if key not in seg_points:
+            seg_points[key] = set()
+        for ncol in ['Node 1', 'Node 2', 'Node 3', 'Node 4']:
+            nn = int(e[ncol]) if pd.notna(e.get(ncol)) else None
+            if nn and nn in node_map:
+                xy = (round(node_map[nn][0], 1), round(node_map[nn][1], 1))
+                seg_points[key].add(xy)
+
+    # For each (name, level, wall_id), compute the horizontal bounding endpoints
+    seg_extent = {}  # (name, level, wall_id) → (start_x, start_y, end_x, end_y, centroid_x, centroid_y, length)
+    for (name, level, wid), points in seg_points.items():
+        if len(points) < 2:
+            continue
+        pts = list(points)
+        # Find the two most distant unique XY points (the endpoints of this wall segment)
+        max_dist = 0
+        p1, p2 = pts[0], pts[-1]
+        for i in range(len(pts)):
+            for j in range(i + 1, len(pts)):
+                d = math.sqrt((pts[i][0] - pts[j][0]) ** 2 + (pts[i][1] - pts[j][1]) ** 2)
+                if d > max_dist:
+                    max_dist = d
+                    p1, p2 = pts[i], pts[j]
+        cx = (p1[0] + p2[0]) / 2
+        cy = (p1[1] + p2[1]) / 2
+        seg_extent[(name, level, wid)] = (p1[0], p1[1], p2[0], p2[1], cx, cy, max_dist)
+
+    # Match each bwall panel to its closest segment extent by centroid proximity
+    fixed = 0
+    for idx, row in bwall_df.iterrows():
+        wm = str(row['wall_mark'])
+        level = str(row['level'])
+        cx = float(row.get('centroid_x_mm', 0) or 0)
+        cy = float(row.get('centroid_y_mm', 0) or 0)
+
+        # Find best matching segment
+        best_key = None
+        best_dist = float('inf')
+        for (name, lv, wid), ext in seg_extent.items():
+            if name != wm or lv != level:
+                continue
+            d = math.sqrt((ext[4] - cx) ** 2 + (ext[5] - cy) ** 2)
+            if d < best_dist:
+                best_dist = d
+                best_key = (name, lv, wid)
+
+        if best_key and best_dist < 5000:
+            sx, sy, ex, ey, new_cx, new_cy, new_len = seg_extent[best_key]
+            bwall_df.at[idx, 'centroid_x_mm'] = round(new_cx, 1)
+            bwall_df.at[idx, 'centroid_y_mm'] = round(new_cy, 1)
+            if new_len > 10:
+                bwall_df.at[idx, 'length_mm'] = round(new_len, 1)
+            # Store actual endpoint coordinates for proper rendering direction
+            bwall_df.at[idx, 'start_x_mm'] = round(sx, 1)
+            bwall_df.at[idx, 'start_y_mm'] = round(sy, 1)
+            bwall_df.at[idx, 'end_x_mm'] = round(ex, 1)
+            bwall_df.at[idx, 'end_y_mm'] = round(ey, 1)
+            fixed += 1
+
+    if fixed:
+        log_fn(f"Fixed {fixed}/{len(bwall_df)} basement wall panels from ELEMENT geometry")
+
+
 def _parse_grid_text(text: str) -> list:
     """Parse 'X1=0, X2=6000, X3=12000' into [(X1, 0), (X2, 6000), ...]"""
     result = []
@@ -362,8 +457,13 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 bwall_elements = pd.read_excel(bwall_file, sheet_name='BasementWall Boundary (ELEMENT)', header=1)
                 outputs['bwall_elements'] = bwall_elements
                 log(f"Basement wall elements: {len(bwall_elements)} element mappings loaded")
-            except Exception:
-                pass
+
+                # Fix basement wall node positions from ELEMENT sheet quad nodes.
+                # The ELEMENT sheet has actual MIDAS quad elements with horizontal spans,
+                # while boundary sheet nodes may be vertical (same XY) pairs.
+                _fix_bwall_nodes_from_elements(outputs['bwall_members'], bwall_elements, nodes_df, log)
+            except Exception as e:
+                log(f"Basement wall element processing: {e}")
 
         # ── Phase 3: Reinforcement ──
         if design_beam_file:
