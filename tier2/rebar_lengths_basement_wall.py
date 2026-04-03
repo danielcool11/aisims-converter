@@ -194,21 +194,36 @@ def _get_zone_z_offset(panel, zone):
 # ── Wall Plan Geometry ──────────────────────────────────────────────────────
 
 def _get_wall_plan(panel, node_coords):
-    """Compute wall start/end in structural XY from quad node coordinates.
+    """Compute wall start/end in structural XY.
 
-    Bottom edge: node_i → node_j defines the wall plan direction.
+    Priority:
+    1. start_x_mm/end_x_mm from ELEMENT sheet (actual horizontal endpoints)
+    2. node_i/node_j coordinates (works for P1 horizontal nodes)
+    3. centroid ± length/2 fallback
+
     Returns (start_x, start_y, end_x, end_y) in structural mm.
-    Falls back to centroid ± length/2 along X if nodes unavailable.
     """
+    # 1. Use ELEMENT sheet endpoints if available (fixes P2 vertical panels)
+    sx = panel.get('start_x_mm')
+    sy = panel.get('start_y_mm')
+    ex = panel.get('end_x_mm')
+    ey = panel.get('end_y_mm')
+    if pd.notna(sx) and pd.notna(ex):
+        sx, sy, ex, ey = float(sx), float(sy), float(ex), float(ey)
+        if abs(sx - ex) > 1 or abs(sy - ey) > 1:
+            return sx, sy, ex, ey
+
+    # 2. Use quad node coordinates (P1 style — horizontal span)
     ni = str(panel.get('node_i', ''))
     nj = str(panel.get('node_j', ''))
     ci = node_coords.get(ni)
     cj = node_coords.get(nj)
-
     if ci and cj:
-        return ci['x_mm'], ci['y_mm'], cj['x_mm'], cj['y_mm']
+        plan_d = math.sqrt((ci['x_mm'] - cj['x_mm'])**2 + (ci['y_mm'] - cj['y_mm'])**2)
+        if plan_d > 10:
+            return ci['x_mm'], ci['y_mm'], cj['x_mm'], cj['y_mm']
 
-    # Fallback: assume wall along X (no rotation)
+    # 3. Fallback: centroid ± length/2
     cx = float(panel.get('centroid_x_mm', 0) or 0)
     cy = float(panel.get('centroid_y_mm', 0) or 0)
     length = float(panel.get('length_mm', 0) or 0)
