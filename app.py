@@ -449,9 +449,76 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 bw_df = outputs.get('bwall_members')
                 if bw_df is not None and len(bw_df) > 0:
                     from converters.junction_polygon import process_wall_junctions
+                    import math
                     bw_df = bw_df.copy()
                     bw_df['element_id'] = range(9000, 9000 + len(bw_df))
                     bw_df['wall_id'] = range(9000, 9000 + len(bw_df))
+
+                    # Fix vertical panels: when node_i XY == node_j XY,
+                    # create synthetic nodes from centroid + length
+                    synth_count = 0
+                    for idx, row in bw_df.iterrows():
+                        ni = str(row.get('node_i', ''))
+                        nj = str(row.get('node_j', ''))
+                        ci = nodes_dict.get(ni, {})
+                        cj = nodes_dict.get(nj, {})
+                        if ci and cj:
+                            dx = abs(ci['x_mm'] - cj['x_mm'])
+                            dy = abs(ci['y_mm'] - cj['y_mm'])
+                            if dx < 1 and dy < 1:
+                                # Vertical panel — reconstruct from centroid + length
+                                cx = float(row.get('centroid_x_mm', 0) or 0)
+                                cy = float(row.get('centroid_y_mm', 0) or 0)
+                                length = float(row.get('length_mm', 0) or 0)
+                                if length > 100 and (cx != 0 or cy != 0):
+                                    half = length / 2
+                                    # Infer direction from centroid vs node
+                                    dx_c = abs(cx - ci['x_mm'])
+                                    dy_c = abs(cy - ci['y_mm'])
+                                    syn_i = f'_SYN_BWI_{idx}'
+                                    syn_j = f'_SYN_BWJ_{idx}'
+                                    z_avg = (ci.get('z_mm', 0) + cj.get('z_mm', 0)) / 2
+                                    if dx_c > dy_c:
+                                        nodes_dict[syn_i] = {'x_mm': cx - half, 'y_mm': cy, 'z_mm': z_avg}
+                                        nodes_dict[syn_j] = {'x_mm': cx + half, 'y_mm': cy, 'z_mm': z_avg}
+                                    else:
+                                        nodes_dict[syn_i] = {'x_mm': cx, 'y_mm': cy - half, 'z_mm': z_avg}
+                                        nodes_dict[syn_j] = {'x_mm': cx, 'y_mm': cy + half, 'z_mm': z_avg}
+                                    bw_df.at[idx, 'node_i'] = syn_i
+                                    bw_df.at[idx, 'node_j'] = syn_j
+                                    synth_count += 1
+
+                    if synth_count:
+                        log(f"Junction: {synth_count} basement wall panels reconstructed from centroid")
+
+                        # Merge nearby synthetic nodes (within 500mm) to share node_ids
+                        # so the junction algorithm can detect connections
+                        syn_nodes = {k: v for k, v in nodes_dict.items() if k.startswith('_SYN_')}
+                        syn_keys = list(syn_nodes.keys())
+                        merge_map = {}  # old_key → canonical_key
+                        for i, ki in enumerate(syn_keys):
+                            if ki in merge_map:
+                                continue
+                            pi = syn_nodes[ki]
+                            for j in range(i + 1, len(syn_keys)):
+                                kj = syn_keys[j]
+                                if kj in merge_map:
+                                    continue
+                                pj = syn_nodes[kj]
+                                d = math.sqrt((pi['x_mm'] - pj['x_mm'])**2 +
+                                              (pi['y_mm'] - pj['y_mm'])**2)
+                                if d < 500:
+                                    merge_map[kj] = ki
+
+                        if merge_map:
+                            for idx, row in bw_df.iterrows():
+                                ni = str(row.get('node_i', ''))
+                                nj = str(row.get('node_j', ''))
+                                if ni in merge_map:
+                                    bw_df.at[idx, 'node_i'] = merge_map[ni]
+                                if nj in merge_map:
+                                    bw_df.at[idx, 'node_j'] = merge_map[nj]
+
                     result_bw = process_wall_junctions(bw_df, nodes_dict)
                     # Keep only the extension + polygon columns, drop synthetic IDs
                     for col in ['extend_start_mm', 'extend_end_mm']:
