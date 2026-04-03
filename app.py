@@ -590,18 +590,25 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                         log(f"Junction: {synth_count} basement wall panels using ELEMENT endpoints")
 
                         # Merge nearby synthetic nodes (within 500mm) to share node_ids
-                        syn_nodes = {k: v for k, v in nodes_dict.items() if k.startswith('_BW_')}
-                        syn_keys = list(syn_nodes.keys())
+                        # Collect ALL node_ids used by basement wall panels
+                        all_bw_node_ids = set()
+                        for idx, row in bw_df.iterrows():
+                            all_bw_node_ids.add(str(row.get('node_i', '')))
+                            all_bw_node_ids.add(str(row.get('node_j', '')))
+                        all_bw_nodes = {k: nodes_dict[k] for k in all_bw_node_ids if k in nodes_dict}
+
+                        # Merge all nearby nodes (synthetic + real) within 500mm
+                        bw_keys = list(all_bw_nodes.keys())
                         merge_map = {}
-                        for i, ki in enumerate(syn_keys):
+                        for i, ki in enumerate(bw_keys):
                             if ki in merge_map:
                                 continue
-                            pi = syn_nodes[ki]
-                            for j in range(i + 1, len(syn_keys)):
-                                kj = syn_keys[j]
+                            pi = all_bw_nodes[ki]
+                            for j in range(i + 1, len(bw_keys)):
+                                kj = bw_keys[j]
                                 if kj in merge_map:
                                     continue
-                                pj = syn_nodes[kj]
+                                pj = all_bw_nodes[kj]
                                 d = math.sqrt((pi['x_mm'] - pj['x_mm'])**2 +
                                               (pi['y_mm'] - pj['y_mm'])**2)
                                 if d < 500:
