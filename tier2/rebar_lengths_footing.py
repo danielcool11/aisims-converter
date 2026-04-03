@@ -324,11 +324,11 @@ def _process_base_zone(member_id, zone_row, thickness, z_mm, lookup, cover, fc, 
 
     bar_role = f'BASE_{direction}_{layer.upper()}'
 
-    # Z coordinate within slab thickness
+    # Z coordinate within footing thickness (z_mm = footing top surface)
     if layer == 'Top':
-        z_bar = z_mm + thickness / 2 - cover - dia / 2
+        z_bar = z_mm - cover - dia / 2
     else:
-        z_bar = z_mm - thickness / 2 + cover + dia / 2
+        z_bar = z_mm - thickness + cover + dia / 2
 
     for grp in bar_groups:
         bar_span = grp['bar_span_mm']
@@ -412,9 +412,9 @@ def _process_additional_zone(member_id, zone_row, thickness, z_mm, lookup, cover
     n_bars = int(dist_width / spacing) + 1 if spacing > 0 else 0
 
     if layer == 'Top':
-        z_bar = z_mm + thickness / 2 - cover - dia / 2
+        z_bar = z_mm - cover - dia / 2
     else:
-        z_bar = z_mm - thickness / 2 + cover + dia / 2
+        z_bar = z_mm - thickness + cover + dia / 2
 
     if direction == 'X':
         mesh = {
@@ -485,8 +485,8 @@ def _process_stirrup_zone(member_id, zone_row, thickness, z_mm, lookup, cover, f
     n_y = int(zone_ly / spacing) + 1 if spacing > 0 else 1
     n_total = n_x * n_y * n_legs
 
-    z_bot = z_mm - thickness / 2 + cover
-    z_top = z_mm + thickness / 2 - cover
+    z_bot = z_mm - thickness + cover
+    z_top = z_mm - cover
 
     mesh = {
         'mesh_origin_x_mm': round(zx_min + cover, 1),
