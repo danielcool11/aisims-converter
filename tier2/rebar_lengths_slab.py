@@ -568,8 +568,8 @@ def calculate_slab_rebar_lengths(
                 polygon = bounds.get('polygon', [])
                 n_nodes = bounds.get('n_nodes', 4)
 
-                # ── Polygon slabs (5+ nodes): scan-line grouped bars ──
-                if n_nodes > 4 and len(polygon) >= 5 and spacing > 0:
+                # ── Polygon slabs (non-rectangular): scan-line grouped bars ──
+                if n_nodes >= 3 and len(polygon) >= 3 and spacing > 0:
                     # Generate bar positions along distribution direction
                     if direction == 'X':
                         dist_start = bounds['y_min'] + dist_Wg1 / 2
