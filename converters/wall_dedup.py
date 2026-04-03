@@ -82,13 +82,28 @@ def deduplicate_walls(walls_df, reinf_wall_df, bwall_members_df, nodes_df,
             ok_panels = bwall_members_df[bwall_members_df['node_status'] == 'OK']
 
         for _, bw in ok_panels.iterrows():
+            added = False
             for na, nb in [('node_i', 'node_j'), ('node_k', 'node_l')]:
                 ni = str(bw.get(na, ''))
                 nj = str(bw.get(nb, ''))
                 ci = node_xy.get(ni)
                 cj = node_xy.get(nj)
                 if ci and cj and 'MISSING' not in ni and 'MISSING' not in nj:
-                    bwall_edges.append((ci[0], ci[1], cj[0], cj[1]))
+                    dx = abs(ci[0] - cj[0])
+                    dy = abs(ci[1] - cj[1])
+                    if dx > 10 or dy > 10:  # real horizontal edge
+                        bwall_edges.append((ci[0], ci[1], cj[0], cj[1]))
+                        added = True
+
+            # Fallback for vertical panels (node_i XY ≈ node_j XY):
+            # Add all unique node XY positions as point-edges for proximity matching
+            if not added:
+                for na in ['node_i', 'node_j', 'node_k', 'node_l']:
+                    nid = str(bw.get(na, ''))
+                    c = node_xy.get(nid)
+                    if c and 'MISSING' not in nid:
+                        # Add as zero-length edge (point) — matched by proximity
+                        bwall_edges.append((c[0], c[1], c[0], c[1]))
 
     # Classify each wall element
     statuses = []
@@ -129,32 +144,32 @@ def deduplicate_walls(walls_df, reinf_wall_df, bwall_members_df, nodes_df,
     no_design = len(walls_df[walls_df['wall_status'] == 'NO_DESIGN'])
     designed = len(walls_df[walls_df['wall_status'] == 'DESIGNED'])
 
-    # Cross-validate against Part C element sheet before removal
+    # Use Part C element sheet as primary dedup (more reliable than geometry)
     if bwall_elements_df is not None and not bwall_elements_df.empty:
         partc_elem_ids = set(bwall_elements_df['ELEMENT'].astype(int))
         all_elem_ids = set(walls_df['element_id'].astype(int))
-        geom_covered_ids = set(
-            walls_df[walls_df['wall_status'] == 'COVERED_BY_PART_C']['element_id'].astype(int)
-        )
 
-        # Part C elements that exist in MembersWall but were not caught by dedup
-        # (exclude DESIGNED elements — they have DesignWall rebar and are kept intentionally)
-        designed_elem_ids = set(
-            walls_df[walls_df['wall_status'] == 'DESIGNED']['element_id'].astype(int)
-        )
-        partc_in_model = partc_elem_ids & all_elem_ids
-        missed = partc_in_model - geom_covered_ids - designed_elem_ids
-        extra = geom_covered_ids - partc_elem_ids
+        # Any Part A element that's listed in Part C → mark as COVERED_BY_PART_C
+        missed_by_geom = 0
+        for idx, row in walls_df.iterrows():
+            eid = int(row['element_id'])
+            if eid in partc_elem_ids and row['wall_status'] != 'COVERED_BY_PART_C':
+                if row['wall_status'] != 'DESIGNED':
+                    walls_df.at[idx, 'wall_status'] = 'COVERED_BY_PART_C'
+                    missed_by_geom += 1
 
-        if missed or extra:
-            print(f'[WallDedup] WARNING - CROSS-VALIDATION MISMATCH:')
-            if missed:
-                print(f'[WallDedup]   Part C elements NOT caught by geometric dedup: {sorted(missed)}')
-            if extra:
-                print(f'[WallDedup]   Geometric dedup caught elements NOT in Part C: {sorted(extra)}')
-        else:
-            print(f'[WallDedup] Cross-validation OK: geometric dedup matches Part C element list '
-                  f'({len(partc_in_model)} elements)')
+        if missed_by_geom:
+            print(f'[WallDedup] Part C element sheet caught {missed_by_geom} additional elements')
+
+        # Also use wall_id mapping: Part C element sheet has 'Wall ID' column
+        # matching MembersWall.wall_id
+        if 'Wall ID' in bwall_elements_df.columns:
+            partc_wall_ids = set(bwall_elements_df['Wall ID'].dropna().astype(int))
+            for idx, row in walls_df.iterrows():
+                wid = int(row['wall_id'])
+                if wid in partc_wall_ids and row['wall_status'] != 'COVERED_BY_PART_C':
+                    if row['wall_status'] != 'DESIGNED':
+                        walls_df.at[idx, 'wall_status'] = 'COVERED_BY_PART_C'
 
     # Remove COVERED_BY_PART_C elements
     walls_df = walls_df[walls_df['wall_status'] != 'COVERED_BY_PART_C'].copy()
