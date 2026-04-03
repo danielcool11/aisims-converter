@@ -113,7 +113,7 @@ st.header("Step 1: Upload Files")
 col_a, col_b = st.columns(2)
 
 with col_a:
-    st.subheader("Part A — MIDAS Gen Exports")
+    st.subheader("Part A - MIDAS Gen Exports")
 
     nodes_file = st.file_uploader("Nodes.csv", type=['csv'], key='nodes')
     materials_file = st.file_uploader("Materials.csv", type=['csv'], key='materials')
@@ -127,7 +127,7 @@ with col_a:
     mgt_file = st.file_uploader("project.mgt (optional)", type=['mgt', 'txt'], key='mgt')
 
 with col_b:
-    st.subheader("Part B — Engineer Data")
+    st.subheader("Part B - Engineer Data")
 
     slab_boundary_file = st.file_uploader("SlabBoundary.csv", type=['csv'], key='slab_boundary')
     slab_reinf_file = st.file_uploader("SlabReinforcement.csv", type=['csv'], key='slab_reinf')
@@ -135,7 +135,7 @@ with col_b:
     foot_boundary_file = st.file_uploader("FootBoundary.csv", type=['csv'], key='foot_boundary')
     foot_reinf_file = st.file_uploader("FootReinforcement.csv", type=['csv'], key='foot_reinf')
 
-    st.subheader("Part C — Basement Walls")
+    st.subheader("Part C - Basement Walls")
     bwall_file = st.file_uploader("Part C Excel (BasementWall)", type=['xlsx'], key='bwall')
 
 # ══════════════════════════════════════════════════════════════
@@ -480,7 +480,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
 
             # Beam
             if all(k in outputs for k in ('beams', 'columns', 'sections', 'reinf_beam', 'nodes')):
-                progress.progress(87, text="Phase 6: Rebar lengths — Beam...")
+                progress.progress(87, text="Phase 6: Rebar lengths - Beam...")
                 try:
                     rebar_beam = calculate_beam_rebar_lengths(
                         outputs['beams'], outputs['columns'], outputs['sections'],
@@ -493,7 +493,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
 
             # Column
             if all(k in outputs for k in ('columns', 'reinf_column', 'sections', 'nodes')):
-                progress.progress(89, text="Phase 6: Rebar lengths — Column...")
+                progress.progress(89, text="Phase 6: Rebar lengths - Column...")
                 try:
                     rebar_col = calculate_column_rebar_lengths(
                         outputs['columns'], outputs['reinf_column'], outputs['sections'],
@@ -506,7 +506,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
 
             # Slab
             if all(k in outputs for k in ('slabs', 'reinf_slab', 'beams', 'nodes')):
-                progress.progress(91, text="Phase 6: Rebar lengths — Slab...")
+                progress.progress(91, text="Phase 6: Rebar lengths - Slab...")
                 try:
                     rebar_slab = calculate_slab_rebar_lengths(
                         outputs['slabs'], outputs['reinf_slab'], outputs['beams'],
@@ -519,7 +519,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
 
             # Stair
             if all(k in outputs for k in ('stairs', 'reinf_stair')):
-                progress.progress(93, text="Phase 6: Rebar lengths — Stair...")
+                progress.progress(93, text="Phase 6: Rebar lengths - Stair...")
                 try:
                     rebar_stair = calculate_stair_rebar_lengths(
                         outputs['stairs'], outputs['reinf_stair'],
@@ -532,7 +532,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
 
             # Wall
             if all(k in outputs for k in ('walls', 'reinf_wall', 'nodes')):
-                progress.progress(95, text="Phase 6: Rebar lengths — Wall...")
+                progress.progress(95, text="Phase 6: Rebar lengths - Wall...")
                 try:
                     rebar_wall = calculate_wall_rebar_lengths(
                         outputs['walls'], outputs['reinf_wall'], outputs['nodes'],
@@ -545,7 +545,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
 
             # Footing
             if all(k in outputs for k in ('footings', 'reinf_footing')):
-                progress.progress(97, text="Phase 6: Rebar lengths — Footing...")
+                progress.progress(97, text="Phase 6: Rebar lengths - Footing...")
                 try:
                     rebar_footing = calculate_footing_rebar_lengths(
                         outputs['footings'], outputs['reinf_footing'],
@@ -558,7 +558,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
 
             # Basement Wall
             if all(k in outputs for k in ('bwall_members', 'reinf_bwall', 'nodes')):
-                progress.progress(99, text="Phase 6: Rebar lengths — Basement Wall...")
+                progress.progress(99, text="Phase 6: Rebar lengths - Basement Wall...")
                 try:
                     rebar_bwall = calculate_basement_wall_rebar_lengths(
                         outputs['bwall_members'], outputs['reinf_bwall'], outputs['nodes'],

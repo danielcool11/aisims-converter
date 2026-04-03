@@ -147,7 +147,7 @@ def deduplicate_walls(walls_df, reinf_wall_df, bwall_members_df, nodes_df,
         extra = geom_covered_ids - partc_elem_ids
 
         if missed or extra:
-            print(f'[WallDedup] WARNING — CROSS-VALIDATION MISMATCH:')
+            print(f'[WallDedup] WARNING - CROSS-VALIDATION MISMATCH:')
             if missed:
                 print(f'[WallDedup]   Part C elements NOT caught by geometric dedup: {sorted(missed)}')
             if extra:
