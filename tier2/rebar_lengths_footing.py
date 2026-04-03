@@ -28,6 +28,129 @@ DEFAULT_COVER_MM = 75.0  # KDS footing cover (ground contact)
 HOOK_EXT_FACTOR = 12     # 90-degree hook = 12 × dia
 
 
+# ── Polygon Scan-Line Clipping ──────────────────────────────────────────────
+
+def _scanline_intersect(polygon, scan_val, scan_axis='Y'):
+    """Find intersection spans of a horizontal/vertical line with a polygon.
+
+    scan_axis='Y': horizontal line at y=scan_val → returns X spans
+    scan_axis='X': vertical line at x=scan_val → returns Y spans
+
+    Returns sorted list of (min, max) tuples representing inside spans.
+    """
+    n = len(polygon)
+    if n < 3:
+        return []
+
+    intersections = []
+    for i in range(n):
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[(i + 1) % n]
+
+        if scan_axis == 'Y':
+            a1, b1 = y1, x1
+            a2, b2 = y2, x2
+        else:
+            a1, b1 = x1, y1
+            a2, b2 = x2, y2
+
+        # Check if edge crosses the scan line
+        if (a1 - scan_val) * (a2 - scan_val) < 0:
+            t = (scan_val - a1) / (a2 - a1)
+            b_int = b1 + t * (b2 - b1)
+            intersections.append(b_int)
+        elif abs(a1 - scan_val) < 0.01 and abs(a2 - scan_val) < 0.01:
+            # Edge lies on the scan line
+            intersections.append(b1)
+            intersections.append(b2)
+
+    intersections.sort()
+
+    # Pair up intersections into spans (inside polygon)
+    spans = []
+    i = 0
+    while i + 1 < len(intersections):
+        span_min = intersections[i]
+        span_max = intersections[i + 1]
+        if span_max - span_min > 1.0:
+            spans.append((span_min, span_max))
+        i += 2
+
+    return spans
+
+
+def _group_bar_spans_polygon(bar_positions, polygon, bar_direction, cover):
+    """Compute bar spans at each position via scan-line, group adjacent same-length bars.
+
+    bar_positions: coordinate values along the distribution axis
+    polygon: list of (x, y) vertices
+    bar_direction: 'X' or 'Y' — which axis the bars run along
+    cover: footing cover (mm)
+
+    Returns list of groups: [{
+        'bar_span_mm': float,       # gross span within polygon
+        'bar_start': float,         # bar start coordinate (bar direction)
+        'bar_end': float,           # bar end coordinate (bar direction)
+        'dist_start': float,        # first bar position (distribution axis)
+        'dist_end': float,          # last bar position (distribution axis)
+        'dist_axis': str,           # 'X' or 'Y'
+        'n_bars': int,
+    }]
+    """
+    if not bar_positions:
+        return []
+
+    # scan_axis is perpendicular to bar direction
+    scan_axis = 'Y' if bar_direction == 'X' else 'X'
+    dist_axis = 'Y' if bar_direction == 'X' else 'X'
+
+    groups = []
+    current_group = None
+    GROUP_TOL = 50  # mm tolerance for grouping same-length bars
+
+    for pos in bar_positions:
+        spans = _scanline_intersect(polygon, pos, scan_axis=scan_axis)
+        if not spans:
+            if current_group:
+                groups.append(current_group)
+                current_group = None
+            continue
+
+        # Use the widest span
+        span = max(spans, key=lambda s: s[1] - s[0])
+        span_min = span[0]
+        span_max = span[1]
+        bar_span = span_max - span_min
+
+        if bar_span < 2 * cover + 10:  # skip degenerate
+            if current_group:
+                groups.append(current_group)
+                current_group = None
+            continue
+
+        if current_group and abs(bar_span - current_group['bar_span_mm']) < GROUP_TOL:
+            # Same group — extend
+            current_group['dist_end'] = pos
+            current_group['n_bars'] += 1
+        else:
+            if current_group:
+                groups.append(current_group)
+            current_group = {
+                'bar_span_mm': bar_span,
+                'bar_start': span_min,
+                'bar_end': span_max,
+                'dist_start': pos,
+                'dist_end': pos,
+                'dist_axis': dist_axis,
+                'n_bars': 1,
+            }
+
+    if current_group:
+        groups.append(current_group)
+
+    return groups
+
+
 def _load_cover(cover_path=None):
     if cover_path and os.path.exists(cover_path):
         df = pd.read_csv(cover_path)
@@ -101,12 +224,16 @@ def _parse_zone_boundary(boundary_str):
     """Parse pipe-separated quad boundary into list of sub-rectangles.
 
     Input: "(0,0);(11600,0);(0,13600);(11600,13600) | (7750,13600);..."
-    Returns: [{'x_min', 'x_max', 'y_min', 'y_max'}, ...]
+    Returns: (sub_rects, polygon_or_None)
+        sub_rects: [{'x_min', 'x_max', 'y_min', 'y_max'}, ...]
+        polygon: [(x,y), ...] if single segment with >4 points, else None
     """
     if pd.isna(boundary_str) or not str(boundary_str).strip():
-        return []
+        return [], None
 
     sub_rects = []
+    all_segments_points = []  # track raw points per segment
+
     for segment in str(boundary_str).split('|'):
         segment = segment.strip()
         if not segment:
@@ -114,14 +241,30 @@ def _parse_zone_boundary(boundary_str):
         # Parse (x,y) pairs
         points = re.findall(r'\(([^)]+)\)', segment)
         if not points:
-            continue
-
-        xs, ys = [], []
-        for pt in points:
-            parts = pt.split(',')
-            if len(parts) >= 2:
-                xs.append(float(parts[0].strip()))
-                ys.append(float(parts[1].strip()))
+            # Try semicolon-separated x,y pairs without parens
+            points_raw = segment.split(';')
+            parsed = []
+            for pt in points_raw:
+                parts = pt.strip().split(',')
+                if len(parts) >= 2:
+                    try:
+                        parsed.append((float(parts[0].strip()), float(parts[1].strip())))
+                    except ValueError:
+                        continue
+            all_segments_points.append(parsed)
+            xs = [p[0] for p in parsed]
+            ys = [p[1] for p in parsed]
+        else:
+            parsed = []
+            xs, ys = [], []
+            for pt in points:
+                parts = pt.split(',')
+                if len(parts) >= 2:
+                    x, y = float(parts[0].strip()), float(parts[1].strip())
+                    xs.append(x)
+                    ys.append(y)
+                    parsed.append((x, y))
+            all_segments_points.append(parsed)
 
         if xs and ys:
             rect = {
@@ -132,7 +275,12 @@ def _parse_zone_boundary(boundary_str):
             if rect['x_max'] - rect['x_min'] > 1 and rect['y_max'] - rect['y_min'] > 1:
                 sub_rects.append(rect)
 
-    return sub_rects
+    # Detect polygon: single segment with >4 unique points
+    polygon = None
+    if len(all_segments_points) == 1 and len(all_segments_points[0]) > 4:
+        polygon = all_segments_points[0]
+
+    return sub_rects, polygon
 
 
 # ── Bar Span Computation ────────────────────────────────────────────────────
@@ -309,8 +457,8 @@ def _process_base_zone(member_id, zone_row, thickness, z_mm, lookup, cover, fc, 
     Ldh, Lpb, Lpt = lookup.get(fy, dia, fc)
     Llap = Lpt if layer == 'Top' else Lpb
 
-    # Parse zone boundary into sub-rectangles
-    sub_rects = _parse_zone_boundary(zone_row.get('zone_boundary', ''))
+    # Parse zone boundary into sub-rectangles + optional polygon
+    sub_rects, polygon = _parse_zone_boundary(zone_row.get('zone_boundary', ''))
     if not sub_rects:
         # Fallback: use zone bounding box
         sub_rects = [{
@@ -320,8 +468,6 @@ def _process_base_zone(member_id, zone_row, thickness, z_mm, lookup, cover, fc, 
             'y_max': float(zone_row['zone_y_max']),
         }]
 
-    bar_groups = _compute_bar_groups(sub_rects, direction)
-
     bar_role = f'BASE_{direction}_{layer.upper()}'
 
     # Z coordinate within footing thickness (z_mm = footing top surface)
@@ -330,30 +476,62 @@ def _process_base_zone(member_id, zone_row, thickness, z_mm, lookup, cover, fc, 
     else:
         z_bar = z_mm - thickness + cover + dia / 2
 
+    # ── Polygon footing: scan-line clipping ──
+    if polygon and len(polygon) > 4 and spacing > 0:
+        # Bounding box of polygon for distribution range
+        xs = [p[0] for p in polygon]
+        ys = [p[1] for p in polygon]
+
+        if direction == 'X':
+            # Bars run along X, distributed along Y
+            dist_start = min(ys) + cover
+            dist_end = max(ys) - cover
+        else:
+            # Bars run along Y, distributed along X
+            dist_start = min(xs) + cover
+            dist_end = max(xs) - cover
+
+        n_pos = int((dist_end - dist_start) / spacing) + 1
+        bar_positions = [dist_start + i * spacing for i in range(n_pos)]
+
+        bar_groups = _group_bar_spans_polygon(bar_positions, polygon, direction, cover)
+
+        print(f'  [POLYGON] {member_id} {bar_role}: {len(polygon)} vertices, '
+              f'{len(bar_groups)} bar groups ({n_pos} positions)')
+
+    else:
+        # ── Rectangular footing: existing logic ──
+        bar_groups = _compute_bar_groups(sub_rects, direction)
+
     for grp in bar_groups:
         bar_span = grp['bar_span_mm']
         clear_span = bar_span - 2 * cover
         L_bar = clear_span + 2 * Ldh  # hook at both free edges
 
-        dist_width = grp['dist_end'] - grp['dist_start']
-        n_bars = int(dist_width / spacing) + 1 if spacing > 0 else 0
+        if 'n_bars' in grp:
+            # Polygon path: n_bars already computed
+            n_bars = grp['n_bars']
+            dist_width = grp['dist_end'] - grp['dist_start']
+        else:
+            dist_width = grp['dist_end'] - grp['dist_start']
+            n_bars = int(dist_width / spacing) + 1 if spacing > 0 else 0
 
         # Mesh coordinates
         if direction == 'X':
             mesh = {
                 'mesh_origin_x_mm': round(grp['bar_start'] + cover, 1),
-                'mesh_origin_y_mm': round(grp['dist_start'] + cover, 1),
+                'mesh_origin_y_mm': round(grp['dist_start'], 1),
                 'mesh_origin_z_mm': round(z_bar, 1),
                 'mesh_terminus_x_mm': round(grp['bar_end'] - cover, 1),
-                'mesh_terminus_y_mm': round(grp['dist_start'] + cover, 1),
+                'mesh_terminus_y_mm': round(grp['dist_start'], 1),
                 'mesh_terminus_z_mm': round(z_bar, 1),
             }
         else:
             mesh = {
-                'mesh_origin_x_mm': round(grp['dist_start'] + cover, 1),
+                'mesh_origin_x_mm': round(grp['dist_start'], 1),
                 'mesh_origin_y_mm': round(grp['bar_start'] + cover, 1),
                 'mesh_origin_z_mm': round(z_bar, 1),
-                'mesh_terminus_x_mm': round(grp['dist_start'] + cover, 1),
+                'mesh_terminus_x_mm': round(grp['dist_start'], 1),
                 'mesh_terminus_y_mm': round(grp['bar_end'] - cover, 1),
                 'mesh_terminus_z_mm': round(z_bar, 1),
             }
