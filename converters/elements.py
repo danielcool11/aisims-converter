@@ -52,6 +52,7 @@ def convert_elements(
     section_lookup: dict,
     thickness_lookup: dict,
     wall_marks: dict = None,
+    material_map: dict = None,
 ) -> dict:
     """
     Convert raw MIDAS elements to standardized member CSVs.
@@ -138,7 +139,7 @@ def convert_elements(
                         # Vertical + thickness property → wall
                         _process_wall_element(
                             elem_id, row, prop_id, node_lookup, thickness_lookup,
-                            wall_mark_lookup, walls
+                            wall_mark_lookup, walls, material_map
                         )
                         reclassified_count += 1
                         continue
@@ -157,18 +158,18 @@ def convert_elements(
                     reclassified_count += 1
                     _process_beam_element(
                         elem_id, row, elem_key, node_lookup, section_lookup,
-                        beams, columns
+                        beams, columns, material_map
                     )
                     continue
 
             _process_beam_element(
                 elem_id, row, prop_id, node_lookup, section_lookup,
-                beams, columns
+                beams, columns, material_map
             )
         elif elem_type == 'WALL':
             _process_wall_element(
                 elem_id, row, prop_id, node_lookup, thickness_lookup,
-                wall_mark_lookup, walls
+                wall_mark_lookup, walls, material_map
             )
 
     beams_df = pd.DataFrame(beams)
@@ -190,7 +191,7 @@ def convert_elements(
 
 
 def _process_beam_element(elem_id, row, prop_id, node_lookup, section_lookup,
-                          beams_list, columns_list):
+                          beams_list, columns_list, material_map=None):
     """Process a BEAM-type element (could be beam or column based on section)."""
     n1 = int(row.get('node1', 0))
     n2 = int(row.get('node2', 0))
@@ -208,6 +209,20 @@ def _process_beam_element(elem_id, row, prop_id, node_lookup, section_lookup,
     member_type = sec_info.get('member_type', 'BEAM')
     member_id = sec_info.get('member_id', f'UNK{prop_id}')
     section_id = sec_info.get('section_id', f'SEC_{prop_id}')
+
+    # Resolve material from raw element's material_id
+    raw_mat_id = row.get('material_id')
+    mat_info = {}
+    if material_map and raw_mat_id is not None and not pd.isna(raw_mat_id):
+        try:
+            mat_info = material_map.get(int(float(raw_mat_id)), {})
+        except (ValueError, TypeError):
+            pass
+    mat_fields = {
+        'material_id': mat_info.get('concrete_grade'),
+        'fy_main': mat_info.get('fy_main'),
+        'fy_sub': mat_info.get('fy_sub'),
+    }
 
     # Coordinates
     x1, y1, z1 = nd1['x_mm'], nd1['y_mm'], nd1['z_mm']
@@ -266,6 +281,7 @@ def _process_beam_element(elem_id, row, prop_id, node_lookup, section_lookup,
             'length_mm': round(length_3d, 1),
             'b_mm': sec_info.get('b_mm'),
             'h_mm': sec_info.get('h_mm'),
+            **mat_fields,
         }
         columns_list.append(record)
 
@@ -307,6 +323,7 @@ def _process_beam_element(elem_id, row, prop_id, node_lookup, section_lookup,
             'length_mm': round(bt_length, 1),
             'b_mm': sec_info.get('b_mm'),
             'h_mm': sec_info.get('h_mm'),
+            **mat_fields,
         }
         columns_list.append(record_col)
 
@@ -333,12 +350,14 @@ def _process_beam_element(elem_id, row, prop_id, node_lookup, section_lookup,
             'length_mm': length,
             'b_mm': sec_info.get('b_mm'),
             'h_mm': sec_info.get('h_mm'),
+            **mat_fields,
         }
         beams_list.append(record)
 
 
 def _process_wall_element(elem_id, row, prop_id, node_lookup,
-                          thickness_lookup, wall_mark_lookup, walls_list):
+                          thickness_lookup, wall_mark_lookup, walls_list,
+                          material_map=None):
     """Process a WALL-type element (plate/quad element)."""
     # Get wall nodes (quad: 4 nodes)
     node_nums = []
@@ -397,6 +416,15 @@ def _process_wall_element(elem_id, row, prop_id, node_lookup,
         if nd:
             node_ids.append(nd['node_id'])
 
+    # Resolve material
+    raw_mat_id = row.get('material_id')
+    mat_info = {}
+    if material_map and raw_mat_id is not None and not pd.isna(raw_mat_id):
+        try:
+            mat_info = material_map.get(int(float(raw_mat_id)), {})
+        except (ValueError, TypeError):
+            pass
+
     record = {
         'element_id': elem_id,
         'wall_mark': wall_mark,
@@ -412,5 +440,6 @@ def _process_wall_element(elem_id, row, prop_id, node_lookup,
         'node_j': node_ids[1] if len(node_ids) > 1 else None,
         'node_k': node_ids[2] if len(node_ids) > 2 else None,
         'node_l': node_ids[3] if len(node_ids) > 3 else None,
+        'material_id': mat_info.get('concrete_grade'),
     }
     walls_list.append(record)

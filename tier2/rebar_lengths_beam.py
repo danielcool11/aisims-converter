@@ -32,9 +32,15 @@ MAX_STOCK_LENGTH_MM = 12000
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _steel_grade(dia_mm):
-    """D10, D13 → 500 MPa; others → 600 MPa."""
-    return 500 if int(dia_mm) in (10, 13) else 600
+def _steel_grade(dia_mm, dia_fy_map=None, fy_override=None):
+    """Get fy for a rebar diameter.
+    Priority: fy_override (per-element) > dia_fy_map (project-level) > hardcoded fallback.
+    """
+    if fy_override is not None:
+        return int(fy_override)
+    if dia_fy_map and int(dia_mm) in dia_fy_map:
+        return dia_fy_map[int(dia_mm)]
+    return 400 if int(dia_mm) in (10, 13) else 600
 
 
 def _dia_label(d_mm):
@@ -708,7 +714,7 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
 
         dia_top = cfg_top['dia']
         dia_bot = cfg_bot['dia']
-        fy = _steel_grade(dia_top)
+        fy = _steel_grade(dia_top, fy_override=sp.get('fy_main'))
         Ldh, Lpt_B, Lpb_B = lookup.get(fy, dia_top, fc)
 
         sec = adapter.get_section(sp.get('section_id', ''))
@@ -1091,6 +1097,7 @@ def calculate_beam_rebar_lengths(
     nodes_df: pd.DataFrame,
     dev_lengths_path: str,
     lap_splice_path: str,
+    dia_fy_map: dict = None,
 ) -> pd.DataFrame:
     """
     Calculate beam rebar lengths from Tier 1 converter output.

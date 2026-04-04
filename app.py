@@ -9,6 +9,7 @@ import streamlit as st
 import pandas as pd
 import os
 import io
+import re
 import zipfile
 import sys
 
@@ -348,7 +349,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
         log(f"Nodes: {len(nodes_df)} nodes")
 
         progress.progress(25, text="Phase 1: Materials...")
-        materials_df = convert_materials(materials_raw, mgt_data)
+        materials_df, material_map, dia_fy_map = convert_materials(materials_raw, mgt_data)
         outputs['materials'] = materials_df
         log(f"Materials: {len(materials_df)} materials")
 
@@ -366,7 +367,8 @@ if st.button("CONVERT", type="primary", use_container_width=True):
         progress.progress(40, text="Phase 2: Elements → Members...")
         wall_marks = mgt_data.get('wall_marks', {}) if mgt_data else {}
         elem_result = convert_elements(
-            elements_raw, nodes_df, section_lookup, thickness_lookup, wall_marks
+            elements_raw, nodes_df, section_lookup, thickness_lookup, wall_marks,
+            material_map=material_map,
         )
         outputs['beams'] = elem_result['beams']
         outputs['columns'] = elem_result['columns']
@@ -393,7 +395,8 @@ if st.button("CONVERT", type="primary", use_container_width=True):
 
                 # Re-run elements with updated nodes
                 elem_result = convert_elements(
-                    elements_raw, nodes_df, section_lookup, thickness_lookup, wall_marks
+                    elements_raw, nodes_df, section_lookup, thickness_lookup, wall_marks,
+                    material_map=material_map,
                 )
                 outputs['beams'] = elem_result['beams']
                 outputs['columns'] = elem_result['columns']
@@ -632,6 +635,23 @@ if st.button("CONVERT", type="primary", use_container_width=True):
         outputs['validation_report'] = report_text
         log("Validation complete")
 
+        # ── Phase 5.5: Build project-level fc/fy maps from beam materials ──
+        fc_by_level = {}
+        all_fc_values = []
+        if 'beams' in outputs and not outputs['beams'].empty:
+            for _, b in outputs['beams'].iterrows():
+                mat = b.get('material_id', '') or ''
+                fc_match = re.search(r'(\d+)', str(mat))
+                fc_val = int(fc_match.group(1)) if fc_match else 35
+                lv = b.get('level', '')
+                if lv:
+                    fc_by_level.setdefault(lv, fc_val)
+                all_fc_values.append(fc_val)
+        import statistics
+        default_fc = statistics.mode(all_fc_values) if all_fc_values else 35
+        log(f"Material maps: fc_by_level has {len(fc_by_level)} levels, "
+            f"default_fc={default_fc}, dia_fy_map D10={dia_fy_map.get(10)}/D16={dia_fy_map.get(16)}")
+
         # ── Phase 6: Tier 2 Rebar Lengths ──
         dev_path = os.path.join(os.path.dirname(__file__), 'config', 'development_lengths.csv')
         lap_path = os.path.join(os.path.dirname(__file__), 'config', 'lap_splice.csv')
@@ -646,7 +666,8 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 try:
                     rebar_beam = calculate_beam_rebar_lengths(
                         outputs['beams'], outputs['columns'], outputs['sections'],
-                        outputs['reinf_beam'], outputs['nodes'], dev_path, lap_path)
+                        outputs['reinf_beam'], outputs['nodes'], dev_path, lap_path,
+                        dia_fy_map=dia_fy_map)
                     outputs['rebar_beam'] = rebar_beam
                     log(f"RebarLengthsBeam: {len(rebar_beam)} records")
                     tier2_count += 1
@@ -659,7 +680,8 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 try:
                     rebar_col = calculate_column_rebar_lengths(
                         outputs['columns'], outputs['reinf_column'], outputs['sections'],
-                        outputs['nodes'], dev_path, lap_path)
+                        outputs['nodes'], dev_path, lap_path,
+                        fc=default_fc, dia_fy_map=dia_fy_map)
                     outputs['rebar_column'] = rebar_col
                     log(f"RebarLengthsColumn: {len(rebar_col)} records")
                     tier2_count += 1
@@ -672,7 +694,8 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 try:
                     rebar_slab = calculate_slab_rebar_lengths(
                         outputs['slabs'], outputs['reinf_slab'], outputs['beams'],
-                        outputs['nodes'], dev_path, lap_path)
+                        outputs['nodes'], dev_path, lap_path,
+                        fc=default_fc, dia_fy_map=dia_fy_map)
                     outputs['rebar_slab'] = rebar_slab
                     log(f"RebarLengthsSlab: {len(rebar_slab)} records")
                     tier2_count += 1
@@ -685,7 +708,8 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 try:
                     rebar_stair = calculate_stair_rebar_lengths(
                         outputs['stairs'], outputs['reinf_stair'],
-                        dev_path, lap_path, cover_path=cover_path)
+                        dev_path, lap_path, fc=default_fc,
+                        dia_fy_map=dia_fy_map, cover_path=cover_path)
                     outputs['rebar_stair'] = rebar_stair
                     log(f"RebarLengthsStair: {len(rebar_stair)} records")
                     tier2_count += 1
@@ -698,7 +722,8 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 try:
                     rebar_wall = calculate_wall_rebar_lengths(
                         outputs['walls'], outputs['reinf_wall'], outputs['nodes'],
-                        dev_path, lap_path, cover_path=cover_path)
+                        dev_path, lap_path, fc=default_fc,
+                        dia_fy_map=dia_fy_map, cover_path=cover_path)
                     outputs['rebar_wall'] = rebar_wall
                     log(f"RebarLengthsWall: {len(rebar_wall)} records")
                     tier2_count += 1
@@ -711,7 +736,8 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 try:
                     rebar_footing = calculate_footing_rebar_lengths(
                         outputs['footings'], outputs['reinf_footing'],
-                        dev_path, lap_path, cover_path=cover_path)
+                        dev_path, lap_path, fc=default_fc,
+                        dia_fy_map=dia_fy_map, cover_path=cover_path)
                     outputs['rebar_footing'] = rebar_footing
                     log(f"RebarLengthsFooting: {len(rebar_footing)} records")
                     tier2_count += 1
@@ -724,7 +750,8 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 try:
                     rebar_bwall = calculate_basement_wall_rebar_lengths(
                         outputs['bwall_members'], outputs['reinf_bwall'], outputs['nodes'],
-                        dev_path, lap_path, cover_path=cover_path)
+                        dev_path, lap_path, fc=default_fc,
+                        dia_fy_map=dia_fy_map, cover_path=cover_path)
                     outputs['rebar_bwall'] = rebar_bwall
                     log(f"RebarLengthsBasementWall: {len(rebar_bwall)} records")
                     tier2_count += 1

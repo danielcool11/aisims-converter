@@ -159,8 +159,12 @@ def _compute_group_transitions(group, cover=COVER_MM, hoop_dia=10, main_dia=22):
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _steel_grade(dia_mm):
-    return 500 if int(dia_mm) in (10, 13) else 600
+def _steel_grade(dia_mm, dia_fy_map=None, fy_override=None):
+    if fy_override is not None:
+        return int(fy_override)
+    if dia_fy_map and int(dia_mm) in dia_fy_map:
+        return dia_fy_map[int(dia_mm)]
+    return 400 if int(dia_mm) in (10, 13) else 600
 
 
 def _dia_label(d_mm):
@@ -533,6 +537,8 @@ def calculate_column_rebar_lengths(
     nodes_df: pd.DataFrame,
     dev_lengths_path: str,
     lap_splice_path: str,
+    fc: int = 35,
+    dia_fy_map: dict = None,
 ) -> pd.DataFrame:
     """
     Calculate column rebar lengths from Tier 1 converter output.
@@ -562,8 +568,7 @@ def calculate_column_rebar_lengths(
     sorted_levels = sorted(all_levels, key=_level_sort_key)
     level_index = {lv: i for i, lv in enumerate(sorted_levels)}
 
-    # Get fc from material (default C35)
-    fc = 35
+    # fc comes from parameter (derived from material_id by app.py)
 
     # Process each column stack
     # Step 1: Group by grid + member_id (separates P2's multiple columns)

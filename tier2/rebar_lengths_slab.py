@@ -34,8 +34,12 @@ THICKNESS_MISMATCH_TOLERANCE = 5.0  # mm
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _steel_grade(dia_mm):
-    return 500 if int(dia_mm) in (10, 13) else 600
+def _steel_grade(dia_mm, dia_fy_map=None, fy_override=None):
+    if fy_override is not None:
+        return int(fy_override)
+    if dia_fy_map and int(dia_mm) in dia_fy_map:
+        return dia_fy_map[int(dia_mm)]
+    return 400 if int(dia_mm) in (10, 13) else 600
 
 
 def _dia_label(d_mm):
@@ -481,6 +485,7 @@ def calculate_slab_rebar_lengths(
     dev_lengths_path: str,
     lap_splice_path: str,
     fc: int = 35,
+    dia_fy_map: dict = None,
 ) -> pd.DataFrame:
     """
     Calculate slab rebar lengths from Tier 1 converter output.

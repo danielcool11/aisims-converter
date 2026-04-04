@@ -38,8 +38,12 @@ HOOK_EXT_FACTOR = 12     # 90-degree hook = 12 × dia
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _steel_grade(dia):
-    return 500 if int(dia) in (10, 13) else 600
+def _steel_grade(dia, dia_fy_map=None, fy_override=None):
+    if fy_override is not None:
+        return int(fy_override)
+    if dia_fy_map and int(dia) in dia_fy_map:
+        return dia_fy_map[int(dia)]
+    return 400 if int(dia) in (10, 13) else 600
 
 
 def _dia_label(d):
@@ -128,6 +132,7 @@ def calculate_stair_rebar_lengths(
     dev_lengths_path: str,
     lap_splice_path: str,
     fc: int = 35,
+    dia_fy_map: dict = None,
     cover_path: str = None,
 ) -> pd.DataFrame:
     """
