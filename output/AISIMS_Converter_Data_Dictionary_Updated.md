@@ -1,7 +1,6 @@
 # AISIMS Converter Data Dictionary
-# AISIMS 변환기 데이터 사전
 
-Generated: 2026-03-27
+Generated: 2026-04-04
 
 ## Naming Conventions
 
@@ -14,16 +13,16 @@ Generated: 2026-03-27
 
 ## File Overview
 
-### Core Files (18 files — every project)
+### Tier 1 — Core Files (18 files, every project)
 
 | # | File | Source | Description |
 |---|------|--------|-------------|
 | 1 | Nodes.csv | Part A | All nodes with level, grid, coordinates |
 | 2 | Materials.csv | Part A | Concrete + rebar material properties |
 | 3 | Sections.csv | Part A | Parsed section definitions with dimensions |
-| 4 | MembersBeam.csv | Part A | Beam elements with coordinates |
+| 4 | MembersBeam.csv | Part A | Beam elements with coordinates and junction extensions |
 | 5 | MembersColumn.csv | Part A | Column elements with 3D length (slanted support) |
-| 6 | MembersWall.csv | Part A | Wall quad panel elements |
+| 6 | MembersWall.csv | Part A | Wall quad panel elements with junction polygons |
 | 7 | MembersSlab.csv | Part B | Slab boundary polygons |
 | 8 | MembersStair.csv | Part B | U-shaped stair 8-point geometry |
 | 9 | MembersFooting.csv | Part B | Mat foundation quads/polygons |
@@ -37,7 +36,7 @@ Generated: 2026-03-27
 | 17 | DesignResultsColumn.csv | Part A | Column design capacity and ratios |
 | 18 | ValidationReport.txt | System | Cross-check results |
 
-### Conditional Files (3 files — project-dependent)
+### Tier 1 — Conditional Files (3 files, project-dependent)
 
 | # | File | Source | Condition | Description |
 |---|------|--------|-----------|-------------|
@@ -45,9 +44,21 @@ Generated: 2026-03-27
 | 20 | MembersBasementWall.csv | Part C | Project has basement | Basement/retaining wall panels with zone dimensions |
 | 21 | ReinforcementBasementWall.csv | Part C | Project has basement | Basement wall rebar per direction/face/zone |
 
+### Tier 2 — Rebar Length Files (7 files, computed from Tier 1)
+
+| # | File | Input | Description |
+|---|------|-------|-------------|
+| 22 | RebarLengthsBeam.csv | Members + Reinf + Sections | Bar-by-bar beam rebar with anchorage and splices |
+| 23 | RebarLengthsColumn.csv | Members + Reinf + Sections | Column main bars, dowels, hoops with splice zones |
+| 24 | RebarLengthsWall.csv | Members + Reinf + Nodes | Normal wall V/H bars with continuity stacking |
+| 25 | RebarLengthsBasementWall.csv | Members + Reinf + Nodes | Basement wall H/V bars, U-bars, dowels |
+| 26 | RebarLengthsSlab.csv | Members + Reinf + Beams | Slab bars with polygon scan-line clipping |
+| 27 | RebarLengthsFooting.csv | Members + Reinf | Footing base, additional, and stirrup bars |
+| 28 | RebarLengthsStair.csv | Members + Reinf | Stair bars with bend points for flights |
+
 ---
 
-## Column Definitions
+## Column Definitions — Tier 1
 
 ### 1. Nodes.csv
 
@@ -117,6 +128,8 @@ Generated: 2026-03-27
 | length_mm | float | mm | Span length |
 | b_mm | float | mm | Section width |
 | h_mm | float | mm | Section depth |
+| extend_start_mm | float | mm | Junction extension at start (half adjacent column/beam width) |
+| extend_end_mm | float | mm | Junction extension at end |
 
 ### 5. MembersColumn.csv
 
@@ -159,11 +172,13 @@ Generated: 2026-03-27
 | node_k | string | — | Corner node 3 |
 | node_l | string | — | Corner node 4 |
 | wall_status | string | — | DESIGNED / NO_DESIGN (see wall deduplication below) |
+| poly_0x_mm..poly_3y_mm | float | mm | Junction-modified polygon vertices (4 corners x 2 coords) |
+| extend_start_mm | float | mm | Junction extension at start (half adjacent wall thickness) |
+| extend_end_mm | float | mm | Junction extension at end |
 
 **Wall deduplication:** Elements from MembersWall that spatially overlap with Part C
 basement wall panels are removed (they are handled by MembersBasementWall instead).
-Remaining elements without DesignWall reinforcement are flagged as `NO_DESIGN`
-(e.g., buttress walls, uncovered perimeter gaps).
+Remaining elements without DesignWall reinforcement are flagged as `NO_DESIGN`.
 
 ### 7. MembersSlab.csv
 
@@ -181,7 +196,7 @@ Remaining elements without DesignWall reinforcement are flagged as `NO_DESIGN`
 | boundary_nodes | string | — | Polygon nodes (semicolon-separated) |
 | node_count | int | — | Number of boundary nodes |
 
-### 8. MembersStair.csv (73 columns)
+### 8. MembersStair.csv (78 columns)
 
 | Column Group | Columns | Description |
 |-------------|---------|-------------|
@@ -205,7 +220,7 @@ Remaining elements without DesignWall reinforcement are flagged as `NO_DESIGN`
 | thickness_mm | float | mm | Foundation thickness |
 | centroid_x_mm | float | mm | Centroid X |
 | centroid_y_mm | float | mm | Centroid Y |
-| z_mm | float | mm | Foundation elevation |
+| z_mm | float | mm | Footing top surface elevation (not center) |
 | Lx_mm | float | mm | X-direction span |
 | Ly_mm | float | mm | Y-direction span |
 | area_mm2 | float | mm2 | Plan area |
@@ -399,7 +414,7 @@ Remaining elements without DesignWall reinforcement are flagged as `NO_DESIGN`
 
 | Column | Type | Unit | Description |
 |--------|------|------|-------------|
-| wall_mark | string | — | Wall name (BW1, DW1, FW1) |
+| wall_mark | string | — | Wall name (BW1, RW1, DW1) |
 | level | string | — | Story level (B1, B4~B1) |
 | panel_no | int | — | Panel sequence (for multi-panel walls) |
 | wall_type | string | — | Wall type code (A, B, etc.) |
@@ -412,14 +427,23 @@ Remaining elements without DesignWall reinforcement are flagged as `NO_DESIGN`
 | zone_height_top_mm | float | mm | Top zone height |
 | zone_height_middle_mm | float | mm | Middle zone height |
 | zone_height_bottom_mm | float | mm | Bottom zone height |
-| node_i | string | — | Corner node 1 (converted ID, or MISSING_xxx if invalid) |
-| node_j | string | — | Corner node 2 (converted ID, or MISSING_xxx if invalid) |
-| node_k | string | — | Corner node 3 (converted ID, or MISSING_xxx if invalid) |
-| node_l | string | — | Corner node 4 (converted ID, or MISSING_xxx if invalid) |
-| centroid_x_mm | float | mm | Panel centroid X (inferred from valid nodes if needed) |
-| centroid_y_mm | float | mm | Panel centroid Y (inferred from valid nodes if needed) |
+| node_i | string | — | Corner node 1 (converted ID, or MISSING_xxx) |
+| node_j | string | — | Corner node 2 |
+| node_k | string | — | Corner node 3 |
+| node_l | string | — | Corner node 4 |
+| centroid_x_mm | float | mm | Panel centroid X |
+| centroid_y_mm | float | mm | Panel centroid Y |
 | z_mm | float | mm | Panel elevation (computed via height stacking) |
-| node_status | string | — | OK / PARTIAL / INFERRED / MISSING — coordinate reliability |
+| node_status | string | — | OK / PARTIAL / INFERRED / MISSING |
+| start_x_mm | float | mm | Actual horizontal span start X (from ELEMENT sheet, P2 only) |
+| start_y_mm | float | mm | Actual horizontal span start Y |
+| end_x_mm | float | mm | Actual horizontal span end X |
+| end_y_mm | float | mm | Actual horizontal span end Y |
+| extend_start_mm | float | mm | Junction extension at start |
+| extend_end_mm | float | mm | Junction extension at end |
+| poly_0x_mm..poly_3y_mm | float | mm | Junction-modified polygon vertices (4 corners x 2 coords) |
+
+Note: `start_x/y_mm` and `end_x/y_mm` are populated from the Part C ELEMENT sheet for projects with vertical panel nodes (P2). They provide the actual horizontal endpoints when node_i/node_j have identical XY coordinates.
 
 ### 21. ReinforcementBasementWall.csv (Conditional)
 
@@ -431,13 +455,269 @@ Remaining elements without DesignWall reinforcement are flagged as `NO_DESIGN`
 | thickness_mm | float | mm | Wall thickness |
 | direction | string | — | HORIZONTAL or VERTICAL |
 | face | string | — | INTERIOR or EXTERIOR |
-| zone | string | — | LEFT/MIDDLE/RIGHT (H) or TOP/MIDDLE/BOTTOM (V) |
+| zone | string | — | LEFT/MIDDLE/RIGHT (H) or TOP/MIDDLE/BOTTOM/FULL (V) |
 | bar_spec | string | — | Bar specification (e.g., D13@200) |
 | dia_mm | int | mm | Bar diameter |
 | spacing_mm | int | mm | Bar spacing |
 
 Note: Composite bars (e.g., D13+D16@100) are split into 2 rows with
 doubled spacing per individual bar type (D13@200 + D16@200).
+
+---
+
+## Column Definitions — Tier 2 (Rebar Lengths)
+
+### 22. RebarLengthsBeam.csv
+
+| Column | Type | Unit | Description |
+|--------|------|------|-------------|
+| segment_id | string | — | Beam segment ID (G1-SEG001) |
+| level | string | — | Story level |
+| direction | string | — | X or Y |
+| line_grid | string | — | Grid line identifier |
+| member_id | string | — | Base member ID |
+| span_index | int | — | Span position in continuous group |
+| start_grid | string | — | Start grid label |
+| end_grid | string | — | End grid label |
+| bar_position | string | — | TOP or BOT |
+| bar_role | string | — | MAIN_SINGLE, MAIN_START, MAIN_END, MAIN_INTERMEDIATE, ADD_START, ADD_END, ADD_INTERMEDIATE, ADD_MIDSPAN |
+| bar_type | string | — | MAIN or STIRRUP |
+| dia_mm | float | mm | Bar diameter |
+| n_bars | int | — | Number of bars |
+| length_mm | float | mm | Individual bar length |
+| layer | string | — | Bar layer |
+| spacing_mm | float | mm | Stirrup spacing (null for main bars) |
+| zone_length_mm | float | mm | Stirrup zone length |
+| quantity_pieces | int | — | Number of stirrup pieces in zone |
+| total_length_mm | float | mm | Total bar length (length x n_bars or quantity) |
+| anchorage_start | string | — | HOOK, LAP, or STRAIGHT |
+| anchorage_end | string | — | HOOK, LAP, or STRAIGHT |
+| lap_length_mm | float | mm | Lap splice length (Lpt or Lpb) |
+| development_length_mm | float | mm | Hook development length (Ldh) |
+| splice_start_mm | float | mm | Splice zone start Z coordinate |
+| splice_start_end_mm | float | mm | Splice zone start end Z |
+| splice_end_mm | float | mm | Splice zone end Z coordinate |
+| splice_end_end_mm | float | mm | Splice zone end end Z |
+| transition_type | string | — | Diameter transition type |
+| reinforcement_type | string | — | Reinforcement classification |
+| split_piece | int | — | Piece index for stock-split bars (null if no split) |
+| original_length_mm | float | mm | Original bar length before stock split |
+| x_start_mm | float | mm | Bar start X (structural coords) |
+| y_start_mm | float | mm | Bar start Y |
+| z_start_mm | float | mm | Bar start Z |
+| x_end_mm | float | mm | Bar end X |
+| y_end_mm | float | mm | Bar end Y |
+| z_end_mm | float | mm | Bar end Z |
+| b_mm | float | mm | Beam section width |
+| h_mm | float | mm | Beam section depth |
+| shape | string | — | Section shape (RECT) |
+
+### 23. RebarLengthsColumn.csv
+
+| Column | Type | Unit | Description |
+|--------|------|------|-------------|
+| member_id | string | — | Column member ID (C1, TC1) |
+| start_grid | string | — | Grid location |
+| level_from | string | — | Bottom level |
+| level_to | string | — | Top level |
+| bar_position | string | — | MAIN or HOOP |
+| bar_role | string | — | DOWEL, MAIN_BOTTOM, MAIN_INTERMEDIATE, MAIN_TOP, MAIN_FULL, HOOP_END_BOTTOM, HOOP_END_TOP, HOOP_MID |
+| bar_type | string | — | MAIN or HOOP |
+| dia_mm | float | mm | Bar diameter |
+| n_bars | int | — | Number of bars |
+| length_mm | float | mm | Individual bar length |
+| spacing_mm | float | mm | Hoop spacing (null for main bars) |
+| zone_length_mm | float | mm | Hoop zone length |
+| quantity_pieces | int | — | Number of hoops in zone |
+| total_length_mm | float | mm | Total bar length |
+| splice_start_mm | float | mm | Splice zone start Z |
+| splice_start_end_mm | float | mm | Splice zone start end Z |
+| splice_end_mm | float | mm | Splice zone end Z |
+| splice_end_end_mm | float | mm | Splice zone end end Z |
+| x_start_mm | float | mm | Bar start X |
+| y_start_mm | float | mm | Bar start Y |
+| z_start_mm | float | mm | Bar start Z |
+| x_end_mm | float | mm | Bar end X |
+| y_end_mm | float | mm | Bar end Y |
+| z_end_mm | float | mm | Bar end Z |
+| bend1_x/y/z_mm | float | mm | Bend point 1 location (slanted columns, P1 only) |
+| bend1_end_x/y/z_mm | float | mm | Bend point 1 end (direction change end) |
+| bend2_x/y/z_mm | float | mm | Bend point 2 location |
+| bend2_end_x/y/z_mm | float | mm | Bend point 2 end |
+| segment_id | string | — | Column segment ID (C1-SEG001) |
+| b_mm | float | mm | Column section width |
+| h_mm | float | mm | Column section depth |
+| shape | string | — | Section shape (RECT) |
+| split_piece | int | — | Piece index for stock-split bars |
+| split_total | int | — | Total pieces after stock split |
+| original_length_mm | float | mm | Original length before split |
+
+Note: Bend point columns (bend1_*, bend2_*) are present for projects with slanted columns (P1). Absent in projects without slanted columns (P2).
+
+### 24. RebarLengthsWall.csv
+
+| Column | Type | Unit | Description |
+|--------|------|------|-------------|
+| wall_id | int | — | MIDAS wall group ID |
+| wall_mark | string | — | Wall mark name |
+| level | string | — | Story level |
+| direction | string | — | VERTICAL or HORIZONTAL |
+| bar_role | string | — | DOWEL, MAIN_BOTTOM, MAIN_INTERMEDIATE, MAIN_TOP, MAIN_SINGLE, MAIN_SINGLE_WITH_DOWEL, H_BAR, U_BAR |
+| dia_mm | float | mm | Bar diameter |
+| spacing_mm | float | mm | Bar spacing |
+| n_bars | int | — | Number of bars |
+| length_mm | float | mm | Individual bar length |
+| total_length_mm | float | mm | Total bar length |
+| height_mm | float | mm | Wall panel height |
+| width_mm | float | mm | Wall panel width |
+| thickness_mm | float | mm | Wall thickness |
+| bar_layer | string | — | Single or Double |
+| splice_start_mm | float | mm | Splice zone start Z |
+| splice_start_end_mm | float | mm | Splice zone start end Z |
+| splice_end_mm | float | mm | Splice zone end Z |
+| splice_end_end_mm | float | mm | Splice zone end end Z |
+| cover_mm | float | mm | Concrete cover |
+| wall_dir_x_mm | float | mm | Wall plan direction X component (for V-bar distribution) |
+| wall_dir_y_mm | float | mm | Wall plan direction Y component |
+| mesh_origin_x/y/z_mm | float | mm | Bar group start position (structural coords) |
+| mesh_terminus_x/y/z_mm | float | mm | Bar group end position |
+| mesh_distribution_axis | string | — | ALONG_WALL_LENGTH or ALONG_WALL_HEIGHT |
+| split_piece | int | — | Piece index for stock-split bars |
+| split_total | int | — | Total pieces after split |
+| original_length_mm | float | mm | Original length before split |
+
+### 25. RebarLengthsBasementWall.csv
+
+| Column | Type | Unit | Description |
+|--------|------|------|-------------|
+| wall_mark | string | — | Wall name (BW1, RW1) |
+| level | string | — | Story level |
+| direction | string | — | HORIZONTAL or VERTICAL |
+| face | string | — | INTERIOR or EXTERIOR |
+| zone | string | — | LEFT/MIDDLE/RIGHT/FULL (H) or TOP/MIDDLE/BOTTOM/DOWEL (V) |
+| bar_role | string | — | H_LEFT, H_MIDDLE, H_RIGHT, H_FULL, V_TOP, V_MIDDLE, V_BOTTOM, U_BAR, DOWEL |
+| dia_mm | int | mm | Bar diameter |
+| spacing_mm | int | mm | Bar spacing |
+| n_bars | int | — | Number of bars |
+| length_mm | int | mm | Individual bar length |
+| total_length_mm | int | mm | Total bar length |
+| height_mm | float | mm | Wall panel height |
+| length_wall_mm | float | mm | Actual panel plan length (from quad nodes) |
+| thickness_mm | float | mm | Wall thickness |
+| zone_height_mm | float | mm | Vertical zone height (V bars only) |
+| Ldh_mm | float | mm | Hook development length |
+| Lpc_mm | float | mm | Lap splice length (V bars only) |
+| cover_mm | float | mm | Concrete cover |
+| mesh_origin_x/y/z_mm | float | mm | Bar group start position |
+| mesh_terminus_x/y/z_mm | float | mm | Bar group end position |
+| mesh_distribution_axis | string | — | ALONG_WALL_LENGTH or ALONG_WALL_HEIGHT |
+| wall_dir_x_mm | float | mm | Wall plan direction X (for distribution) |
+| wall_dir_y_mm | float | mm | Wall plan direction Y |
+| split_piece | float | — | Piece index for stock-split bars |
+| split_total | float | — | Total pieces after split |
+| original_length_mm | float | mm | Original length before split |
+| zone_width_mm | float | mm | Horizontal zone width |
+
+### 26. RebarLengthsSlab.csv
+
+| Column | Type | Unit | Description |
+|--------|------|------|-------------|
+| member_id | string | — | Slab identifier |
+| level | string | — | Story level |
+| slab_type | string | — | C or B |
+| thickness_mm | float | mm | Slab thickness |
+| direction | string | — | X or Y |
+| layer | string | — | Top or Bot |
+| bar_role | string | — | SINGLE, START, END, INTERMEDIATE |
+| start_type | string | — | hook, lap, or straight |
+| end_type | string | — | hook, lap, or straight |
+| dia_mm | int | mm | Bar diameter |
+| spacing_mm | int | mm | Bar spacing |
+| n_bars | int | — | Number of bars in this group |
+| length_mm | int | mm | Individual bar length |
+| l_cl_mm | float | mm | Clear span |
+| Wg1_mm | float | mm | Beam width at start |
+| Wg2_mm | float | mm | Beam width at end |
+| Ldh_mm | float | mm | Hook development length |
+| Llap_mm | float | mm | Lap splice length |
+| Lx_mm | float | mm | Slab X span |
+| Ly_mm | float | mm | Slab Y span |
+| short_direction | string | — | X or Y (short span direction) |
+| panel_role | string | — | SINGLE, START, END, INTERMEDIATE |
+| mismatch_before | string | — | Thickness mismatch at start (nullable) |
+| mismatch_after | string | — | Thickness mismatch at end (nullable) |
+| adj_thickness_before_mm | float | mm | Adjacent slab thickness before |
+| adj_thickness_after_mm | float | mm | Adjacent slab thickness after |
+| centroid_x/y_mm | float | mm | Slab centroid |
+| z_mm | float | mm | Slab elevation |
+| mesh_origin_x/y/z_mm | float | mm | Bar start position |
+| mesh_terminus_x/y/z_mm | float | mm | Bar end position |
+| mesh_distribution_axis | string | — | ALONG_X or ALONG_Y |
+| split_piece | int | — | Piece index for stock-split bars |
+| split_total | int | — | Total pieces |
+| original_length_mm | float | mm | Original length before split |
+| total_length_mm | int | mm | Total bar length |
+
+Note: For polygon slabs (non-rectangular, 3+ nodes), bars are scan-line clipped to the slab boundary. Each group of adjacent bars with the same length is output as one record.
+
+### 27. RebarLengthsFooting.csv
+
+| Column | Type | Unit | Description |
+|--------|------|------|-------------|
+| member_id | string | — | Foundation ID |
+| zone | string | — | Zone ID |
+| zone_type | string | — | BASE, ADDITIONAL, or STIRRUP |
+| direction | string | — | X or Y |
+| layer | string | — | Top or Bot |
+| bar_role | string | — | BASE_X_TOP, BASE_Y_BOT, ADD_X_TOP, STIRRUP, etc. |
+| dia_mm | int | mm | Bar diameter |
+| spacing_mm | int | mm | Bar spacing |
+| n_bars | int | — | Number of bars |
+| length_mm | int | mm | Individual bar length |
+| total_length_mm | int | mm | Total bar length |
+| Ldh_mm | float | mm | Hook development length |
+| Llap_mm | float | mm | Lap splice length |
+| cover_mm | float | mm | Concrete cover |
+| bar_span_mm | float | mm | Clear bar span |
+| dist_width_mm | float | mm | Distribution width |
+| mesh_distribution_axis | string | — | ALONG_X or ALONG_Y |
+| mesh_origin_x/y/z_mm | float | mm | Bar start position |
+| mesh_terminus_x/y/z_mm | float | mm | Bar end position |
+| split_piece | int | — | Piece index for stock-split bars |
+| split_total | int | — | Total pieces |
+| original_length_mm | float | mm | Original length before split |
+
+Note: Footing z_mm is the **top surface** elevation, not center. Top bars at z - cover, bottom bars at z - thickness + cover.
+
+### 28. RebarLengthsStair.csv
+
+| Column | Type | Unit | Description |
+|--------|------|------|-------------|
+| segment_id | string | — | Stair segment ID |
+| member_id | string | — | Stair member ID |
+| story_group | string | — | Story range (e.g., B1~1F) |
+| zone | string | — | landing_lower, flight1, landing_mid, flight2 |
+| sub_zone | string | — | FULL, LEFT, RIGHT, etc. |
+| direction | string | — | longitudinal or transverse |
+| layer | string | — | Top or Bot |
+| dia_mm | int | mm | Bar diameter |
+| spacing_mm | int | mm | Bar spacing |
+| n_bars | int | — | Number of bars |
+| length_mm | int | mm | Individual bar length |
+| total_length_mm | int | mm | Total bar length |
+| cover_mm | float | mm | Concrete cover |
+| Ldh_mm | float | mm | Hook development length |
+| lap_top_mm | float | mm | Top bar lap splice length |
+| lap_bot_mm | float | mm | Bottom bar lap splice length |
+| start_x/y/z | float | mm | Bar start position |
+| end_x/y/z | float | mm | Bar end position |
+| width_dir_x/y/z | float | — | Bar distribution direction (unit vector) |
+| width_span_mm | float | mm | Distribution span width |
+| bend1_x/y/z | float | mm | Bend point 1 (flights only) |
+| bend2_x/y/z | float | mm | Bend point 2 (flights only) |
+| split_piece | int | — | Piece index for stock-split bars |
+| split_total | int | — | Total pieces |
+| original_length_mm | float | mm | Original length before split |
 
 ---
 
@@ -464,3 +744,8 @@ doubled spacing per individual bar type (D13@200 + D16@200).
 - Semicolons (;) used as separator in boundary_nodes to prevent Excel interpretation
 - Composite bars (D16+D13@200) split into 2 rows with doubled spacing
 - Pipe format stirrups (4|5-D13@150) take max leg count
+- Stock split: bars exceeding 12m are split into equal pieces with lap splices at joints
+- Polygon slabs: non-rectangular slabs (3+ nodes) use scan-line clipping for rebar
+- Footing z_mm represents the top surface, not the center of the foundation
+- Bend columns (bend1_*, bend2_*) present only for slanted column transitions
+- wall_dir_x/y_mm provides explicit wall plan direction for reliable V-bar distribution in the renderer
