@@ -142,10 +142,20 @@ Update beam, column, and wall ingest to read `material_id` field.
 ### Merge Rules
 1. Same `member_id` + same `level` + same `direction`
 2. Contiguous (end-to-start within 100mm tolerance)
-3. **Break at columns**: if intermediate node grid is in `column_grids` set → structural support → break point
+3. **Break at structural supports**: if intermediate node grid is in `support_grids` set → break point. Support grids = union of:
+   - Column grids (from MembersColumn)
+   - Wall grids (from MembersWall — all walls, since MIDAS only models structural walls)
+   - Beam-beam junctions (grid points where beams of different `member_id` intersect)
 4. **Break on section change**: different `section_id` → different beam size
 5. **Break on material change**: different `material_id` → different concrete grade
 6. **Max length**: merged span ≤ 12000mm
+
+### Additional Considerations
+- **extend_start/end_mm after merge**: Only outer endpoints of merged span keep extensions. Internal merged points lose theirs.
+- **Stirrup fy vs main bar fy**: Use `fy_main` for main bars, `fy_sub` for stirrups/ties/hoops. Each calculator must differentiate.
+- **Sanity check**: Assert sum of element lengths before merge == sum of merged span lengths.
+- **Diagonal beams**: Direction detection via dominant coordinate axis. Sort by that axis for merging.
+- **segment_id after merge**: New IDs (e.g., `TG6-SPAN001`). Verify `design_key` → reinforcement FK still works.
 
 ### Real Example — P2 TG6 at 3F (y=42800, X-direction)
 
