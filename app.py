@@ -34,6 +34,7 @@ from converters.basement_walls import convert_basement_walls
 from converters.validation import validate_outputs, format_report
 from converters.wall_dedup import deduplicate_walls
 from converters.junction_polygon import run_junction_detection
+from converters.beam_merge import merge_beam_spans
 from tier2.rebar_lengths_beam import calculate_beam_rebar_lengths
 from tier2.rebar_lengths_column import calculate_column_rebar_lengths
 from tier2.rebar_lengths_slab import calculate_slab_rebar_lengths
@@ -401,6 +402,19 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 outputs['beams'] = elem_result['beams']
                 outputs['columns'] = elem_result['columns']
                 outputs['walls'] = elem_result['walls']
+
+        # ── Phase 2.6: Beam merge ──
+        if 'beams' in outputs and not outputs['beams'].empty:
+            progress.progress(52, text="Phase 2.6: Merging beam spans...")
+            try:
+                beams_before = len(outputs['beams'])
+                outputs['beams'] = merge_beam_spans(
+                    outputs['beams'], outputs['columns'],
+                    outputs.get('walls'),
+                )
+                log(f"Beam merge: {beams_before} elements → {len(outputs['beams'])} spans")
+            except Exception as e:
+                log(f"Beam merge FAILED (keeping original): {e}")
 
         # Read Part B files once (file pointer can only be read once)
         slab_boundary_raw = None
