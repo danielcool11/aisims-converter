@@ -1,6 +1,6 @@
 # AISIMS Converter Data Dictionary
 
-Generated: 2026-04-04
+Generated: 2026-04-06
 
 ## Naming Conventions
 
@@ -130,6 +130,14 @@ Generated: 2026-04-04
 | h_mm | float | mm | Section depth |
 | extend_start_mm | float | mm | Junction extension at start (half adjacent column/beam width) |
 | extend_end_mm | float | mm | Junction extension at end |
+| material_id | string | — | Concrete grade from MIDAS material (e.g., C35, C40) |
+| fy_main | float | MPa | Main rebar yield strength from material |
+| fy_sub | float | MPa | Stirrup rebar yield strength from material |
+| element_ids | string | — | Constituent MIDAS element IDs, comma-separated (merged spans) |
+
+**Beam merging:** Adjacent FEM beam elements are merged into structural column-to-column spans.
+Merge breaks at: column grids, wall grids, beam-beam junctions, section/material changes, max 12m.
+`element_id` keeps the first element's ID. `element_ids` lists all constituent element IDs for traceability.
 
 ### 5. MembersColumn.csv
 
@@ -152,6 +160,9 @@ Generated: 2026-04-04
 | length_mm | float | mm | Actual 3D length (>height for slanted columns) |
 | b_mm | float | mm | Section width |
 | h_mm | float | mm | Section depth |
+| material_id | string | — | Concrete grade from MIDAS material (e.g., C35, C40) |
+| fy_main | float | MPa | Main rebar yield strength from material |
+| fy_sub | float | MPa | Tie rebar yield strength from material |
 
 ### 6. MembersWall.csv
 
@@ -175,6 +186,7 @@ Generated: 2026-04-04
 | poly_0x_mm..poly_3y_mm | float | mm | Junction-modified polygon vertices (4 corners x 2 coords) |
 | extend_start_mm | float | mm | Junction extension at start (half adjacent wall thickness) |
 | extend_end_mm | float | mm | Junction extension at end |
+| material_id | string | — | Concrete grade from MIDAS material (e.g., C35, C40) |
 
 **Wall deduplication:** Elements from MembersWall that spatially overlap with Part C
 basement wall panels are removed (they are handled by MembersBasementWall instead).
@@ -749,3 +761,6 @@ Note: Footing z_mm is the **top surface** elevation, not center. Top bars at z -
 - Footing z_mm represents the top surface, not the center of the foundation
 - Bend columns (bend1_*, bend2_*) present only for slanted column transitions
 - wall_dir_x/y_mm provides explicit wall plan direction for reliable V-bar distribution in the renderer
+- **Beam merging**: Adjacent FEM beam elements are merged into structural column-to-column spans. Breaks at column grids, wall grids, beam-beam junctions, section/material changes, and max 12m stock length. Diagonal beams preserve both axis coordinates.
+- **Material propagation**: material_id, fy_main, fy_sub are derived from the raw MIDAS Materials.csv per-element assignment. Beams/columns/walls get per-element values. Slabs/footings/stairs use project-level defaults (dia_fy_map: D10/D13→fy_sub, D16+→fy_main).
+- **Stair level validation**: level_to is validated against z_start + total_height using story definition. Corrects ambiguous level codes (e.g., 'R' → '7F' when elevation matches 7F, not Roof).

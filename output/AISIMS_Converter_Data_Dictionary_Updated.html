@@ -23,7 +23,7 @@ strong { color: #1f2328; }
 </head>
 <body>
 <h1>AISIMS Converter Data Dictionary</h1>
-<p>Generated: 2026-04-04</p>
+<p>Generated: 2026-04-06</p>
 <h2>Naming Conventions</h2>
 <table>
 <thead>
@@ -626,8 +626,35 @@ strong { color: #1f2328; }
 <td>mm</td>
 <td>Junction extension at end</td>
 </tr>
+<tr>
+<td>material_id</td>
+<td>string</td>
+<td>—</td>
+<td>Concrete grade from MIDAS material (e.g., C35, C40)</td>
+</tr>
+<tr>
+<td>fy_main</td>
+<td>float</td>
+<td>MPa</td>
+<td>Main rebar yield strength from material</td>
+</tr>
+<tr>
+<td>fy_sub</td>
+<td>float</td>
+<td>MPa</td>
+<td>Stirrup rebar yield strength from material</td>
+</tr>
+<tr>
+<td>element_ids</td>
+<td>string</td>
+<td>—</td>
+<td>Constituent MIDAS element IDs, comma-separated (merged spans)</td>
+</tr>
 </tbody>
 </table>
+<p><strong>Beam merging:</strong> Adjacent FEM beam elements are merged into structural column-to-column spans.
+Merge breaks at: column grids, wall grids, beam-beam junctions, section/material changes, max 12m.
+<code>element_id</code> keeps the first element's ID. <code>element_ids</code> lists all constituent element IDs for traceability.</p>
 <h3>5. MembersColumn.csv</h3>
 <table>
 <thead>
@@ -740,6 +767,24 @@ strong { color: #1f2328; }
 <td>float</td>
 <td>mm</td>
 <td>Section depth</td>
+</tr>
+<tr>
+<td>material_id</td>
+<td>string</td>
+<td>—</td>
+<td>Concrete grade from MIDAS material (e.g., C35, C40)</td>
+</tr>
+<tr>
+<td>fy_main</td>
+<td>float</td>
+<td>MPa</td>
+<td>Main rebar yield strength from material</td>
+</tr>
+<tr>
+<td>fy_sub</td>
+<td>float</td>
+<td>MPa</td>
+<td>Tie rebar yield strength from material</td>
 </tr>
 </tbody>
 </table>
@@ -861,6 +906,12 @@ strong { color: #1f2328; }
 <td>float</td>
 <td>mm</td>
 <td>Junction extension at end</td>
+</tr>
+<tr>
+<td>material_id</td>
+<td>string</td>
+<td>—</td>
+<td>Concrete grade from MIDAS material (e.g., C35, C40)</td>
 </tr>
 </tbody>
 </table>
@@ -3759,6 +3810,9 @@ doubled spacing per individual bar type (D13@200 + D16@200).</p>
 <li>Footing z_mm represents the top surface, not the center of the foundation</li>
 <li>Bend columns (bend1_<em>, bend2_</em>) present only for slanted column transitions</li>
 <li>wall_dir_x/y_mm provides explicit wall plan direction for reliable V-bar distribution in the renderer</li>
+<li><strong>Beam merging</strong>: Adjacent FEM beam elements are merged into structural column-to-column spans. Breaks at column grids, wall grids, beam-beam junctions, section/material changes, and max 12m stock length. Diagonal beams preserve both axis coordinates.</li>
+<li><strong>Material propagation</strong>: material_id, fy_main, fy_sub are derived from the raw MIDAS Materials.csv per-element assignment. Beams/columns/walls get per-element values. Slabs/footings/stairs use project-level defaults (dia_fy_map: D10/D13→fy_sub, D16+→fy_main).</li>
+<li><strong>Stair level validation</strong>: level_to is validated against z_start + total_height using story definition. Corrects ambiguous level codes (e.g., 'R' → '7F' when elevation matches 7F, not Roof).</li>
 </ul>
 </body>
 </html>
