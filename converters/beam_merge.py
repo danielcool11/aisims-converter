@@ -117,36 +117,32 @@ def _merge_chain(chain, span_counter):
     last = chain[-1]
     span_counter += 1
 
-    # Determine direction-consistent start/end
-    direction = _beam_direction(
-        first['x_from_mm'], first['y_from_mm'],
-        last['x_to_mm'], last['y_to_mm'],
-    )
+    # Collect all coordinates from all elements in the chain
+    all_x = []
+    all_y = []
+    for r in chain:
+        all_x.extend([r['x_from_mm'], r['x_to_mm']])
+        all_y.extend([r['y_from_mm'], r['y_to_mm']])
 
-    # For merged span: use the outermost coordinates
+    # Determine direction from the total coordinate span
+    dx_span = max(all_x) - min(all_x)
+    dy_span = max(all_y) - min(all_y)
+    direction = 'X' if dx_span >= dy_span else 'Y'
+
+    # Use outermost coordinates along primary axis,
+    # average for perpendicular axis (beams on same gridline)
     if direction == 'X':
-        all_x = []
-        for r in chain:
-            all_x.extend([r['x_from_mm'], r['x_to_mm']])
-        x_min, x_max = min(all_x), max(all_x)
-        # Find which element has min-x as start
-        start_elem = min(chain, key=lambda r: min(r['x_from_mm'], r['x_to_mm']))
-        end_elem = max(chain, key=lambda r: max(r['x_from_mm'], r['x_to_mm']))
-        x_from = min(start_elem['x_from_mm'], start_elem['x_to_mm'])
-        x_to = max(end_elem['x_from_mm'], end_elem['x_to_mm'])
-        y_from = start_elem['y_from_mm']
-        y_to = end_elem['y_to_mm']
+        x_from = min(all_x)
+        x_to = max(all_x)
+        y_avg = sum(all_y) / len(all_y)
+        y_from = y_avg
+        y_to = y_avg
     else:
-        all_y = []
-        for r in chain:
-            all_y.extend([r['y_from_mm'], r['y_to_mm']])
-        y_min, y_max = min(all_y), max(all_y)
-        start_elem = min(chain, key=lambda r: min(r['y_from_mm'], r['y_to_mm']))
-        end_elem = max(chain, key=lambda r: max(r['y_from_mm'], r['y_to_mm']))
-        y_from = min(start_elem['y_from_mm'], start_elem['y_to_mm'])
-        y_to = max(end_elem['y_from_mm'], end_elem['y_to_mm'])
-        x_from = start_elem['x_from_mm']
-        x_to = end_elem['x_to_mm']
+        y_from = min(all_y)
+        y_to = max(all_y)
+        x_avg = sum(all_x) / len(all_x)
+        x_from = x_avg
+        x_to = x_avg
 
     # Sum lengths
     total_length = sum(r['length_mm'] for r in chain)
@@ -178,11 +174,11 @@ def _merge_chain(chain, span_counter):
                 grid_to = gf
                 break
 
-    # Nodes: outermost
-    node_from = start_elem.get('node_from', '')
-    node_to = end_elem.get('node_to', '')
+    # Nodes: first and last in chain (sorted by primary coordinate)
+    node_from = first.get('node_from', '')
+    node_to = last.get('node_to', '')
 
-    # Use the dominant (most common or first) element's properties
+    # Use the first element's properties (all should be same within merged span)
     member_id = first['member_id']
     section_id = first['section_id']
     design_key = first.get('design_key', '')
@@ -197,8 +193,8 @@ def _merge_chain(chain, span_counter):
     element_ids = ','.join(str(int(r['element_id'])) for r in chain)
 
     # Extensions: only keep outermost
-    extend_start = start_elem.get('extend_start_mm', 0) or 0
-    extend_end = end_elem.get('extend_end_mm', 0) or 0
+    extend_start = first.get('extend_start_mm', 0) or 0
+    extend_end = last.get('extend_end_mm', 0) or 0
 
     merged = {
         'element_id': int(first['element_id']),  # keep first for backward compat
