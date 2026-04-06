@@ -192,9 +192,19 @@ def _merge_chain(chain, span_counter):
     # Element IDs for traceability
     element_ids = ','.join(str(int(r['element_id'])) for r in chain)
 
-    # Extensions: only keep outermost
-    extend_start = first.get('extend_start_mm', 0) or 0
-    extend_end = last.get('extend_end_mm', 0) or 0
+    # Extensions: take max from any element at each end of the chain.
+    # The first element (by sort) contributes start extension,
+    # the last element contributes end extension.
+    # Check both extend_start and extend_end on each since element
+    # direction may not match the merged span direction.
+    extend_start = max(
+        first.get('extend_start_mm', 0) or 0,
+        first.get('extend_end_mm', 0) or 0,
+    )
+    extend_end = max(
+        last.get('extend_start_mm', 0) or 0,
+        last.get('extend_end_mm', 0) or 0,
+    )
 
     merged = {
         'element_id': int(first['element_id']),  # keep first for backward compat
