@@ -208,7 +208,7 @@ Remaining elements without DesignWall reinforcement are flagged as `NO_DESIGN`.
 | boundary_nodes | string | — | Polygon nodes (semicolon-separated) |
 | node_count | int | — | Number of boundary nodes |
 
-### 8. MembersStair.csv (78 columns)
+### 8. MembersStair.csv (73 columns)
 
 | Column Group | Columns | Description |
 |-------------|---------|-------------|
