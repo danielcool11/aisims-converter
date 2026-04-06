@@ -127,17 +127,25 @@ def _merge_chain(chain, span_counter):
     # Determine direction from the total coordinate span
     dx_span = max(all_x) - min(all_x)
     dy_span = max(all_y) - min(all_y)
+    is_diagonal = dx_span > 100 and dy_span > 100 and min(dx_span, dy_span) > max(dx_span, dy_span) * 0.15
     direction = 'X' if dx_span >= dy_span else 'Y'
 
-    # Use outermost coordinates along primary axis,
-    # average for perpendicular axis (beams on same gridline)
-    if direction == 'X':
+    if is_diagonal:
+        # Diagonal beams: use first element's start and last element's end
+        # (chain is sorted by primary axis, so first→last = full span)
+        x_from = first['x_from_mm']
+        y_from = first['y_from_mm']
+        x_to = last['x_to_mm']
+        y_to = last['y_to_mm']
+    elif direction == 'X':
+        # X-direction: use outermost X, average Y
         x_from = min(all_x)
         x_to = max(all_x)
         y_avg = sum(all_y) / len(all_y)
         y_from = y_avg
         y_to = y_avg
     else:
+        # Y-direction: use outermost Y, average X
         y_from = min(all_y)
         y_to = max(all_y)
         x_avg = sum(all_x) / len(all_x)
