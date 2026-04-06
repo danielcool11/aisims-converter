@@ -136,6 +136,24 @@ def convert_stairs(
         z_end = level_z.get(level_to) if level_z else None
         if z_start is None and z_mm is not None:
             z_start = z_mm
+
+        # Validate level_to: if z_start + total_height doesn't match level_to's Z,
+        # find the correct level (e.g., 'R' might map to 'Roof' but actual top is '7F')
+        if z_start is not None and total_height and level_z:
+            expected_z_end = z_start + total_height
+            if z_end is None or abs(expected_z_end - z_end) > 500:
+                # Find the level whose Z matches the stair top
+                best_level = level_to
+                best_diff = abs(expected_z_end - z_end) if z_end is not None else float('inf')
+                for lv, lz in level_z.items():
+                    diff = abs(lz - expected_z_end)
+                    if diff < best_diff:
+                        best_diff = diff
+                        best_level = lv
+                if best_level != level_to:
+                    level_to = best_level
+                    z_end = level_z.get(level_to)
+
         z_mid = z_start + total_height / 2.0 if z_start is not None and total_height else None
 
         # Flight sloped length
