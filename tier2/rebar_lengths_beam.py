@@ -281,14 +281,26 @@ class BeamDataAdapter:
                 'z_mm': float(row['z_mm']),
             }
 
-        # Column dimensions at grid points: grid → {b_mm, h_mm}
+        # Column dimensions at grid points: (grid, level) → {b_mm, h_mm}
+        # A column spanning level_from~level_to supports beams at both levels.
         self.column_dims = {}
         for _, row in self.columns_df.iterrows():
             grid = str(row.get('grid', ''))
-            if grid and grid != 'OFF_GRID':
-                b = float(row['b_mm']) if pd.notna(row.get('b_mm')) else 0
-                h = float(row['h_mm']) if pd.notna(row.get('h_mm')) else 0
-                self.column_dims[grid] = {'b_mm': b, 'h_mm': h}
+            if not grid or grid == 'OFF_GRID':
+                continue
+            b = float(row['b_mm']) if pd.notna(row.get('b_mm')) else 0
+            h = float(row['h_mm']) if pd.notna(row.get('h_mm')) else 0
+            levels = set()
+            for lf in ('level_from', 'level_to', 'level'):
+                lv = str(row.get(lf, '') or '').strip()
+                if lv:
+                    levels.add(lv)
+            for lv in levels:
+                key = (grid, lv)
+                if key not in self.column_dims:
+                    self.column_dims[key] = {'b_mm': 0, 'h_mm': 0}
+                self.column_dims[key]['b_mm'] = max(self.column_dims[key]['b_mm'], b)
+                self.column_dims[key]['h_mm'] = max(self.column_dims[key]['h_mm'], h)
 
         # Beam direction and line_key
         self.beams_df['direction'] = self.beams_df.apply(
@@ -526,12 +538,20 @@ class BeamDataAdapter:
                 cfg['main'] = 0
                 cfg['is_uniform'] = True
 
-    def get_column_width(self, grid, direction):
-        """Get column width at a grid point in beam direction."""
-        dims = self.column_dims.get(grid, {'b_mm': 0, 'h_mm': 0})
-        if direction == 'X':
-            return dims.get('b_mm', 0) or 0
-        return dims.get('h_mm', 0) or 0
+    def get_column_width(self, grid, direction, level=None):
+        """Get column width at a grid point in beam direction.
+        Uses (grid, level) key for level-aware lookup.
+        Falls back to any-level match if level not found (backward compat).
+        """
+        if level:
+            dims = self.column_dims.get((grid, level), None)
+            if dims:
+                return dims.get('b_mm', 0) if direction == 'X' else dims.get('h_mm', 0)
+        # Fallback: match any level at this grid (backward compat)
+        for (g, _lv), dims in self.column_dims.items():
+            if g == grid:
+                return dims.get('b_mm', 0) if direction == 'X' else dims.get('h_mm', 0)
+        return 0
 
     def get_section(self, section_id):
         return self.section_props.get(str(section_id))
@@ -734,8 +754,9 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
 
         lext = max(d_eff, 12.0 * dia_top)
 
-        Wc1 = adapter.get_column_width(grid_from, direction)
-        Wc2 = adapter.get_column_width(grid_to, direction)
+        beam_level = sp.get('level', '')
+        Wc1 = adapter.get_column_width(grid_from, direction, beam_level)
+        Wc2 = adapter.get_column_width(grid_to, direction, beam_level)
         l_cl = l_span - 0.5 * (Wc1 + Wc2)
 
         is_first = (sub_i == 0)
@@ -818,8 +839,9 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
             l_cl_next = l_cl
             if sub_i < n_sub - 1:
                 next_sp = span_list[sub_i + 1]['sp']
-                next_Wc1 = adapter.get_column_width(next_sp.get('grid_from', ''), direction)
-                next_Wc2 = adapter.get_column_width(next_sp.get('grid_to', ''), direction)
+                next_level = next_sp.get('level', beam_level)
+                next_Wc1 = adapter.get_column_width(next_sp.get('grid_from', ''), direction, next_level)
+                next_Wc2 = adapter.get_column_width(next_sp.get('grid_to', ''), direction, next_level)
                 l_cl_next = float(next_sp['length_mm']) - 0.5 * (next_Wc1 + next_Wc2)
 
             # ADD_START (first span, EXT zone has more bars than main)
@@ -990,8 +1012,9 @@ def _calculate_stirrups(adapter):
 
         grid_from = row.get('grid_from', '')
         grid_to = row.get('grid_to', '')
-        Wc1 = adapter.get_column_width(grid_from, direction)
-        Wc2 = adapter.get_column_width(grid_to, direction)
+        st_level = row.get('level', '')
+        Wc1 = adapter.get_column_width(grid_from, direction, st_level)
+        Wc2 = adapter.get_column_width(grid_to, direction, st_level)
         l_cl = l_span - 0.5 * (Wc1 + Wc2)
 
         xs = row.get('x_from_mm', 0) or 0
@@ -1076,15 +1099,17 @@ def _compute_splice_coords(results, adapter):
 
         direction = bar.get('direction', 'X')
 
+        bar_level = bar.get('level', '')
+
         if bar.get('anchorage_start') == 'LAP' and bar.get('start_grid'):
-            col_w = adapter.get_column_width(bar['start_grid'], direction)
+            col_w = adapter.get_column_width(bar['start_grid'], direction, bar_level)
             face = (bar.get('x_start_mm', 0) or 0) + col_w / 2 if direction == 'X' \
                 else (bar.get('y_start_mm', 0) or 0) + col_w / 2
             bar['splice_start_mm'] = round(face, 1)
             bar['splice_start_end_mm'] = round(face + lap, 1)
 
         if bar.get('anchorage_end') == 'LAP' and bar.get('end_grid'):
-            col_w = adapter.get_column_width(bar['end_grid'], direction)
+            col_w = adapter.get_column_width(bar['end_grid'], direction, bar_level)
             face = (bar.get('x_end_mm', 0) or 0) + col_w / 2 if direction == 'X' \
                 else (bar.get('y_end_mm', 0) or 0) + col_w / 2
             bar['splice_end_mm'] = round(face, 1)
