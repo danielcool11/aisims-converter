@@ -417,43 +417,51 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 log(f"Beam merge FAILED (keeping original): {e}")
 
         # ── Phase 2.7: Add column width at beam supports ──
+        # Use coordinate matching (not grid labels) to avoid false positives
+        # from beam merge borrowing grid labels at beam-beam junctions.
         if 'beams' in outputs and 'columns' in outputs:
             try:
+                import math
                 beams_df = outputs['beams']
                 cols_df = outputs['columns']
-                # Build (grid, level) → max column width lookup.
-                # A column spanning level_from~level_to supports beams at both levels.
-                col_widths = {}  # (grid, level) → {X: width, Y: width}
+                XY_TOL = 200  # mm tolerance for coordinate matching
+
+                # Build column position index: list of (x, y, level_from, level_to, b, h)
+                col_positions = []
                 for _, c in cols_df.iterrows():
-                    g = str(c.get('grid', '')).strip()
-                    if not g:
-                        continue
+                    x = float(c.get('x_mm', 0) or 0)
+                    y = float(c.get('y_mm', 0) or 0)
                     b = float(c.get('b_mm', 0) or 0)
                     h = float(c.get('h_mm', 0) or 0)
-                    # Column supports beams at both its bottom and top levels
-                    levels = set()
                     lf = str(c.get('level_from', '') or '').strip()
                     lt = str(c.get('level_to', '') or '').strip()
-                    lv = str(c.get('level', '') or '').strip()
-                    if lf: levels.add(lf)
-                    if lt: levels.add(lt)
-                    if lv: levels.add(lv)
-                    for level in levels:
-                        key = (g, level)
-                        if key not in col_widths:
-                            col_widths[key] = {'X': 0, 'Y': 0}
-                        col_widths[key]['X'] = max(col_widths[key]['X'], b)
-                        col_widths[key]['Y'] = max(col_widths[key]['Y'], h)
+                    col_positions.append((x, y, lf, lt, b, h))
+
+                def find_col_width(x, y, level, direction):
+                    """Find column width at (x, y) on this level."""
+                    best = 0
+                    for cx, cy, clf, clt, cb, ch in col_positions:
+                        if abs(cx - x) > XY_TOL or abs(cy - y) > XY_TOL:
+                            continue
+                        # Column must span this level
+                        if level and level != clf and level != clt:
+                            continue
+                        w = cb if direction == 'X' else ch
+                        if w > best:
+                            best = w
+                    return best
 
                 cw_start = []
                 cw_end = []
                 for _, bm in beams_df.iterrows():
                     d = str(bm.get('direction', 'X'))
                     lv = str(bm.get('level', '')).strip()
-                    gf = str(bm.get('grid_from', '')).strip()
-                    gt = str(bm.get('grid_to', '')).strip()
-                    w1 = col_widths.get((gf, lv), {}).get(d, 0)
-                    w2 = col_widths.get((gt, lv), {}).get(d, 0)
+                    x1 = float(bm.get('x_from_mm', 0) or 0)
+                    y1 = float(bm.get('y_from_mm', 0) or 0)
+                    x2 = float(bm.get('x_to_mm', 0) or 0)
+                    y2 = float(bm.get('y_to_mm', 0) or 0)
+                    w1 = find_col_width(x1, y1, lv, d)
+                    w2 = find_col_width(x2, y2, lv, d)
                     cw_start.append(int(round(w1)))
                     cw_end.append(int(round(w2)))
                 beams_df['col_width_start_mm'] = cw_start
