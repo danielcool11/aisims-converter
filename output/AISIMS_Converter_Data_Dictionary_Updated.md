@@ -1,6 +1,6 @@
 # AISIMS Converter Data Dictionary
 
-Generated: 2026-04-06
+Generated: 2026-04-07
 
 ## Naming Conventions
 
@@ -128,12 +128,21 @@ Generated: 2026-04-06
 | length_mm | float | mm | Span length |
 | b_mm | float | mm | Section width |
 | h_mm | float | mm | Section depth |
-| extend_start_mm | float | mm | Junction extension at start (half adjacent column/beam width) |
-| extend_end_mm | float | mm | Junction extension at end |
+| extend_start_mm | float | mm | Junction extension at start (half adjacent **wall/beam** width, NOT column — see note) |
+| extend_end_mm | float | mm | Junction extension at end (half adjacent **wall/beam** width) |
+| col_width_start_mm | float | mm | Column/support width at start grid in beam direction |
+| col_width_end_mm | float | mm | Column/support width at end grid in beam direction |
 | material_id | string | — | Concrete grade from MIDAS material (e.g., C35, C40) |
 | fy_main | float | MPa | Main rebar yield strength from material |
 | fy_sub | float | MPa | Stirrup rebar yield strength from material |
 | element_ids | string | — | Constituent MIDAS element IDs, comma-separated (merged spans) |
+
+**⚠️ extend vs col_width:** `extend_start_mm` / `extend_end_mm` are from perpendicular **beam-beam** or **beam-wall** junctions only. Beam-column junctions are skipped because the column box already covers the joint. To find column inner face positions, use `col_width_start_mm` / `col_width_end_mm`:
+```
+column_inner_face_start = x_from_mm + col_width_start_mm / 2
+column_inner_face_end   = x_to_mm   - col_width_end_mm / 2
+clear_span = length_mm - (col_width_start_mm + col_width_end_mm) / 2
+```
 
 **Beam merging:** Adjacent FEM beam elements are merged into structural column-to-column spans.
 Merge breaks at: column grids, wall grids, beam-beam junctions, section/material changes, max 12m.
@@ -506,10 +515,10 @@ doubled spacing per individual bar type (D13@200 + D16@200).
 | anchorage_end | string | — | HOOK, LAP, or STRAIGHT |
 | lap_length_mm | float | mm | Lap splice length (Lpt or Lpb) |
 | development_length_mm | float | mm | Hook development length (Ldh) |
-| splice_start_mm | float | mm | Splice zone start Z coordinate |
-| splice_start_end_mm | float | mm | Splice zone start end Z |
-| splice_end_mm | float | mm | Splice zone end Z coordinate |
-| splice_end_end_mm | float | mm | Splice zone end end Z |
+| splice_start_mm | float | mm | Lap splice region start at bar's start end (absolute coord, column far face) |
+| splice_start_end_mm | float | mm | Lap splice region end at bar's start end (splice_start + lap_length) |
+| splice_end_mm | float | mm | Lap splice region start at bar's far end (absolute coord, column far face) |
+| splice_end_end_mm | float | mm | Lap splice region end at bar's far end (splice_end + lap_length) |
 | transition_type | string | — | Diameter transition type |
 | reinforcement_type | string | — | Reinforcement classification |
 | split_piece | int | — | Piece index for stock-split bars (null if no split) |
@@ -523,6 +532,14 @@ doubled spacing per individual bar type (D13@200 + D16@200).
 | b_mm | float | mm | Beam section width |
 | h_mm | float | mm | Beam section depth |
 | shape | string | — | Section shape (RECT) |
+| col_width_start_mm | float | mm | Column/support width at start grid in beam direction |
+| col_width_end_mm | float | mm | Column/support width at end grid in beam direction |
+
+**Stirrup zones:** Zones tile contiguously from start column face: EXT (25% l_cl) → CTR (50% l_cl) → INT (25% l_cl), where `l_cl = length_mm - (col_width_start_mm + col_width_end_mm) / 2`.
+
+**Splice coordinates:** `splice_start_mm` / `splice_end_mm` are **absolute coordinates** (same system as beam x/y), not relative to beam start. They represent the start of the lap region at the column far face, extending `lap_length_mm` into the adjacent span.
+
+**n_bars vs quantity_pieces (stirrups):** For stirrup bars (CTR/EXT/INT), `n_bars` = number of legs per set (2 or 4), `quantity_pieces` = number of stirrup sets in the zone. `length_mm` = full perimeter of one closed tie. Weight = `quantity_pieces × length_mm × unit_weight`.
 
 ### 23. RebarLengthsColumn.csv
 
@@ -536,15 +553,15 @@ doubled spacing per individual bar type (D13@200 + D16@200).
 | bar_role | string | — | DOWEL, MAIN_BOTTOM, MAIN_INTERMEDIATE, MAIN_TOP, MAIN_FULL, HOOP_END_BOTTOM, HOOP_END_TOP, HOOP_MID |
 | bar_type | string | — | MAIN or HOOP |
 | dia_mm | float | mm | Bar diameter |
-| n_bars | int | — | Number of bars |
-| length_mm | float | mm | Individual bar length |
+| n_bars | int | — | Number of bars (main bars); 0 for hoops (use quantity_pieces) |
+| length_mm | float | mm | Individual bar length (main) or full hoop perimeter (hoops) |
 | spacing_mm | float | mm | Hoop spacing (null for main bars) |
 | zone_length_mm | float | mm | Hoop zone length |
-| quantity_pieces | int | — | Number of hoops in zone |
-| total_length_mm | float | mm | Total bar length |
-| splice_start_mm | float | mm | Splice zone start Z |
+| quantity_pieces | int | — | Number of hoops in zone (weight = quantity_pieces × length_mm × unit_weight) |
+| total_length_mm | float | mm | Total bar length (= quantity_pieces × length_mm for hoops) |
+| splice_start_mm | float | mm | Splice zone start Z (absolute elevation) |
 | splice_start_end_mm | float | mm | Splice zone start end Z |
-| splice_end_mm | float | mm | Splice zone end Z |
+| splice_end_mm | float | mm | Splice zone end Z (absolute elevation) |
 | splice_end_end_mm | float | mm | Splice zone end end Z |
 | x_start_mm | float | mm | Bar start X |
 | y_start_mm | float | mm | Bar start Y |
