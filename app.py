@@ -421,28 +421,39 @@ if st.button("CONVERT", type="primary", use_container_width=True):
             try:
                 beams_df = outputs['beams']
                 cols_df = outputs['columns']
-                # Build grid → max column width lookup
-                col_widths = {}  # grid → {X: width, Y: width}
+                # Build (grid, level) → max column width lookup.
+                # A column spanning level_from~level_to supports beams at both levels.
+                col_widths = {}  # (grid, level) → {X: width, Y: width}
                 for _, c in cols_df.iterrows():
                     g = str(c.get('grid', '')).strip()
                     if not g:
                         continue
                     b = float(c.get('b_mm', 0) or 0)
                     h = float(c.get('h_mm', 0) or 0)
-                    if g not in col_widths:
-                        col_widths[g] = {'X': 0, 'Y': 0}
-                    # X-direction beam sees column width in X; Y-direction sees Y
-                    col_widths[g]['X'] = max(col_widths[g]['X'], b)
-                    col_widths[g]['Y'] = max(col_widths[g]['Y'], h)
+                    # Column supports beams at both its bottom and top levels
+                    levels = set()
+                    lf = str(c.get('level_from', '') or '').strip()
+                    lt = str(c.get('level_to', '') or '').strip()
+                    lv = str(c.get('level', '') or '').strip()
+                    if lf: levels.add(lf)
+                    if lt: levels.add(lt)
+                    if lv: levels.add(lv)
+                    for level in levels:
+                        key = (g, level)
+                        if key not in col_widths:
+                            col_widths[key] = {'X': 0, 'Y': 0}
+                        col_widths[key]['X'] = max(col_widths[key]['X'], b)
+                        col_widths[key]['Y'] = max(col_widths[key]['Y'], h)
 
                 cw_start = []
                 cw_end = []
                 for _, bm in beams_df.iterrows():
                     d = str(bm.get('direction', 'X'))
+                    lv = str(bm.get('level', '')).strip()
                     gf = str(bm.get('grid_from', '')).strip()
                     gt = str(bm.get('grid_to', '')).strip()
-                    w1 = col_widths.get(gf, {}).get(d, 0)
-                    w2 = col_widths.get(gt, {}).get(d, 0)
+                    w1 = col_widths.get((gf, lv), {}).get(d, 0)
+                    w2 = col_widths.get((gt, lv), {}).get(d, 0)
                     cw_start.append(int(round(w1)))
                     cw_end.append(int(round(w2)))
                 beams_df['col_width_start_mm'] = cw_start
