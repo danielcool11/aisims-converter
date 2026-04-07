@@ -777,6 +777,8 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
             'member_id': member_id, 'span_index': span_idx,
             'start_grid': grid_from, 'end_grid': grid_to,
             'b_mm': b_mm, 'h_mm': h_mm, 'shape': shape,
+            'col_width_start_mm': int(round(Wc1)) if Wc1 else 0,
+            'col_width_end_mm': int(round(Wc2)) if Wc2 else 0,
         }
 
         # MAIN TOP
@@ -1025,6 +1027,8 @@ def _calculate_stirrups(adapter):
             'x_start_mm': xs, 'y_start_mm': ys, 'z_start_mm': zs,
             'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': zs,
             'b_mm': int(b_mm), 'h_mm': int(h_mm), 'shape': shape,
+            'col_width_start_mm': int(round(Wc1)) if Wc1 else 0,
+            'col_width_end_mm': int(round(Wc2)) if Wc2 else 0,
         }
 
         for zn, zl in zone_lengths.items():
@@ -1149,6 +1153,7 @@ def calculate_beam_rebar_lengths(
         'x_start_mm', 'y_start_mm', 'z_start_mm',
         'x_end_mm', 'y_end_mm', 'z_end_mm',
         'b_mm', 'h_mm', 'shape',
+        'col_width_start_mm', 'col_width_end_mm',
     ]
 
     df = pd.DataFrame(all_results)

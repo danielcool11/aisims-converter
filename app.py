@@ -416,6 +416,41 @@ if st.button("CONVERT", type="primary", use_container_width=True):
             except Exception as e:
                 log(f"Beam merge FAILED (keeping original): {e}")
 
+        # ── Phase 2.7: Add column width at beam supports ──
+        if 'beams' in outputs and 'columns' in outputs:
+            try:
+                beams_df = outputs['beams']
+                cols_df = outputs['columns']
+                # Build grid → max column width lookup
+                col_widths = {}  # grid → {X: width, Y: width}
+                for _, c in cols_df.iterrows():
+                    g = str(c.get('grid', '')).strip()
+                    if not g:
+                        continue
+                    b = float(c.get('b_mm', 0) or 0)
+                    h = float(c.get('h_mm', 0) or 0)
+                    if g not in col_widths:
+                        col_widths[g] = {'X': 0, 'Y': 0}
+                    # X-direction beam sees column width in X; Y-direction sees Y
+                    col_widths[g]['X'] = max(col_widths[g]['X'], b)
+                    col_widths[g]['Y'] = max(col_widths[g]['Y'], h)
+
+                cw_start = []
+                cw_end = []
+                for _, bm in beams_df.iterrows():
+                    d = str(bm.get('direction', 'X'))
+                    gf = str(bm.get('grid_from', '')).strip()
+                    gt = str(bm.get('grid_to', '')).strip()
+                    w1 = col_widths.get(gf, {}).get(d, 0)
+                    w2 = col_widths.get(gt, {}).get(d, 0)
+                    cw_start.append(int(round(w1)))
+                    cw_end.append(int(round(w2)))
+                beams_df['col_width_start_mm'] = cw_start
+                beams_df['col_width_end_mm'] = cw_end
+                outputs['beams'] = beams_df
+            except Exception as e:
+                log(f"Column width on beams FAILED: {e}")
+
         # Read Part B files once (file pointer can only be read once)
         slab_boundary_raw = None
         slab_reinf_raw = None
