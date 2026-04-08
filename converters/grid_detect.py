@@ -17,7 +17,7 @@ from typing import Optional
 
 def detect_grid_from_columns(
     column_positions: list,
-    cluster_tolerance: float = 100.0,
+    cluster_tolerance: float = 200.0,
     min_columns_per_line: int = 2,
 ) -> dict:
     """
