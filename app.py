@@ -493,25 +493,31 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 outputs['reference_lines'] = pd.DataFrame(ref_lines)
 
                 # Assign x_ref/y_ref to members
+                # Assignment tolerance wider than clustering (cluster can shift center)
+                assign_tol = 300.0
+
                 if 'beams' in outputs and not outputs['beams'].empty:
                     assign_member_refs(outputs['beams'], ref_lines,
                                       direction_col='direction',
-                                      x_col='x_from_mm', y_col='y_from_mm')
+                                      x_col='x_from_mm', y_col='y_from_mm',
+                                      tolerance=assign_tol)
                 if 'columns' in outputs and not outputs['columns'].empty:
                     assign_member_refs(outputs['columns'], ref_lines,
                                       direction_col=None,
-                                      x_col='x_mm', y_col='y_mm')
+                                      x_col='x_mm', y_col='y_mm',
+                                      tolerance=assign_tol)
                 if 'walls' in outputs and not outputs['walls'].empty:
-                    # Walls use different coordinate columns
                     wall_df = outputs['walls']
                     if 'x_from_mm' in wall_df.columns:
                         assign_member_refs(wall_df, ref_lines,
                                           direction_col='direction' if 'direction' in wall_df.columns else None,
-                                          x_col='x_from_mm', y_col='y_from_mm')
+                                          x_col='x_from_mm', y_col='y_from_mm',
+                                          tolerance=assign_tol)
                     elif 'start_x_mm' in wall_df.columns:
                         assign_member_refs(wall_df, ref_lines,
                                           direction_col=None,
-                                          x_col='start_x_mm', y_col='start_y_mm')
+                                          x_col='start_x_mm', y_col='start_y_mm',
+                                          tolerance=assign_tol)
 
                 n_grid = sum(1 for r in ref_lines if r['type'] == 'GRID')
                 n_ref = sum(1 for r in ref_lines if r['type'] == 'REF')
