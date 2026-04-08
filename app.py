@@ -470,6 +470,57 @@ if st.button("CONVERT", type="primary", use_container_width=True):
             except Exception as e:
                 log(f"Column width on beams FAILED: {e}")
 
+        # ── Phase 2.8: Reference line detection ──
+        if 'beams' in outputs and 'columns' in outputs:
+            try:
+                from converters.grid_detect import detect_reference_lines, assign_member_refs
+
+                # Get grid lines from Phase 2.5
+                gx = grid_result.get('grid_x', []) if 'grid_result' in locals() and grid_result else []
+                gy = grid_result.get('grid_y', []) if 'grid_result' in locals() and grid_result else []
+                # Manual grid input fallback
+                if not gx and grid_x_input:
+                    gx = grid_x_input
+                if not gy and grid_y_input:
+                    gy = grid_y_input
+
+                ref_lines = detect_reference_lines(
+                    gx, gy,
+                    beams_df=outputs.get('beams'),
+                    columns_df=outputs.get('columns'),
+                    walls_df=outputs.get('walls'),
+                )
+                outputs['reference_lines'] = pd.DataFrame(ref_lines)
+
+                # Assign x_ref/y_ref to members
+                if 'beams' in outputs and not outputs['beams'].empty:
+                    assign_member_refs(outputs['beams'], ref_lines,
+                                      direction_col='direction',
+                                      x_col='x_from_mm', y_col='y_from_mm')
+                if 'columns' in outputs and not outputs['columns'].empty:
+                    assign_member_refs(outputs['columns'], ref_lines,
+                                      direction_col=None,
+                                      x_col='x_mm', y_col='y_mm')
+                if 'walls' in outputs and not outputs['walls'].empty:
+                    # Walls use different coordinate columns
+                    wall_df = outputs['walls']
+                    if 'x_from_mm' in wall_df.columns:
+                        assign_member_refs(wall_df, ref_lines,
+                                          direction_col='direction' if 'direction' in wall_df.columns else None,
+                                          x_col='x_from_mm', y_col='y_from_mm')
+                    elif 'start_x_mm' in wall_df.columns:
+                        assign_member_refs(wall_df, ref_lines,
+                                          direction_col=None,
+                                          x_col='start_x_mm', y_col='start_y_mm')
+
+                n_grid = sum(1 for r in ref_lines if r['type'] == 'GRID')
+                n_ref = sum(1 for r in ref_lines if r['type'] == 'REF')
+                log(f"Reference lines: {n_grid} grid + {n_ref} reference = {len(ref_lines)} total")
+            except Exception as e:
+                log(f"Reference line detection FAILED: {e}")
+                import traceback
+                traceback.print_exc()
+
         # Read Part B files once (file pointer can only be read once)
         slab_boundary_raw = None
         slab_reinf_raw = None
@@ -884,6 +935,7 @@ if st.session_state.outputs:
         'rebar_wall': 'RebarLengthsWall.csv',
         'rebar_footing': 'RebarLengthsFooting.csv',
         'rebar_bwall': 'RebarLengthsBasementWall.csv',
+        'reference_lines': 'ReferenceLines.csv',
     }
 
     # Show previews
