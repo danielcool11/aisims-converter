@@ -238,6 +238,7 @@ def _merge_chain(chain, span_counter):
         'fy_main': fy_main,
         'fy_sub': fy_sub,
         'element_ids': element_ids,
+        'direction': direction,
     }
     return merged, span_counter
 
