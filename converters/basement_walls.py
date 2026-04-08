@@ -20,10 +20,121 @@ from parsers.rebar_spec import parse_bar_at_spacing, parse_composite_bar
 from parsers.level_normalizer import normalize_level
 
 
+def _expand_level_range(level_str, story_df=None):
+    """
+    Expand a level range like 'B4~B1' into individual levels [B4, B3, B2, B1].
+    Uses story definition for ordering. Returns list of levels (deepest first).
+    If not a range, returns [level_str].
+    """
+    level_str = str(level_str).strip()
+    if '~' not in level_str:
+        return [level_str]
+
+    parts = level_str.split('~')
+    if len(parts) != 2:
+        return [level_str]
+
+    start_lv = normalize_level(parts[0].strip())
+    end_lv = normalize_level(parts[1].strip())
+
+    if story_df is not None and len(story_df) > 0:
+        # Use story definition for ordering
+        story_levels = []
+        for _, row in story_df.iterrows():
+            name = str(row.iloc[1]).strip() if len(row) > 1 else ''
+            z = float(row.iloc[2]) if len(row) > 2 and pd.notna(row.iloc[2]) else None
+            h = float(row.iloc[3]) if len(row) > 3 and pd.notna(row.iloc[3]) else 0
+            if name:
+                story_levels.append({'name': normalize_level(name), 'z_mm': z, 'height_mm': h})
+
+        # Sort by Z ascending (deepest first)
+        story_levels.sort(key=lambda s: s['z_mm'] if s['z_mm'] is not None else 0)
+
+        # Find start and end indices
+        level_names = [s['name'] for s in story_levels]
+        try:
+            idx_start = level_names.index(start_lv)
+            idx_end = level_names.index(end_lv)
+        except ValueError:
+            # Level not in story definition — fallback to B-level parsing
+            return _expand_b_range(start_lv, end_lv)
+
+        lo = min(idx_start, idx_end)
+        hi = max(idx_start, idx_end)
+        return [level_names[i] for i in range(lo, hi + 1)]
+    else:
+        return _expand_b_range(start_lv, end_lv)
+
+
+def _expand_b_range(start_lv, end_lv):
+    """Expand B-level range without story definition (e.g., B4~B1 → [B4, B3, B2, B1])."""
+    m1 = re.match(r'B(\d+)', start_lv)
+    m2 = re.match(r'B(\d+)', end_lv)
+    if m1 and m2:
+        n1, n2 = int(m1.group(1)), int(m2.group(1))
+        lo, hi = min(n1, n2), max(n1, n2)
+        return [f'B{i}' for i in range(hi, lo - 1, -1)]  # deepest first
+    return [f'{start_lv}~{end_lv}']
+
+
+def _sort_quad_nodes_ccw(panel_nodes, node_coords):
+    """
+    Sort 4 quad nodes into CCW convention:
+      i = bottom-left, j = bottom-right, k = top-right (above j), l = top-left (above i)
+
+    Uses actual node coordinates. Returns reordered list of 4 node IDs.
+    If coordinates unavailable or not 4 nodes, returns original order.
+    """
+    if len(panel_nodes) != 4:
+        return panel_nodes
+
+    # Get coordinates
+    coords = []
+    for nid in panel_nodes:
+        c = node_coords.get(nid)
+        if c is None:
+            return panel_nodes  # can't sort without coords
+        coords.append((nid, c['x_mm'], c['y_mm'], c['z_mm']))
+
+    # Split into bottom pair (lower Z) and top pair (higher Z)
+    sorted_by_z = sorted(coords, key=lambda c: c[3])
+    bottom = sorted_by_z[:2]
+    top = sorted_by_z[2:]
+
+    # Sort bottom pair by plan position (left to right)
+    # Determine wall direction from centroid spread
+    bx = [c[1] for c in bottom]
+    by = [c[2] for c in bottom]
+    dx = abs(bx[1] - bx[0])
+    dy = abs(by[1] - by[0])
+
+    if dx >= dy:
+        # Wall runs in X direction — sort by X
+        bottom.sort(key=lambda c: c[1])
+        # Match top to bottom by X proximity
+        top_sorted = []
+        for b in bottom:
+            closest = min(top, key=lambda t: abs(t[1] - b[1]))
+            top_sorted.append(closest)
+            top = [t for t in top if t[0] != closest[0]]
+    else:
+        # Wall runs in Y direction — sort by Y
+        bottom.sort(key=lambda c: c[2])
+        top_sorted = []
+        for b in bottom:
+            closest = min(top, key=lambda t: abs(t[2] - b[2]))
+            top_sorted.append(closest)
+            top = [t for t in top if t[0] != closest[0]]
+
+    # CCW: i=bottom-left, j=bottom-right, k=top-right (above j), l=top-left (above i)
+    return [bottom[0][0], bottom[1][0], top_sorted[1][0], top_sorted[0][0]]
+
+
 def convert_basement_walls(
     boundary_df: pd.DataFrame,
     reinforcement_df: pd.DataFrame,
     nodes_df: pd.DataFrame = None,
+    story_df: pd.DataFrame = None,
 ) -> tuple:
     """
     Convert basement wall data into MembersBasementWall and
@@ -33,6 +144,7 @@ def convert_basement_walls(
         boundary_df: DataFrame from BasementWall Boundary sheet
         reinforcement_df: DataFrame from BasementWall Reinforcement sheet
         nodes_df: Nodes DataFrame for coordinate lookup (optional)
+        story_df: StoryDefinition DataFrame for level range expansion (optional)
 
     Returns:
         tuple: (members_df, reinforcement_df)
@@ -113,6 +225,60 @@ def convert_basement_walls(
                         entry[dst] = val
         if node_id:
             wall_entries[key]['nodes'].append(node_id)
+
+    # ── #31: Expand level ranges (e.g., B4~B1 → B4, B3, B2, B1) ──
+    # Build story height lookup from story_df
+    story_heights = {}  # level → height_mm from story definition
+    if story_df is not None and len(story_df) > 0:
+        for _, row in story_df.iterrows():
+            name = normalize_level(str(row.iloc[1]).strip()) if len(row) > 1 else ''
+            h = float(row.iloc[3]) if len(row) > 3 and pd.notna(row.iloc[3]) else 0
+            if name:
+                story_heights[name] = h
+
+    expanded_entries = {}
+    range_expand_count = 0
+    for (name, level), entry in list(wall_entries.items()):
+        if '~' not in level:
+            expanded_entries[(name, level)] = entry
+            continue
+
+        # Expand range
+        levels = _expand_level_range(level, story_df)
+        if len(levels) <= 1:
+            expanded_entries[(name, level)] = entry
+            continue
+
+        range_expand_count += 1
+        total_range_h = entry.get('height_mm') or 0
+        range_nodes = entry['nodes']
+
+        for lv in levels:
+            # Per-level height from story definition, or divide evenly
+            lv_height = story_heights.get(lv, total_range_h / len(levels) if len(levels) > 0 else total_range_h)
+
+            # Per-level zone heights (proportional to level height vs total)
+            ratio = lv_height / total_range_h if total_range_h > 0 else 1.0 / len(levels)
+
+            new_entry = {
+                'name': name,
+                'level': lv,
+                'length_mm': entry['length_mm'],
+                'height_mm': lv_height,
+                'zone_width_left_mm': entry['zone_width_left_mm'],
+                'zone_width_middle_mm': entry['zone_width_middle_mm'],
+                'zone_width_right_mm': entry['zone_width_right_mm'],
+                'zone_height_top_mm': round((entry.get('zone_height_top_mm') or 0) * ratio, 1) or entry.get('zone_height_top_mm'),
+                'zone_height_middle_mm': round((entry.get('zone_height_middle_mm') or 0) * ratio, 1) or entry.get('zone_height_middle_mm'),
+                'zone_height_bottom_mm': round((entry.get('zone_height_bottom_mm') or 0) * ratio, 1) or entry.get('zone_height_bottom_mm'),
+                'has_horizontal_zones': entry.get('has_horizontal_zones', False),
+                'nodes': range_nodes,  # same nodes shared (full-height wall)
+            }
+            expanded_entries[(name, lv)] = new_entry
+
+    if range_expand_count:
+        print(f'[BasementWall] Expanded {range_expand_count} range entries → {len(expanded_entries)} total')
+    wall_entries = expanded_entries
 
     # ── Validate nodes: check existence and Z consistency ──
     # Basement levels should have negative Z (below ground)
@@ -315,6 +481,9 @@ def convert_basement_walls(
         else:
             continue
 
+        # #32: Sort quad nodes into CCW convention (i=BL, j=BR, k=TR, l=TL)
+        panels = [_sort_quad_nodes_ccw(p, node_coords) for p in panels]
+
         # Z from height stacking (reliable for all panels)
         z_mm = wall_z_map.get((name, level))
 
@@ -458,15 +627,20 @@ def convert_basement_walls(
     reinforcement_df = reinforcement_df.rename(columns=col_map)
 
     # Build reinforcement lookup for filling member thickness/type
+    # Expand range levels so per-level members can find their thickness
     reinf_lookup = {}
     for _, row in reinforcement_df.iterrows():
         name = str(row.get('name', '')).strip()
-        level = normalize_level(str(row.get('position', '')).strip())
-        if name and name != 'nan':
-            reinf_lookup[(name, level)] = {
-                'thickness_mm': _safe_float(row.get('thickness_mm')),
-                'wall_type': str(row.get('wall_type', '')).strip(),
-            }
+        raw_level = normalize_level(str(row.get('position', '')).strip())
+        if not name or name == 'nan':
+            continue
+        info = {
+            'thickness_mm': _safe_float(row.get('thickness_mm')),
+            'wall_type': str(row.get('wall_type', '')).strip(),
+        }
+        levels = _expand_level_range(raw_level, story_df) if '~' in raw_level else [raw_level]
+        for lv in levels:
+            reinf_lookup[(name, lv)] = info
 
     # Fill thickness and wall_type in members from reinforcement
     for m in members:
@@ -513,54 +687,58 @@ def convert_basement_walls(
 
     for _, row in reinforcement_df.iterrows():
         name = str(row.get('name', '')).strip()
-        level = normalize_level(str(row.get('position', '')).strip())
+        raw_level = normalize_level(str(row.get('position', '')).strip())
         thickness = _safe_float(row.get('thickness_mm'))
         wall_type = str(row.get('wall_type', '')).strip()
 
         if not name or name == 'nan':
             continue
 
-        for col_name, direction, face, zone in rebar_positions:
-            spec_str = str(row.get(col_name, '')).strip()
-            if not spec_str or spec_str == 'nan':
-                continue
+        # #31: Expand level range in reinforcement (same spec duplicated to each level)
+        levels = _expand_level_range(raw_level, story_df) if '~' in raw_level else [raw_level]
 
-            if '+' in spec_str:
-                # Composite bar: D13+D16@100 → 2 rows with doubled spacing
-                spacing_match = re.search(r'@(\d+)', spec_str)
-                spacing = int(spacing_match.group(1)) if spacing_match else None
-                composite = parse_composite_bar(spec_str)
+        for level in levels:
+            for col_name, direction, face, zone in rebar_positions:
+                spec_str = str(row.get(col_name, '')).strip()
+                if not spec_str or spec_str == 'nan':
+                    continue
 
-                for bar in composite:
-                    doubled = spacing * 2 if spacing else None
-                    reinf_rows.append({
-                        'wall_mark': name,
-                        'level': level,
-                        'wall_type': wall_type,
-                        'thickness_mm': thickness,
-                        'direction': direction,
-                        'face': face,
-                        'zone': zone,
-                        'bar_spec': f"D{bar['dia']}@{doubled}" if doubled else spec_str,
-                        'dia_mm': bar['dia'],
-                        'spacing_mm': doubled,
-                    })
-                composite_count += 1
-            else:
-                bar = parse_bar_at_spacing(spec_str)
-                if bar:
-                    reinf_rows.append({
-                        'wall_mark': name,
-                        'level': level,
-                        'wall_type': wall_type,
-                        'thickness_mm': thickness,
-                        'direction': direction,
-                        'face': face,
-                        'zone': zone,
-                        'bar_spec': spec_str,
-                        'dia_mm': bar['dia'],
-                        'spacing_mm': bar['spacing'],
-                    })
+                if '+' in spec_str:
+                    # Composite bar: D13+D16@100 → 2 rows with doubled spacing
+                    spacing_match = re.search(r'@(\d+)', spec_str)
+                    spacing = int(spacing_match.group(1)) if spacing_match else None
+                    composite = parse_composite_bar(spec_str)
+
+                    for bar in composite:
+                        doubled = spacing * 2 if spacing else None
+                        reinf_rows.append({
+                            'wall_mark': name,
+                            'level': level,
+                            'wall_type': wall_type,
+                            'thickness_mm': thickness,
+                            'direction': direction,
+                            'face': face,
+                            'zone': zone,
+                            'bar_spec': f"D{bar['dia']}@{doubled}" if doubled else spec_str,
+                            'dia_mm': bar['dia'],
+                            'spacing_mm': doubled,
+                        })
+                    composite_count += 1
+                else:
+                    bar = parse_bar_at_spacing(spec_str)
+                    if bar:
+                        reinf_rows.append({
+                            'wall_mark': name,
+                            'level': level,
+                            'wall_type': wall_type,
+                            'thickness_mm': thickness,
+                            'direction': direction,
+                            'face': face,
+                            'zone': zone,
+                            'bar_spec': spec_str,
+                            'dia_mm': bar['dia'],
+                            'spacing_mm': bar['spacing'],
+                        })
 
     reinf_result_df = pd.DataFrame(reinf_rows)
 

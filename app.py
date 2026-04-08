@@ -587,7 +587,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
             progress.progress(63, text="Phase 2: Basement walls...")
             bwall_boundary = pd.read_excel(bwall_file, sheet_name='BasementWall Boundary', header=1)
             bwall_reinf = pd.read_excel(bwall_file, sheet_name='BasementWall Reinforcement', header=1)
-            bwall_members, bwall_reinf_df = convert_basement_walls(bwall_boundary, bwall_reinf, nodes_df)
+            bwall_members, bwall_reinf_df = convert_basement_walls(bwall_boundary, bwall_reinf, nodes_df, story_raw)
             outputs['bwall_members'] = bwall_members
             outputs['reinf_bwall'] = bwall_reinf_df
             log(f"Basement walls: {len(bwall_members)} panels, {len(bwall_reinf_df)} reinforcement rows")
