@@ -569,7 +569,52 @@ def convert_basement_walls(
                         panel_length = round(max_d, 1)
                         break
 
-            members.append({
+            # Compute global plan-view polygon from node coordinates
+            # Find two distinct XY positions from the 4 nodes (wall endpoints in plan)
+            poly_data = {}
+            if len(valid_coords) >= 2:
+                import math
+                # Collect unique XY positions (nodes at different Z share same XY)
+                xy_unique = []
+                for c in valid_coords:
+                    xy = (round(c['x_mm'], 1), round(c['y_mm'], 1))
+                    if not any(abs(xy[0]-p[0]) < 10 and abs(xy[1]-p[1]) < 10 for p in xy_unique):
+                        xy_unique.append(xy)
+
+                if len(xy_unique) >= 2:
+                    # Wall spans from xy_unique[0] to xy_unique[1]
+                    p1x, p1y = xy_unique[0]
+                    p2x, p2y = xy_unique[1]
+                    dx = p2x - p1x
+                    dy = p2y - p1y
+                    wall_len = math.sqrt(dx*dx + dy*dy)
+
+                    if wall_len > 10:
+                        # Perpendicular direction for thickness offset
+                        # Use thickness from reinforcement lookup (filled later),
+                        # fall back to estimated thickness from entry
+                        t_half = 150  # default half-thickness, updated after reinf fill
+                        nx = -dy / wall_len  # perpendicular unit vector
+                        ny = dx / wall_len
+
+                        # Include extensions
+                        ext_s = entry.get('_forced_extend_start', 0) or 0
+                        ext_e = entry.get('_forced_extend_end', 0) or 0
+                        # Extend wall endpoints along wall direction
+                        ux, uy = dx / wall_len, dy / wall_len
+                        s1x = p1x - ux * ext_s
+                        s1y = p1y - uy * ext_s
+                        s2x = p2x + ux * ext_e
+                        s2y = p2y + uy * ext_e
+
+                        poly_data = {
+                            '_poly_s1': (s1x, s1y),
+                            '_poly_s2': (s2x, s2y),
+                            '_poly_nx': nx,
+                            '_poly_ny': ny,
+                        }
+
+            member = {
                 'wall_mark': name,
                 'level': level,
                 'panel_no': pi,
@@ -591,7 +636,9 @@ def convert_basement_walls(
                 'centroid_y_mm': centroid_y,
                 'z_mm': z_mm,
                 'node_status': node_status,
-            })
+            }
+            member.update(poly_data)
+            members.append(member)
 
     if inferred_count or missing_count:
         print(f'[BasementWall] Node warnings: {inferred_count} inferred, '
@@ -665,6 +712,24 @@ def convert_basement_walls(
         if info:
             m['thickness_mm'] = info['thickness_mm']
             m['wall_type'] = info['wall_type']
+
+    # Compute global polygons now that thickness is known
+    for m in members:
+        s1 = m.pop('_poly_s1', None)
+        s2 = m.pop('_poly_s2', None)
+        nx = m.pop('_poly_nx', None)
+        ny = m.pop('_poly_ny', None)
+        if s1 and s2 and nx is not None:
+            t_half = (m.get('thickness_mm') or 300) / 2
+            ox, oy = nx * t_half, ny * t_half
+            m['poly_0x_mm'] = round(s1[0] + ox, 1)
+            m['poly_0y_mm'] = round(s1[1] + oy, 1)
+            m['poly_1x_mm'] = round(s2[0] + ox, 1)
+            m['poly_1y_mm'] = round(s2[1] + oy, 1)
+            m['poly_2x_mm'] = round(s2[0] - ox, 1)
+            m['poly_2y_mm'] = round(s2[1] - oy, 1)
+            m['poly_3x_mm'] = round(s1[0] - ox, 1)
+            m['poly_3y_mm'] = round(s1[1] - oy, 1)
 
     members_df = pd.DataFrame(members)
 
