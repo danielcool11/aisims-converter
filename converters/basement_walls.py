@@ -227,14 +227,18 @@ def convert_basement_walls(
             wall_entries[key]['nodes'].append(node_id)
 
     # ── #31: Expand level ranges (e.g., B4~B1 → B4, B3, B2, B1) ──
-    # Build story height lookup from story_df
+    # Build story height and z lookup from story_df
     story_heights = {}  # level → height_mm from story definition
+    story_z = {}        # level → z_mm (top of level = bottom of level above)
     if story_df is not None and len(story_df) > 0:
         for _, row in story_df.iterrows():
             name = normalize_level(str(row.iloc[1]).strip()) if len(row) > 1 else ''
+            z = float(row.iloc[2]) if len(row) > 2 and pd.notna(row.iloc[2]) else None
             h = float(row.iloc[3]) if len(row) > 3 and pd.notna(row.iloc[3]) else 0
             if name:
                 story_heights[name] = h
+                if z is not None:
+                    story_z[name] = z  # z = elevation of top of this level
 
     expanded_entries = {}
     range_expand_count = 0
@@ -260,6 +264,16 @@ def convert_basement_walls(
             # Per-level zone heights (proportional to level height vs total)
             ratio = lv_height / total_range_h if total_range_h > 0 else 1.0 / len(levels)
 
+            # Per-level z_centroid from story definition
+            # story_z[lv] = top of this level (= bottom of level above)
+            # z_centroid = story_z[lv] - height/2  (story_z is top, subtract half height for centroid)
+            forced_z = None
+            if lv in story_z and lv_height > 0:
+                level_top_z = story_z[lv]  # e.g., B1 → -4150
+                # story_z gives the elevation of this level's base (bottom)
+                # centroid = base + height/2
+                forced_z = round(level_top_z + lv_height / 2, 1)
+
             new_entry = {
                 'name': name,
                 'level': lv,
@@ -273,6 +287,7 @@ def convert_basement_walls(
                 'zone_height_bottom_mm': round((entry.get('zone_height_bottom_mm') or 0) * ratio, 1) or entry.get('zone_height_bottom_mm'),
                 'has_horizontal_zones': entry.get('has_horizontal_zones', False),
                 'nodes': range_nodes,  # same nodes shared (full-height wall)
+                '_forced_z': forced_z,  # override z_centroid from story definition
             }
             expanded_entries[(name, lv)] = new_entry
 
@@ -484,8 +499,9 @@ def convert_basement_walls(
         # #32: Sort quad nodes into CCW convention (i=BL, j=BR, k=TR, l=TL)
         panels = [_sort_quad_nodes_ccw(p, node_coords) for p in panels]
 
-        # Z from height stacking (reliable for all panels)
-        z_mm = wall_z_map.get((name, level))
+        # Z from forced story definition (expanded range walls) or height stacking
+        forced_z = entry.get('_forced_z')
+        z_mm = forced_z if forced_z is not None else wall_z_map.get((name, level))
 
         for pi, panel_nodes in enumerate(panels, start=1):
             # Classify each node for XY positioning
