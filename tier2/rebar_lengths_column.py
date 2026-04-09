@@ -725,6 +725,8 @@ def calculate_column_rebar_lengths(
                     'bar_position': 'MAIN', 'bar_role': 'DOWEL', 'bar_type': 'MAIN',
                     'dia_mm': dia_d, 'n_bars': n_d,
                     'length_mm': int(round(dowel_len)),
+                    'anchorage_start': 'HOOK', 'anchorage_end': 'LAP',
+                    'development_length_mm': Ldh_d, 'lap_length_mm': Lpc_d,
                     'splice_start_mm': None, 'splice_start_end_mm': None,
                     'splice_end_mm': round(col_z_bottom, 1),
                     'splice_end_end_mm': round(col_z_bottom + Lpc_d, 1),
@@ -766,6 +768,7 @@ def calculate_column_rebar_lengths(
                 if is_top:
                     L_bar = L + Ldh
                     role = 'MAIN_TOP'
+                    anc_start, anc_end = 'LAP', 'HOOK'
                     sp_start = round(z_start, 1)
                     sp_start_end = round(z_start + Lpc, 1)
                     sp_end = None
@@ -773,6 +776,7 @@ def calculate_column_rebar_lengths(
                 elif is_first:
                     L_bar = L + Lpc
                     role = 'MAIN_BOTTOM'
+                    anc_start, anc_end = 'LAP', 'LAP'
                     sp_start = round(z_start, 1)
                     sp_start_end = round(z_start + Lpc, 1)
                     sp_end = round(z_start + h, 1)
@@ -780,6 +784,7 @@ def calculate_column_rebar_lengths(
                 else:
                     L_bar = L + Lpc
                     role = 'MAIN_INTERMEDIATE'
+                    anc_start, anc_end = 'LAP', 'LAP'
                     sp_start = round(z_start, 1)
                     sp_start_end = round(z_start + Lpc, 1)
                     sp_end = round(z_start + h, 1)
@@ -835,6 +840,8 @@ def calculate_column_rebar_lengths(
                     'bar_position': 'MAIN', 'bar_role': role, 'bar_type': 'MAIN',
                     'dia_mm': dia_main, 'n_bars': n_bars,
                     'length_mm': int(round(L_bar)),
+                    'anchorage_start': anc_start, 'anchorage_end': anc_end,
+                    'development_length_mm': Ldh, 'lap_length_mm': Lpc,
                     'splice_start_mm': sp_start, 'splice_start_end_mm': sp_start_end,
                     'splice_end_mm': sp_end, 'splice_end_end_mm': sp_end_end,
                     'x_start_mm': round(x_start, 1), 'y_start_mm': round(y_start, 1),
@@ -958,6 +965,8 @@ def calculate_column_rebar_lengths(
         'member_id', 'start_grid', 'level_from', 'level_to',
         'bar_position', 'bar_role', 'bar_type',
         'dia_mm', 'n_bars', 'length_mm',
+        'anchorage_start', 'anchorage_end',
+        'development_length_mm', 'lap_length_mm',
         'spacing_mm', 'zone_length_mm', 'quantity_pieces', 'total_length_mm',
         'splice_start_mm', 'splice_start_end_mm',
         'splice_end_mm', 'splice_end_end_mm',
