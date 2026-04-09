@@ -709,6 +709,70 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
     results = []
     n_sub = len(span_list)
 
+    # ── Pre-compute joint feasibility for the entire subgroup ──
+    # Joint_i connects span_i to span_{i+1}.
+    # Feasible if the RECEIVING span's (span_{i+1}) allowable zone ≥ L_lap.
+    # We need L_lap and clear span for each span first.
+    span_data = []
+    for info in span_list:
+        sp = info['sp']
+        grid_from = sp.get('grid_from', '')
+        grid_to = sp.get('grid_to', '')
+        l_span = float(sp['length_mm'])
+        beam_level = sp.get('level', '')
+        Wc1 = adapter.get_column_width(grid_from, direction, beam_level)
+        Wc2 = adapter.get_column_width(grid_to, direction, beam_level)
+        l_cl = l_span - 0.5 * (Wc1 + Wc2)
+
+        dia_top = info['cfg_top']['dia']
+        fy = _steel_grade(dia_top, fy_override=sp.get('fy_main'))
+        fc = _parse_fc(sp.get('material_id', 'C35'))
+        Ldh, Lpt_B, Lpb_B = lookup.get(fy, dia_top, fc)
+
+        span_data.append({
+            'l_span': l_span, 'l_cl': l_cl,
+            'Wc1': Wc1, 'Wc2': Wc2,
+            'Ldh': Ldh, 'Lpt_B': Lpt_B, 'Lpb_B': Lpb_B,
+            'L_lap': max(Lpt_B, Lpb_B),
+        })
+
+    # Determine joint feasibility: joint_i connects span_i → span_{i+1}
+    # Feasible if receiving span (i+1) has allowable zone ≥ L_lap
+    joint_feasible = []  # length = n_sub - 1
+    for i in range(n_sub - 1):
+        receiving = span_data[i + 1]
+        zone_width = 0.50 * max(0, receiving['l_cl'])
+        L_lap = receiving['L_lap']
+        joint_feasible.append(zone_width >= L_lap)
+
+    # Derive bar role per span from joint types
+    # left_joint: joint_{i-1} (or run_start if i==0)
+    # right_joint: joint_i (or run_end if i==n_sub-1)
+    span_roles = []
+    for i in range(n_sub):
+        left_feasible = joint_feasible[i - 1] if i > 0 else None       # None = run start
+        right_feasible = joint_feasible[i] if i < n_sub - 1 else None   # None = run end
+
+        if left_feasible is None and right_feasible is None:
+            role = 'MAIN_SINGLE'
+        elif left_feasible is None and right_feasible is True:
+            role = 'MAIN_START'
+        elif left_feasible is None and right_feasible is False:
+            role = 'MAIN_SINGLE'
+        elif left_feasible is True and right_feasible is True:
+            role = 'MAIN_INTERMEDIATE'
+        elif left_feasible is True and (right_feasible is False or right_feasible is None):
+            role = 'MAIN_END'
+        elif left_feasible is False and right_feasible is True:
+            role = 'MAIN_START'
+        elif left_feasible is False and (right_feasible is False or right_feasible is None):
+            role = 'MAIN_SINGLE'
+        else:
+            role = 'MAIN_SINGLE'
+
+        span_roles.append(role)
+
+    # ── Process each span with its assigned role ──
     for sub_i, info in enumerate(span_list):
         sp = info['sp']
         member_id = info['member_id']
@@ -724,22 +788,23 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
         l_span = float(sp['length_mm'])
         fc = _parse_fc(sp.get('material_id', 'C35'))
 
-        # Coordinates from beam data
         xs = sp.get('x_from_mm', 0) or 0
         ys = sp.get('y_from_mm', 0) or 0
         zs = sp.get('z_mm', 0) or 0
         xe = sp.get('x_to_mm', 0) or 0
         ye = sp.get('y_to_mm', 0) or 0
-        ze = zs  # beams are horizontal
+        ze = zs
 
         dia_top = cfg_top['dia']
         dia_bot = cfg_bot['dia']
-        fy = _steel_grade(dia_top, fy_override=sp.get('fy_main'))
-        Ldh, Lpt_B, Lpb_B = lookup.get(fy, dia_top, fc)
+
+        sd = span_data[sub_i]
+        Ldh, Lpt_B, Lpb_B = sd['Ldh'], sd['Lpt_B'], sd['Lpb_B']
+        Wc1, Wc2 = sd['Wc1'], sd['Wc2']
+        l_cl = sd['l_cl']
 
         sec = adapter.get_section(sp.get('section_id', ''))
         if sec is None:
-            # Use b_mm/h_mm from beam directly
             b_mm = sp.get('b_mm', 300)
             h_mm = sp.get('h_mm', 500)
             d_eff = h_mm - COVER_MM - 11
@@ -754,17 +819,11 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
 
         lext = max(d_eff, 12.0 * dia_top)
 
-        beam_level = sp.get('level', '')
-        Wc1 = adapter.get_column_width(grid_from, direction, beam_level)
-        Wc2 = adapter.get_column_width(grid_to, direction, beam_level)
-        l_cl = l_span - 0.5 * (Wc1 + Wc2)
-
-        is_first = (sub_i == 0)
-        is_last = (sub_i == n_sub - 1)
-        is_single = (n_sub == 1)
+        role = span_roles[sub_i]
+        is_single_role = (role == 'MAIN_SINGLE')
 
         # Bar counts
-        if is_single:
+        if is_single_role:
             main_top = int(cfg_top['zones'].get('INT', cfg_top['main']))
             main_bot = int(cfg_bot['zones'].get('CTR', cfg_bot['main']))
         elif is_uniform:
@@ -774,21 +833,17 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
             main_top = int(gm_top)
             main_bot = int(gm_bot)
 
-        # Main bar role & length
-        if is_single:
-            role = 'MAIN_SINGLE'
+        # Main bar length based on role
+        if role == 'MAIN_SINGLE':
             Ltop = l_cl + Ldh + Ldh
             Lbot = l_cl + Ldh + Ldh
-        elif is_first:
-            role = 'MAIN_START'
+        elif role == 'MAIN_START':
             Ltop = l_cl + Ldh + Lpt_B
             Lbot = l_cl + Ldh + Lpb_B
-        elif is_last:
-            role = 'MAIN_END'
+        elif role == 'MAIN_END':
             Ltop = l_cl + Ldh
             Lbot = l_cl + Ldh
-        else:
-            role = 'MAIN_INTERMEDIATE'
+        else:  # MAIN_INTERMEDIATE
             Ltop = l_span + Lpt_B
             Lbot = l_span + Lpb_B
 
@@ -827,7 +882,9 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
             results.append(piece)
 
         # ADD bars (VARIABLE only, with continuity)
-        if not is_uniform and not is_single:
+        is_first = (sub_i == 0)
+        is_last = (sub_i == n_sub - 1)
+        if not is_uniform and not is_single_role:
             zones_top = cfg_top.get('zones', {})
             zones_bot = cfg_bot.get('zones', {})
 
