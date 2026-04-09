@@ -743,11 +743,36 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                         level_results.append(process_wall_junctions(lv_df, lv_nodes))
 
                     result_bw = pd.concat(level_results).sort_index()
-                    # Keep only the extension + polygon columns, drop synthetic IDs
-                    for col in ['extend_start_mm', 'extend_end_mm']:
-                        outputs['bwall_members'][col] = result_bw[col].values
+
+                    # Map extensions from node_i/node_j space to start/end space.
+                    # Junction algorithm: extend_start = extension at node_i,
+                    #                     extend_end   = extension at node_j.
+                    # But start_x/start_y may correspond to node_j (not node_i).
+                    # Fix: check which node is closer to start, swap if needed.
+                    bw_out = outputs['bwall_members']
+                    ext_start_vals = result_bw['extend_start_mm'].values.copy()
+                    ext_end_vals = result_bw['extend_end_mm'].values.copy()
+                    for idx in range(len(bw_out)):
+                        row = bw_out.iloc[idx]
+                        sx = float(row.get('start_x_mm', 0) or 0)
+                        sy = float(row.get('start_y_mm', 0) or 0)
+                        ni = str(row.get('node_i', ''))
+                        nj = str(row.get('node_j', ''))
+                        ci = nodes_dict.get(ni, {})
+                        cj = nodes_dict.get(nj, {})
+                        if ci and cj:
+                            nix, niy = ci.get('x_mm', 0), ci.get('y_mm', 0)
+                            njx, njy = cj.get('x_mm', 0), cj.get('y_mm', 0)
+                            di = (sx - nix) ** 2 + (sy - niy) ** 2
+                            dj = (sx - njx) ** 2 + (sy - njy) ** 2
+                            if dj < di:
+                                # start is closer to node_j → swap extensions
+                                ext_start_vals[idx], ext_end_vals[idx] = ext_end_vals[idx], ext_start_vals[idx]
+                    bw_out['extend_start_mm'] = ext_start_vals
+                    bw_out['extend_end_mm'] = ext_end_vals
+
                     for col in [c for c in result_bw.columns if c.startswith('poly_')]:
-                        outputs['bwall_members'][col] = result_bw[col].values
+                        bw_out[col] = result_bw[col].values
 
                 log("Junction detection complete")
             except Exception as e:
