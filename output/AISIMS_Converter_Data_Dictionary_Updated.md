@@ -1,6 +1,6 @@
 # AISIMS Converter Data Dictionary
 
-Generated: 2026-04-07
+Generated: 2026-04-10 (updated from 2026-04-07)
 
 ## Naming Conventions
 
@@ -13,7 +13,7 @@ Generated: 2026-04-07
 
 ## File Overview
 
-### Tier 1 — Core Files (18 files, every project)
+### Tier 1 — Core Files (19 files, every project)
 
 | # | File | Source | Description |
 |---|------|--------|-------------|
@@ -35,26 +35,27 @@ Generated: 2026-04-07
 | 16 | DesignResultsBeam.csv | Part A | Beam design capacity and ratios |
 | 17 | DesignResultsColumn.csv | Part A | Column design capacity and ratios |
 | 18 | ValidationReport.txt | System | Cross-check results |
+| 19 | ReferenceLines.csv | Part A | Grid lines and reference lines with coordinates |
 
 ### Tier 1 — Conditional Files (3 files, project-dependent)
 
 | # | File | Source | Condition | Description |
 |---|------|--------|-----------|-------------|
-| 19 | DesignResultsWall.csv | Part A | Shear wall system | Wall design ratios + geometry |
-| 20 | MembersBasementWall.csv | Part C | Project has basement | Basement/retaining wall panels with zone dimensions |
-| 21 | ReinforcementBasementWall.csv | Part C | Project has basement | Basement wall rebar per direction/face/zone |
+| 20 | DesignResultsWall.csv | Part A | Shear wall system | Wall design ratios + geometry |
+| 21 | MembersBasementWall.csv | Part C | Project has basement | Basement/retaining wall panels with zone dimensions |
+| 22 | ReinforcementBasementWall.csv | Part C | Project has basement | Basement wall rebar per direction/face/zone |
 
 ### Tier 2 — Rebar Length Files (7 files, computed from Tier 1)
 
 | # | File | Input | Description |
 |---|------|-------|-------------|
-| 22 | RebarLengthsBeam.csv | Members + Reinf + Sections | Bar-by-bar beam rebar with anchorage and splices |
-| 23 | RebarLengthsColumn.csv | Members + Reinf + Sections | Column main bars, dowels, hoops with splice zones |
-| 24 | RebarLengthsWall.csv | Members + Reinf + Nodes | Normal wall V/H bars with continuity stacking |
-| 25 | RebarLengthsBasementWall.csv | Members + Reinf + Nodes | Basement wall H/V bars, U-bars, dowels |
-| 26 | RebarLengthsSlab.csv | Members + Reinf + Beams | Slab bars with polygon scan-line clipping |
-| 27 | RebarLengthsFooting.csv | Members + Reinf | Footing base, additional, and stirrup bars |
-| 28 | RebarLengthsStair.csv | Members + Reinf | Stair bars with bend points for flights |
+| 23 | RebarLengthsBeam.csv | Members + Reinf + Sections | Bar-by-bar beam rebar with anchorage and splices |
+| 24 | RebarLengthsColumn.csv | Members + Reinf + Sections | Column main bars, dowels, hoops with splice zones |
+| 25 | RebarLengthsWall.csv | Members + Reinf + Nodes | Normal wall V/H bars with continuity stacking |
+| 26 | RebarLengthsBasementWall.csv | Members + Reinf + Nodes | Basement wall H/V bars, U-bars, dowels |
+| 27 | RebarLengthsSlab.csv | Members + Reinf + Beams | Slab bars with polygon scan-line clipping |
+| 28 | RebarLengthsFooting.csv | Members + Reinf | Footing base, additional, and stirrup bars |
+| 29 | RebarLengthsStair.csv | Members + Reinf | Stair bars with bend points for flights |
 
 ---
 
@@ -136,6 +137,9 @@ Generated: 2026-04-07
 | fy_main | float | MPa | Main rebar yield strength from material |
 | fy_sub | float | MPa | Stirrup rebar yield strength from material |
 | element_ids | string | — | Constituent MIDAS element IDs, comma-separated (merged spans) |
+| direction | string | — | Beam direction: X or Y (inferred from coordinates) |
+| x_ref | string | — | Assigned X-direction reference line label |
+| y_ref | string | — | Assigned Y-direction reference line label |
 
 **⚠️ extend vs col_width:** `extend_start_mm` / `extend_end_mm` are from perpendicular **beam-beam** or **beam-wall** junctions only. Beam-column junctions are skipped because the column box already covers the joint. To find column inner face positions, use `col_width_start_mm` / `col_width_end_mm`:
 ```
@@ -172,6 +176,8 @@ Merge breaks at: column grids, wall grids, beam-beam junctions, section/material
 | material_id | string | — | Concrete grade from MIDAS material (e.g., C35, C40) |
 | fy_main | float | MPa | Main rebar yield strength from material |
 | fy_sub | float | MPa | Tie rebar yield strength from material |
+| x_ref | string | — | Assigned X-direction reference line label |
+| y_ref | string | — | Assigned Y-direction reference line label |
 
 ### 6. MembersWall.csv
 
@@ -484,11 +490,24 @@ Note: `start_x/y_mm` and `end_x/y_mm` are populated from the Part C ELEMENT shee
 Note: Composite bars (e.g., D13+D16@100) are split into 2 rows with
 doubled spacing per individual bar type (D13@200 + D16@200).
 
+### 19. ReferenceLines.csv
+
+| Column | Type | Unit | Description |
+|--------|------|------|-------------|
+| label | string | — | Line label (X1, X1-1, Y2-1, etc.) |
+| coord_mm | float | mm | Position coordinate (X for X-axis lines, Y for Y-axis lines) |
+| axis | string | — | X or Y |
+| type | string | — | GRID (has column, bold line) or REF (no column, thin dashed) |
+
+Grid lines are detected from column positions. Reference lines are additional structural lines
+(from beam endpoints) that don't have columns. Label convention: X1-1 = first reference line
+after grid X1.
+
 ---
 
 ## Column Definitions — Tier 2 (Rebar Lengths)
 
-### 22. RebarLengthsBeam.csv
+### 23. RebarLengthsBeam.csv
 
 | Column | Type | Unit | Description |
 |--------|------|------|-------------|
@@ -541,7 +560,7 @@ doubled spacing per individual bar type (D13@200 + D16@200).
 
 **n_bars vs quantity_pieces (stirrups):** For stirrup bars (CTR/EXT/INT), `n_bars` = number of legs per set (2 or 4), `quantity_pieces` = number of stirrup sets in the zone. `length_mm` = full perimeter of one closed tie. Weight = `quantity_pieces × length_mm × unit_weight`.
 
-### 23. RebarLengthsColumn.csv
+### 24. RebarLengthsColumn.csv
 
 | Column | Type | Unit | Description |
 |--------|------|------|-------------|
@@ -555,6 +574,10 @@ doubled spacing per individual bar type (D13@200 + D16@200).
 | dia_mm | float | mm | Bar diameter |
 | n_bars | int | — | Number of bars (main bars); 0 for hoops (use quantity_pieces) |
 | length_mm | float | mm | Individual bar length (main) or full hoop perimeter (hoops) |
+| anchorage_start | string | — | Start anchorage: HOOK or LAP (DOWEL=HOOK/LAP, MAIN_TOP=LAP/HOOK, others=LAP/LAP) |
+| anchorage_end | string | — | End anchorage: HOOK or LAP |
+| development_length_mm | float | mm | Hook development length (Ldh) from dev_lengths lookup |
+| lap_length_mm | float | mm | Column lap splice length (Lpc) from lap_splice lookup |
 | spacing_mm | float | mm | Hoop spacing (null for main bars) |
 | zone_length_mm | float | mm | Hoop zone length |
 | quantity_pieces | int | — | Number of hoops in zone (weight = quantity_pieces × length_mm × unit_weight) |
@@ -583,7 +606,7 @@ doubled spacing per individual bar type (D13@200 + D16@200).
 
 Note: Bend point columns (bend1_*, bend2_*) are present for projects with slanted columns (P1). Absent in projects without slanted columns (P2).
 
-### 24. RebarLengthsWall.csv
+### 25. RebarLengthsWall.csv
 
 | Column | Type | Unit | Description |
 |--------|------|------|-------------|
@@ -615,7 +638,7 @@ Note: Bend point columns (bend1_*, bend2_*) are present for projects with slante
 | split_total | int | — | Total pieces after split |
 | original_length_mm | float | mm | Original length before split |
 
-### 25. RebarLengthsBasementWall.csv
+### 26. RebarLengthsBasementWall.csv
 
 | Column | Type | Unit | Description |
 |--------|------|------|-------------|
@@ -647,7 +670,7 @@ Note: Bend point columns (bend1_*, bend2_*) are present for projects with slante
 | original_length_mm | float | mm | Original length before split |
 | zone_width_mm | float | mm | Horizontal zone width |
 
-### 26. RebarLengthsSlab.csv
+### 27. RebarLengthsSlab.csv
 
 | Column | Type | Unit | Description |
 |--------|------|------|-------------|
@@ -689,7 +712,7 @@ Note: Bend point columns (bend1_*, bend2_*) are present for projects with slante
 
 Note: For polygon slabs (non-rectangular, 3+ nodes), bars are scan-line clipped to the slab boundary. Each group of adjacent bars with the same length is output as one record.
 
-### 27. RebarLengthsFooting.csv
+### 28. RebarLengthsFooting.csv
 
 | Column | Type | Unit | Description |
 |--------|------|------|-------------|
@@ -718,7 +741,7 @@ Note: For polygon slabs (non-rectangular, 3+ nodes), bars are scan-line clipped 
 
 Note: Footing z_mm is the **top surface** elevation, not center. Top bars at z - cover, bottom bars at z - thickness + cover.
 
-### 28. RebarLengthsStair.csv
+### 29. RebarLengthsStair.csv
 
 | Column | Type | Unit | Description |
 |--------|------|------|-------------|
