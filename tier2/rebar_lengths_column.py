@@ -571,12 +571,33 @@ def calculate_column_rebar_lengths(
     # fc comes from parameter (derived from material_id by app.py)
 
     # Process each column stack
-    # Step 1: Group by grid + member_id (separates P2's multiple columns)
+    # Step 1: Group by grid + member_id (separates P2's multiple columns).
+    #         For OFF_GRID columns, also include rounded (x_mm, y_mm) so
+    #         physically distinct off-grid columns of the same member_id
+    #         end up in different groups. Without this, P2 Buldang TC4A
+    #         OFF_GRID columns at (-35800, 28700) and (-36000, 9250) all
+    #         shared one group, and the lap-zone next-column logic at
+    #         lines 816-824 grabbed coordinates from the wrong column,
+    #         producing rebar rows with x_end/y_end pointing at a
+    #         different physical column (19,450mm Y delta).
     # Step 2: Merge Z-continuous stacks of same member_id across grids (P1 slanted)
     col_df = col_df.copy()
 
+    # Build the physical grouping key. For on-grid columns, the grid label
+    # alone is sufficient. For OFF_GRID columns, append rounded (x, y) so
+    # physically separate columns at different positions don't collide.
+    def _phys_grid_key(row):
+        grid = row['grid']
+        if grid == 'OFF_GRID':
+            x = round(float(row['x_mm']), 0) if pd.notna(row.get('x_mm')) else 0
+            y = round(float(row['y_mm']), 0) if pd.notna(row.get('y_mm')) else 0
+            return f"OFF_GRID@{x:.0f},{y:.0f}"
+        return grid
+
+    col_df['_phys_grid'] = col_df.apply(_phys_grid_key, axis=1)
+
     raw_stacks = {}
-    for (grid, member_id), sub in col_df.groupby(['grid', 'member_id']):
+    for (grid, member_id), sub in col_df.groupby(['_phys_grid', 'member_id']):
         sub = sub.copy()
         sub['_lv_idx'] = sub['level_from'].apply(_level_sort_key)
         sub = sub.sort_values('_lv_idx').reset_index(drop=True)
@@ -623,10 +644,15 @@ def calculate_column_rebar_lengths(
 
         merged[(grid, mid)] = combined
 
-    for (grid, member_id), grp in merged.items():
+    for (phys_grid, member_id), grp in merged.items():
         # Sort bottom to top
         grp = grp.copy()
         grp['_lv_idx'] = grp['level_from'].apply(_level_sort_key)
+        # `phys_grid` is the synthetic key used for grouping (may be
+        # 'OFF_GRID@-35800,28700' for off-grid columns); the original `grid`
+        # label is what the output CSV expects ('OFF_GRID' or 'X3Y1' etc.).
+        # Take it from the first row of the group.
+        grid = str(grp.iloc[0]['grid'])
         grp = grp.sort_values('_lv_idx').reset_index(drop=True)
 
         # Check if any rebar config exists for this member
