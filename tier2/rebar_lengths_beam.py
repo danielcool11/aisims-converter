@@ -250,12 +250,13 @@ class DevLapLookup:
 class BeamDataAdapter:
     """Adapts our converter output to the calculator's needs."""
 
-    def __init__(self, beams_df, columns_df, sections_df, reinf_df, nodes_df):
+    def __init__(self, beams_df, columns_df, sections_df, reinf_df, nodes_df, walls_df=None):
         self.beams_df = beams_df.copy()
         self.columns_df = columns_df.copy()
         self.sections_df = sections_df.copy()
         self.reinf_df = reinf_df.copy()
         self.nodes_df = nodes_df.copy()
+        self.walls_df = walls_df.copy() if walls_df is not None else pd.DataFrame()
 
         self._build_lookups()
 
@@ -301,6 +302,41 @@ class BeamDataAdapter:
                     self.column_dims[key] = {'b_mm': 0, 'h_mm': 0}
                 self.column_dims[key]['b_mm'] = max(self.column_dims[key]['b_mm'], b)
                 self.column_dims[key]['h_mm'] = max(self.column_dims[key]['h_mm'], h)
+
+        # Wall thickness at grid points for beam-to-wall anchorage.
+        # Match walls to beam grids by proximity of wall centroid to node grid coords.
+        # wall_thickness: (grid, level) → thickness_mm
+        self.wall_thickness = {}
+        if not self.walls_df.empty:
+            # Build grid_pos → grid_label lookup from nodes
+            grid_positions = {}  # grid_label → (x_mm, y_mm)
+            for _, row in self.nodes_df.iterrows():
+                g = str(row.get('grid', ''))
+                if g and g != 'OFF_GRID':
+                    grid_positions[g] = (float(row['x_mm']), float(row['y_mm']))
+
+            for _, w in self.walls_df.iterrows():
+                t = float(w.get('thickness_mm', 0) or 0)
+                if t <= 0:
+                    continue
+                lv = str(w.get('level', '') or '').strip()
+                if not lv:
+                    continue
+                cx = float(w.get('centroid_x_mm', 0) or 0)
+                cy = float(w.get('centroid_y_mm', 0) or 0)
+                # Find closest grid to wall centroid
+                best_grid = None
+                best_dist = 500  # max snap distance mm
+                for g, (gx, gy) in grid_positions.items():
+                    d = min(abs(cx - gx), abs(cy - gy))
+                    if d < best_dist:
+                        best_dist = d
+                        best_grid = g
+                if best_grid:
+                    key = (best_grid, lv)
+                    # Keep the max thickness at this grid
+                    self.wall_thickness[key] = max(
+                        self.wall_thickness.get(key, 0), t)
 
         # Beam direction and line_key
         self.beams_df['direction'] = self.beams_df.apply(
@@ -553,6 +589,20 @@ class BeamDataAdapter:
                 return dims.get('b_mm', 0) if direction == 'X' else dims.get('h_mm', 0)
         return 0
 
+    def get_wall_thickness(self, grid, direction, level=None):
+        """Get wall thickness at a grid point, 0 if no wall.
+        Used as fallback when get_column_width returns 0 (beam anchors into wall).
+        """
+        if level:
+            t = self.wall_thickness.get((grid, level), 0)
+            if t > 0:
+                return t
+        # Fallback: match any level at this grid
+        for (g, _lv), t in self.wall_thickness.items():
+            if g == grid and t > 0:
+                return t
+        return 0
+
     def get_section(self, section_id):
         return self.section_props.get(str(section_id))
 
@@ -721,7 +771,11 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
         l_span = float(sp['length_mm'])
         beam_level = sp.get('level', '')
         Wc1 = adapter.get_column_width(grid_from, direction, beam_level)
+        if Wc1 == 0:
+            Wc1 = adapter.get_wall_thickness(grid_from, direction, beam_level)
         Wc2 = adapter.get_column_width(grid_to, direction, beam_level)
+        if Wc2 == 0:
+            Wc2 = adapter.get_wall_thickness(grid_to, direction, beam_level)
         l_cl = l_span - 0.5 * (Wc1 + Wc2)
 
         dia_top = info['cfg_top']['dia']
@@ -898,7 +952,11 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
                 next_sp = span_list[sub_i + 1]['sp']
                 next_level = next_sp.get('level', beam_level)
                 next_Wc1 = adapter.get_column_width(next_sp.get('grid_from', ''), direction, next_level)
+                if next_Wc1 == 0:
+                    next_Wc1 = adapter.get_wall_thickness(next_sp.get('grid_from', ''), direction, next_level)
                 next_Wc2 = adapter.get_column_width(next_sp.get('grid_to', ''), direction, next_level)
+                if next_Wc2 == 0:
+                    next_Wc2 = adapter.get_wall_thickness(next_sp.get('grid_to', ''), direction, next_level)
                 l_cl_next = float(next_sp['length_mm']) - 0.5 * (next_Wc1 + next_Wc2)
 
             # ADD_START (first span, EXT zone has more bars than main)
@@ -1071,7 +1129,11 @@ def _calculate_stirrups(adapter):
         grid_to = row.get('grid_to', '')
         st_level = row.get('level', '')
         Wc1 = adapter.get_column_width(grid_from, direction, st_level)
+        if Wc1 == 0:
+            Wc1 = adapter.get_wall_thickness(grid_from, direction, st_level)
         Wc2 = adapter.get_column_width(grid_to, direction, st_level)
+        if Wc2 == 0:
+            Wc2 = adapter.get_wall_thickness(grid_to, direction, st_level)
         l_cl = l_span - 0.5 * (Wc1 + Wc2)
 
         xs = row.get('x_from_mm', 0) or 0
@@ -1160,6 +1222,8 @@ def _compute_splice_coords(results, adapter):
 
         if bar.get('anchorage_start') == 'LAP' and bar.get('start_grid'):
             col_w = adapter.get_column_width(bar['start_grid'], direction, bar_level)
+            if col_w == 0:
+                col_w = adapter.get_wall_thickness(bar['start_grid'], direction, bar_level)
             face = (bar.get('x_start_mm', 0) or 0) + col_w / 2 if direction == 'X' \
                 else (bar.get('y_start_mm', 0) or 0) + col_w / 2
             bar['splice_start_mm'] = round(face, 1)
@@ -1167,6 +1231,8 @@ def _compute_splice_coords(results, adapter):
 
         if bar.get('anchorage_end') == 'LAP' and bar.get('end_grid'):
             col_w = adapter.get_column_width(bar['end_grid'], direction, bar_level)
+            if col_w == 0:
+                col_w = adapter.get_wall_thickness(bar['end_grid'], direction, bar_level)
             face = (bar.get('x_end_mm', 0) or 0) + col_w / 2 if direction == 'X' \
                 else (bar.get('y_end_mm', 0) or 0) + col_w / 2
             bar['splice_end_mm'] = round(face, 1)
@@ -1184,6 +1250,7 @@ def calculate_beam_rebar_lengths(
     dev_lengths_path: str,
     lap_splice_path: str,
     dia_fy_map: dict = None,
+    walls_df: pd.DataFrame = None,
 ) -> pd.DataFrame:
     """
     Calculate beam rebar lengths from Tier 1 converter output.
@@ -1196,6 +1263,7 @@ def calculate_beam_rebar_lengths(
         nodes_df: Nodes.csv
         dev_lengths_path: path to development_lengths.csv
         lap_splice_path: path to lap_splice.csv
+        walls_df: MembersWall.csv (optional, for wall anchorage extension)
 
     Returns:
         DataFrame for RebarLengthsBeam.csv
@@ -1204,7 +1272,7 @@ def calculate_beam_rebar_lengths(
     lookup = DevLapLookup(dev_lengths_path, lap_splice_path)
 
     print('[RebarBeam] Building data adapter...')
-    adapter = BeamDataAdapter(beams_df, columns_df, sections_df, reinf_df, nodes_df)
+    adapter = BeamDataAdapter(beams_df, columns_df, sections_df, reinf_df, nodes_df, walls_df)
     print(f'[RebarBeam] {len(adapter.long_cfg)} longitudinal configs, '
           f'{len(adapter.stirrup_cfg)} stirrup configs')
 

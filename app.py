@@ -817,7 +817,8 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                     rebar_beam = calculate_beam_rebar_lengths(
                         outputs['beams'], outputs['columns'], outputs['sections'],
                         outputs['reinf_beam'], outputs['nodes'], dev_path, lap_path,
-                        dia_fy_map=dia_fy_map)
+                        dia_fy_map=dia_fy_map,
+                        walls_df=outputs.get('walls'))
                     outputs['rebar_beam'] = rebar_beam
                     log(f"RebarLengthsBeam: {len(rebar_beam)} records")
                     tier2_count += 1
