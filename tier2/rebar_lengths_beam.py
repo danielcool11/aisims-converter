@@ -770,10 +770,15 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
         grid_to = sp.get('grid_to', '')
         l_span = float(sp['length_mm'])
         beam_level = sp.get('level', '')
-        Wc1 = adapter.get_column_width(grid_from, direction, beam_level)
+        # Prefer precomputed col_width from Phase 2.7 (coordinate-based, includes wall fallback)
+        Wc1 = float(sp.get('col_width_start_mm', 0) or 0)
+        Wc2 = float(sp.get('col_width_end_mm', 0) or 0)
+        if Wc1 == 0:
+            Wc1 = adapter.get_column_width(grid_from, direction, beam_level)
         if Wc1 == 0:
             Wc1 = adapter.get_wall_thickness(grid_from, direction, beam_level)
-        Wc2 = adapter.get_column_width(grid_to, direction, beam_level)
+        if Wc2 == 0:
+            Wc2 = adapter.get_column_width(grid_to, direction, beam_level)
         if Wc2 == 0:
             Wc2 = adapter.get_wall_thickness(grid_to, direction, beam_level)
         l_cl = l_span - 0.5 * (Wc1 + Wc2)

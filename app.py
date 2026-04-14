@@ -451,6 +451,30 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                             best = w
                     return best
 
+                # Build wall position index for fallback when no column found
+                wall_positions = []  # (cx, cy, level, thickness)
+                if 'walls' in outputs and outputs['walls'] is not None and not outputs['walls'].empty:
+                    for _, w in outputs['walls'].iterrows():
+                        wx = float(w.get('centroid_x_mm', 0) or 0)
+                        wy = float(w.get('centroid_y_mm', 0) or 0)
+                        wlv = str(w.get('level', '') or '').strip()
+                        wt = float(w.get('thickness_mm', 0) or 0)
+                        if wt > 0:
+                            wall_positions.append((wx, wy, wlv, wt))
+
+                def find_wall_thickness(x, y, level):
+                    """Find wall thickness at (x, y) on this level."""
+                    best = 0
+                    WALL_TOL = 500  # mm — walls have centroid offset from beam endpoint
+                    for wx, wy, wlv, wt in wall_positions:
+                        if abs(wx - x) > WALL_TOL or abs(wy - y) > WALL_TOL:
+                            continue
+                        if level and wlv and level != wlv:
+                            continue
+                        if wt > best:
+                            best = wt
+                    return best
+
                 cw_start = []
                 cw_end = []
                 for _, bm in beams_df.iterrows():
@@ -461,7 +485,11 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                     x2 = float(bm.get('x_to_mm', 0) or 0)
                     y2 = float(bm.get('y_to_mm', 0) or 0)
                     w1 = find_col_width(x1, y1, lv, d)
+                    if w1 == 0:
+                        w1 = find_wall_thickness(x1, y1, lv)
                     w2 = find_col_width(x2, y2, lv, d)
+                    if w2 == 0:
+                        w2 = find_wall_thickness(x2, y2, lv)
                     cw_start.append(int(round(w1)))
                     cw_end.append(int(round(w2)))
                 beams_df['col_width_start_mm'] = cw_start
