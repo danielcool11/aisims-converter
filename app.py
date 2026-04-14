@@ -451,21 +451,41 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                             best = w
                     return best
 
-                # Build wall position index for fallback when no column found
+                # Build wall position index for fallback when no column found.
+                # Uses centroid proximity (500mm tolerance) — proven more reliable than
+                # polygon bbox matching which is too restrictive for beam endpoints
+                # at wall sides. Includes both regular walls and basement walls.
                 wall_positions = []  # (cx, cy, level, thickness)
-                if 'walls' in outputs and outputs['walls'] is not None and not outputs['walls'].empty:
-                    for _, w in outputs['walls'].iterrows():
-                        wx = float(w.get('centroid_x_mm', 0) or 0)
-                        wy = float(w.get('centroid_y_mm', 0) or 0)
-                        wlv = str(w.get('level', '') or '').strip()
+                WALL_TOL = 500  # mm
+
+                def _add_wall_positions(wall_df):
+                    for _, w in wall_df.iterrows():
                         wt = float(w.get('thickness_mm', 0) or 0)
-                        if wt > 0:
-                            wall_positions.append((wx, wy, wlv, wt))
+                        if wt <= 0:
+                            continue
+                        wlv = str(w.get('level', '') or '').strip()
+                        cx = float(w.get('centroid_x_mm', 0) or 0)
+                        cy = float(w.get('centroid_y_mm', 0) or 0)
+                        if cx != 0 or cy != 0:
+                            wall_positions.append((cx, cy, wlv, wt))
+                        # Also add start/end points for long walls (beam may connect at end)
+                        for sx_col, sy_col in [('start_x_mm', 'start_y_mm'), ('end_x_mm', 'end_y_mm')]:
+                            sx = w.get(sx_col)
+                            sy = w.get(sy_col)
+                            if pd.notna(sx) and pd.notna(sy):
+                                sx, sy = float(sx), float(sy)
+                                if (sx != 0 or sy != 0):
+                                    wall_positions.append((sx, sy, wlv, wt))
+
+                if 'walls' in outputs and outputs['walls'] is not None and not outputs['walls'].empty:
+                    _add_wall_positions(outputs['walls'])
+                # Include basement walls
+                if 'bwall_members' in outputs and outputs['bwall_members'] is not None and not outputs['bwall_members'].empty:
+                    _add_wall_positions(outputs['bwall_members'])
 
                 def find_wall_thickness(x, y, level):
                     """Find wall thickness at (x, y) on this level."""
                     best = 0
-                    WALL_TOL = 500  # mm — walls have centroid offset from beam endpoint
                     for wx, wy, wlv, wt in wall_positions:
                         if abs(wx - x) > WALL_TOL or abs(wy - y) > WALL_TOL:
                             continue
