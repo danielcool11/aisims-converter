@@ -495,6 +495,27 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                             best = wt
                     return best
 
+                # Node-sharing: beam node in wall boundary → anchored to wall.
+                # Most reliable method (M3 from Suhwan's analysis: 73-84% coverage).
+                wall_node_thickness = {}  # node_id → max wall thickness
+                for wall_src in ['walls', 'bwall_members']:
+                    wdf = outputs.get(wall_src)
+                    if wdf is None or wdf.empty:
+                        continue
+                    for _, w in wdf.iterrows():
+                        wt = float(w.get('thickness_mm', 0) or 0)
+                        if wt <= 0:
+                            continue
+                        for nc in ['node_i', 'node_j', 'node_k', 'node_l']:
+                            n = str(w.get(nc, '') or '').strip()
+                            if n and n != 'nan':
+                                wall_node_thickness[n] = max(
+                                    wall_node_thickness.get(n, 0), wt)
+
+                def find_wall_by_node(node_id):
+                    """Find wall thickness if beam node is shared with a wall."""
+                    return wall_node_thickness.get(str(node_id).strip(), 0)
+
                 cw_start = []
                 cw_end = []
                 for _, bm in beams_df.iterrows():
@@ -504,12 +525,18 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                     y1 = float(bm.get('y_from_mm', 0) or 0)
                     x2 = float(bm.get('x_to_mm', 0) or 0)
                     y2 = float(bm.get('y_to_mm', 0) or 0)
+                    nf = str(bm.get('node_from', '')).strip()
+                    nt = str(bm.get('node_to', '')).strip()
                     w1 = find_col_width(x1, y1, lv, d)
                     if w1 == 0:
                         w1 = find_wall_thickness(x1, y1, lv)
+                    if w1 == 0:
+                        w1 = find_wall_by_node(nf)
                     w2 = find_col_width(x2, y2, lv, d)
                     if w2 == 0:
                         w2 = find_wall_thickness(x2, y2, lv)
+                    if w2 == 0:
+                        w2 = find_wall_by_node(nt)
                     cw_start.append(int(round(w1)))
                     cw_end.append(int(round(w2)))
                 beams_df['col_width_start_mm'] = cw_start
