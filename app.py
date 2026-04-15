@@ -660,7 +660,13 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 # Node-sharing: beam node in wall boundary → anchored to wall.
                 # Most reliable method (M3 from Suhwan's analysis: 73-84% coverage).
                 # Also track per-node wall levels for "extends below" check.
-                wall_node_thickness = {}  # node_id → max wall thickness
+                # Issue #79: key by (node_id, level), not node_id alone.
+                # The same node can be shared by walls at multiple storeys with
+                # different thicknesses (e.g. thick basement BW1A t=400 plus
+                # thinner above-grade CW t=200 meeting at the 1F floor corner).
+                # Without level scoping, max() would inflate col_width for the
+                # 1F beam and the renderer's hook overshoots the wall face.
+                wall_node_thickness = {}  # (node_id, level) → max wall thickness
                 wall_node_levels = {}     # node_id → set of wall levels at this node
                 for wall_src in ['walls', 'bwall_members']:
                     wdf = outputs.get(wall_src)
@@ -674,14 +680,17 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                         for nc in ['node_i', 'node_j', 'node_k', 'node_l']:
                             n = str(w.get(nc, '') or '').strip()
                             if n and n != 'nan':
-                                wall_node_thickness[n] = max(
-                                    wall_node_thickness.get(n, 0), wt)
                                 if wlv:
+                                    key = (n, wlv)
+                                    wall_node_thickness[key] = max(
+                                        wall_node_thickness.get(key, 0), wt)
                                     wall_node_levels.setdefault(n, set()).add(wlv)
 
-                def find_wall_by_node(node_id):
-                    """Find wall thickness if beam node is shared with a wall."""
-                    return wall_node_thickness.get(str(node_id).strip(), 0)
+                def find_wall_by_node(node_id, beam_level):
+                    """Find wall thickness if beam node is shared with a wall
+                    AT THE SAME LEVEL as the beam (issue #79)."""
+                    return wall_node_thickness.get(
+                        (str(node_id).strip(), str(beam_level).strip()), 0)
 
                 def wall_extends_below_node(node_id, beam_level):
                     """True if the wall sharing this node covers the directly-below
@@ -730,12 +739,12 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                     if w1 == 0:
                         w1 = find_wall_thickness(x1, y1, lv)
                     if w1 == 0:
-                        w1 = find_wall_by_node(nf)
+                        w1 = find_wall_by_node(nf, lv)
                     w2 = find_col_width(x2, y2, lv, d)
                     if w2 == 0:
                         w2 = find_wall_thickness(x2, y2, lv)
                     if w2 == 0:
-                        w2 = find_wall_by_node(nt)
+                        w2 = find_wall_by_node(nt, lv)
                     cw_start.append(int(round(w1)))
                     cw_end.append(int(round(w2)))
 
