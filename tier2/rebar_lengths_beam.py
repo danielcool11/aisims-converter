@@ -890,6 +890,16 @@ def _emit_remainder_bars(run_index: RunIndex, adapter, lookup) -> list:
                 continue
             n_bars = len(strips)
 
+            # Determine which ends are CASE 2 HOOKS (extending into an
+            # adjacent lower-count beam) vs RUN BOUNDARY (at the original
+            # beam's column with a normal HOOK into that column).
+            #
+            # All strips for this interval share the same near/far flags
+            # (interval is keyed by beam_row_idxs), so we read it from
+            # any strip.
+            near_into_adj = strips[0].near_hooks_into_beam_idx is not None
+            far_into_adj = strips[0].far_hooks_into_beam_idx is not None
+
             # Collect geometry from the first and last beams in the interval
             first_row = beams_df.loc[beam_idxs[0]]
             last_row = beams_df.loc[beam_idxs[-1]]
@@ -899,17 +909,34 @@ def _emit_remainder_bars(run_index: RunIndex, adapter, lookup) -> list:
             h_mm = int(round(first_row.get('h_mm') or 600))
             fy_main = first_row.get('fy_main')
 
-            # Coordinate span: from first beam's "start" to last beam's "end"
-            # Use min/max on the primary axis
+            # Anchorage: Ldh for the diameter + material of the first beam.
+            # (All beams in the run share the same diameter by Case 3 break.)
+            fy = _steel_grade(dia, fy_override=fy_main)
+            fc = _parse_fc(material_id)
+            Ldh, Lpt_B, Lpb_B = lookup.get(fy, dia, fc)
+
+            # Coordinate span: physical extent of the bar.
+            #   - Interval ends that face an adjacent lower-count beam in
+            #     the run (Case 2 hook) → extend by Ldh into that beam.
+            #     Bar's end is in the adjacent beam's clear span; col_width
+            #     at that end is 0 (no column there).
+            #   - Interval ends at a run boundary → use the original
+            #     beam's endpoint as-is. Bar terminates at the run's
+            #     supporting column with a normal HOOK; col_width at that
+            #     end matches the original beam's col_width on that side.
             refs_on_dir = first_row.get('direction', 'X')
+
+            # Original interval span (without extension)
             if refs_on_dir == 'X':
                 all_x = []
                 for idx in beam_idxs:
                     r = beams_df.loc[idx]
                     all_x.append(float(r.get('x_from_mm', 0) or 0))
                     all_x.append(float(r.get('x_to_mm', 0) or 0))
-                xs = min(all_x)
-                xe = max(all_x)
+                interval_min = min(all_x)
+                interval_max = max(all_x)
+                xs = interval_min - (Ldh if near_into_adj else 0)
+                xe = interval_max + (Ldh if far_into_adj else 0)
                 ys = float(first_row.get('y_from_mm', 0) or 0)
                 ye = ys
             else:
@@ -918,28 +945,59 @@ def _emit_remainder_bars(run_index: RunIndex, adapter, lookup) -> list:
                     r = beams_df.loc[idx]
                     all_y.append(float(r.get('y_from_mm', 0) or 0))
                     all_y.append(float(r.get('y_to_mm', 0) or 0))
-                ys = min(all_y)
-                ye = max(all_y)
+                interval_min = min(all_y)
+                interval_max = max(all_y)
+                ys = interval_min - (Ldh if near_into_adj else 0)
+                ye = interval_max + (Ldh if far_into_adj else 0)
                 xs = float(first_row.get('x_from_mm', 0) or 0)
                 xe = xs
             zs = float(first_row.get('z_mm', 0) or 0)
             ze = zs
+
+            # col_width at each end:
+            #   - extended-into-adjacent-beam end → 0 (clear space)
+            #   - run-boundary end → use the original beam's col_width on
+            #     the matching side
+            cw_start_mm = 0
+            cw_end_mm = 0
+            if not near_into_adj:
+                # The "near" end of the interval = the LEFT/SMALLER-primary
+                # end. For the FIRST beam in the interval, this is whichever
+                # end has the smaller primary coord, which is its
+                # col_width_start_mm if its own coord direction matches the
+                # run direction (or col_width_end_mm if reversed).
+                fb = beams_df.loc[beam_idxs[0]]
+                if refs_on_dir == 'X':
+                    if float(fb.get('x_from_mm', 0) or 0) <= float(fb.get('x_to_mm', 0) or 0):
+                        cw_start_mm = int(fb.get('col_width_start_mm', 0) or 0)
+                    else:
+                        cw_start_mm = int(fb.get('col_width_end_mm', 0) or 0)
+                else:
+                    if float(fb.get('y_from_mm', 0) or 0) <= float(fb.get('y_to_mm', 0) or 0):
+                        cw_start_mm = int(fb.get('col_width_start_mm', 0) or 0)
+                    else:
+                        cw_start_mm = int(fb.get('col_width_end_mm', 0) or 0)
+            if not far_into_adj:
+                lb = beams_df.loc[beam_idxs[-1]]
+                if refs_on_dir == 'X':
+                    if float(lb.get('x_to_mm', 0) or 0) >= float(lb.get('x_from_mm', 0) or 0):
+                        cw_end_mm = int(lb.get('col_width_end_mm', 0) or 0)
+                    else:
+                        cw_end_mm = int(lb.get('col_width_start_mm', 0) or 0)
+                else:
+                    if float(lb.get('y_to_mm', 0) or 0) >= float(lb.get('y_from_mm', 0) or 0):
+                        cw_end_mm = int(lb.get('col_width_end_mm', 0) or 0)
+                    else:
+                        cw_end_mm = int(lb.get('col_width_start_mm', 0) or 0)
 
             # Sum of physical span lengths across the interval
             sum_span = 0.0
             for idx in beam_idxs:
                 sum_span += float(beams_df.loc[idx].get('length_mm') or 0)
 
-            # Anchorage: Ldh for the diameter + material of the first beam.
-            # (All beams in the run share the same diameter by Case 3 break.)
-            fy = _steel_grade(dia, fy_override=fy_main)
-            fc = _parse_fc(material_id)
-            Ldh, Lpt_B, Lpb_B = lookup.get(fy, dia, fc)
-
-            # Phase 2 length approximation: sum of spans + 2*Ldh
-            # (Refinement pass in Phase 3 can subtract column halves when a
-            #  remainder's end coincides with a run boundary at a column.)
-            length_mm = sum_span + 2 * Ldh
+            # length_mm = interval span + Ldh on each extended end + 0 on
+            # each non-extended end. Matches the coord extent above.
+            length_mm = sum_span + (Ldh if near_into_adj else 0) + (Ldh if far_into_adj else 0)
 
             sec = adapter.get_section(str(first_row.get('section_id', '') or ''))
             if sec is not None:
@@ -966,8 +1024,8 @@ def _emit_remainder_bars(run_index: RunIndex, adapter, lookup) -> list:
                 'b_mm': b_mm,
                 'h_mm': h_mm,
                 'shape': shape,
-                'col_width_start_mm': 0,
-                'col_width_end_mm': 0,
+                'col_width_start_mm': cw_start_mm,
+                'col_width_end_mm': cw_end_mm,
                 'support_extends_below_start': False,
                 'support_extends_below_end': False,
                 'x_start_mm': xs,
