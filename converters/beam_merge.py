@@ -43,15 +43,42 @@ def _primary_coord(row, direction):
 
 
 def _are_contiguous(row_a, row_b, direction):
-    """Check if two beam elements connect end-to-end."""
+    """Check if two beam elements connect end-to-end AND are coaxial.
+
+    Endpoint proximity alone is not enough: a straight x-beam at y=0 and a
+    diagonal beam starting at (same node, y=0) going to (y=1300) share a
+    node but are on different physical lines. Merging them into one span
+    would drop the diagonal beam's y-change. We require the direction
+    vectors to be parallel (integer cross product ≈ 0) before chaining.
+
+    Issue #78 / P2 TG8 3F regression: removing the support-grid break
+    (commit c928494) allowed the straight TG8 chain and a diagonal TG8
+    element to merge into one span, losing the straight chain's -28400
+    endpoint in the rendered output.
+    """
     if direction == 'X':
-        # A's max-x should be close to B's min-x
         a_end = max(row_a['x_from_mm'], row_a['x_to_mm'])
         b_start = min(row_b['x_from_mm'], row_b['x_to_mm'])
     else:
         a_end = max(row_a['y_from_mm'], row_a['y_to_mm'])
         b_start = min(row_b['y_from_mm'], row_b['y_to_mm'])
-    return abs(a_end - b_start) < CONTIGUITY_TOL
+    if abs(a_end - b_start) >= CONTIGUITY_TOL:
+        return False
+
+    # Coaxiality: both direction vectors must be parallel.
+    dax = row_a['x_to_mm'] - row_a['x_from_mm']
+    day = row_a['y_to_mm'] - row_a['y_from_mm']
+    dbx = row_b['x_to_mm'] - row_b['x_from_mm']
+    dby = row_b['y_to_mm'] - row_b['y_from_mm']
+    # Integer cross-product tolerance: allow 1mm slop in either component
+    # so slightly-imperfect colinear FEM elements still merge.
+    cross = dax * dby - day * dbx
+    # Reference magnitude for tolerance — the larger of the two lengths
+    mag = max(abs(dax) + abs(day), abs(dbx) + abs(dby), 1.0)
+    # 0.5% relative tolerance on the cross product (rad ≈ sin ≈ cross/mag²)
+    if abs(cross) > 0.005 * mag * mag:
+        return False
+    return True
 
 
 def _build_support_grids(columns_df, walls_df, beams_df):
@@ -141,25 +168,24 @@ def _merge_chain(chain, span_counter):
         endpoints.append((r['x_from_mm'], r['y_from_mm'], r.get('node_from', '')))
         endpoints.append((r['x_to_mm'], r['y_to_mm'], r.get('node_to', '')))
 
-    if is_diagonal:
-        # Diagonal: first element's start → last element's end (chain sorted
-        # by primary axis, so first→last is the full span)
-        x_from = first['x_from_mm']
-        y_from = first['y_from_mm']
-        x_to = last['x_to_mm']
-        y_to = last['y_to_mm']
-    elif direction == 'X':
-        # X-direction: endpoints are the points with min and max x.
+    # Pick the two endpoints with extreme primary-axis coordinate.
+    # Works for straight X/Y chains AND diagonal chains uniformly — the
+    # primary axis is whichever of X or Y has the larger span. Using
+    # endpoint extremes (instead of first/last element's own x_from/x_to)
+    # is essential when some chain elements have reversed orientation
+    # (node1 on the right, node2 on the left), which otherwise causes the
+    # merged span to lose one end — e.g. P2 TG8 3F chain [23661, 31709,
+    # 31708, 23456, 22620] where 23661's own x_from=-26300, x_to=-28400
+    # was dropping the -28400 endpoint when the old is_diagonal branch
+    # took first['x_from_mm'].
+    if direction == 'X':
         min_pt = min(endpoints, key=lambda p: p[0])
         max_pt = max(endpoints, key=lambda p: p[0])
-        x_from, y_from = min_pt[0], min_pt[1]
-        x_to, y_to = max_pt[0], max_pt[1]
     else:
-        # Y-direction: endpoints are the points with min and max y.
         min_pt = min(endpoints, key=lambda p: p[1])
         max_pt = max(endpoints, key=lambda p: p[1])
-        x_from, y_from = min_pt[0], min_pt[1]
-        x_to, y_to = max_pt[0], max_pt[1]
+    x_from, y_from = min_pt[0], min_pt[1]
+    x_to, y_to = max_pt[0], max_pt[1]
 
     # Sum lengths
     total_length = sum(r['length_mm'] for r in chain)
