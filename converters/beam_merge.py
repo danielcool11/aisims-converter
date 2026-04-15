@@ -18,6 +18,7 @@ Output preserves same schema as MembersBeam.csv + adds element_ids column.
 
 import pandas as pd
 import math
+from typing import Dict
 
 
 CONTIGUITY_TOL = 100.0  # mm — max gap between consecutive element endpoints
@@ -385,54 +386,63 @@ def merge_beam_spans(
     total_elements = 0
 
     for (level, member_id, direction), group in grouped:
-        # Sort by primary coordinate
         sorted_group = group.sort_values('_sort_key')
         rows = [row.to_dict() for _, row in sorted_group.iterrows()]
         total_elements += len(rows)
+        n = len(rows)
 
-        # Form contiguous chains, splitting at break points
+        # Graph-based chain detection (union-find). Linear chain walking
+        # would split chains when the sort interleaves unrelated beams
+        # at different perpendicular positions — for example, all G2 2F
+        # Y-direction beams are now in one group, sorted by min_y, but
+        # they live at multiple x positions across the building, so a
+        # G2 at x=-50000 can land between two G2's at x=-35800 in the
+        # sort and break the chain even though the -35800 pair shares a
+        # node and is mergeable.
+        #
+        # Build a union-find over rows where two rows union only if
+        # _are_contiguous + same section + same material. Each connected
+        # component becomes one chain. Then sort each chain by sort_key
+        # to preserve the physical order along the primary axis.
+        parent = list(range(n))
+
+        def find(x: int) -> int:
+            while parent[x] != x:
+                parent[x] = parent[parent[x]]
+                x = parent[x]
+            return x
+
+        def union(a: int, b: int) -> None:
+            ra, rb = find(a), find(b)
+            if ra != rb:
+                parent[ra] = rb
+
+        # Pairwise check. O(n^2) per group, but groups are typically
+        # tens of beams so this is cheap. Could be optimized later
+        # with spatial indexing if needed.
+        for i in range(n):
+            for j in range(i + 1, n):
+                a = rows[i]
+                b = rows[j]
+                if a.get('section_id') != b.get('section_id'):
+                    continue
+                if a.get('material_id') != b.get('material_id'):
+                    continue
+                # Try both orderings since _are_contiguous expects
+                # prev's far-end ≈ next's near-end on the primary axis.
+                if _are_contiguous(a, b, direction) or _are_contiguous(b, a, direction):
+                    union(i, j)
+
+        # Group rows by their union-find root
+        groups_by_root: Dict[int, list] = {}
+        for i in range(n):
+            r = find(i)
+            groups_by_root.setdefault(r, []).append(i)
+
         chains = []
-        current_chain = []
-
-        for i, row in enumerate(rows):
-            if not current_chain:
-                current_chain.append(row)
-                continue
-
-            prev = current_chain[-1]
-
-            # Check contiguity
-            if not _are_contiguous(prev, row, direction):
-                chains.append(current_chain)
-                current_chain = [row]
-                continue
-
-            # Check section change
-            if row.get('section_id') != prev.get('section_id'):
-                chains.append(current_chain)
-                current_chain = [row]
-                continue
-
-            # Check material change
-            if row.get('material_id') != prev.get('material_id'):
-                chains.append(current_chain)
-                current_chain = [row]
-                continue
-
-            # No support-grid break here.
-            #
-            # The outer grouping (level, member_id, direction, perp_key)
-            # already guarantees every row in the chain shares the same
-            # member_id. Per Prof. Sunkuk's rule (issue #78 Error C):
-            # identical member_id + same section + shared node + coaxial
-            # means MIDAS considers this one physical structural element
-            # and it must merge, even when the shared node is a column
-            # grid. Breaking at support grids over-fragmented same-member
-            # spans that MIDAS intentionally continued through the column.
-            current_chain.append(row)
-
-        if current_chain:
-            chains.append(current_chain)
+        for indices in groups_by_root.values():
+            indices.sort(key=lambda i: rows[i]['_sort_key'])
+            chains.append([rows[i] for i in indices])
 
         # Merge each chain
         for chain in chains:
