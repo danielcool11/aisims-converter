@@ -280,22 +280,26 @@ def _classify_pair_at_node(
     if a.level != b.level:
         finding.reason = 'level mismatch'
         return finding
-    # Gate 2: support at node — Prof. Sunkuk rule doesn't apply
-    if has_support:
-        finding.reason = 'column/wall at junction'
-        return finding
-    # Gate 3: not coaxial (any non-zero angle)
+    # Gate 2: not coaxial (any non-zero angle)
     if not _is_coaxial(a, b):
         finding.reason = 'not coaxial'
         return finding
-    # Gate 4: different section
+    # Gate 3: different section
     if not _same_section(a, b):
         finding.reason = f'section mismatch ({a.b_mm}x{a.h_mm} vs {b.b_mm}x{b.h_mm})'
         return finding
-    # Gate 5: no rebar info on one side
+    # Gate 4: no rebar info on one side
     if n_a == 0 or n_b == 0:
         finding.reason = f'missing {position} count'
         return finding
+
+    # NOTE: column/wall support at the junction is NOT a gate.
+    # Prof. Sunkuk's rule (issue #78) applies to any coaxial same-section
+    # same-diameter beam-to-beam junction regardless of whether a column is
+    # between them. Lapping inside a column cage is standard detailing
+    # (the cage provides lateral confinement for the lap zone), and is
+    # more economical than each beam hooking into the column independently.
+    # has_support is still recorded on the finding for logging/debug.
 
     # Case 3: different diameter → each side hooks independently
     if dia_a != dia_b:

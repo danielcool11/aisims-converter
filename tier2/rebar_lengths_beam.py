@@ -1415,8 +1415,25 @@ def _calculate_main_bars(adapter, lookup):
                     current = []
                 continue
             if current:
-                # Break sub-group if diameter changes OR beams don't connect
-                if (current[-1]['dia_top'] != s['dia_top'] or
+                # Break sub-group if diameter changes, member_id changes, or
+                # beams don't connect.
+                #
+                # The member_id check is essential: the line_key groups all
+                # beams on the same gridline at the same level regardless of
+                # member_id. Without a member_id break, four different members
+                # that happen to share a gridline (e.g. P2 2F x=-35800:
+                # G2A → G8 → G2 → G8A, all contiguous end-to-end via shared
+                # column nodes) get lumped into one "4-span run" and the
+                # MAIN_START/INTERMEDIATE/END role-assignment flows across
+                # member_id boundaries. The middle spans end up with LAP
+                # anchorage that's supposed to overlap the PREVIOUS span —
+                # but the previous span is a different member, so the bar
+                # visually starts ~1m INTO its own span and appears to stop
+                # short of the support. Breaking at member_id changes gives
+                # each member its own subgroup; same-member contiguous runs
+                # still merge correctly.
+                if (current[-1]['member_id'] != s['member_id'] or
+                        current[-1]['dia_top'] != s['dia_top'] or
                         not _are_contiguous(current[-1], s)):
                     subgroups.append(current)
                     current = []
