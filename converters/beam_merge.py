@@ -21,7 +21,6 @@ import math
 
 
 CONTIGUITY_TOL = 100.0  # mm — max gap between consecutive element endpoints
-MAX_MERGE_LENGTH = 12000.0  # mm — never merge beyond stock length
 
 
 def _beam_direction(x_from, y_from, x_to, y_to):
@@ -267,7 +266,6 @@ def merge_beam_spans(
     columns_df: pd.DataFrame,
     walls_df: pd.DataFrame = None,
     tolerance: float = CONTIGUITY_TOL,
-    max_length: float = MAX_MERGE_LENGTH,
 ) -> pd.DataFrame:
     """Merge adjacent FEM beam elements into structural spans.
 
@@ -276,10 +274,14 @@ def merge_beam_spans(
         columns_df: MembersColumn.csv DataFrame (for support grid detection)
         walls_df: MembersWall.csv DataFrame (for wall support detection)
         tolerance: max gap between consecutive endpoints (mm)
-        max_length: max merged span length (mm)
 
     Returns:
         Merged DataFrame with same schema + element_ids column.
+
+    Note: no max structural span length is enforced — MIDAS "structural spans"
+    can exceed stock bar length (12m). Bar-level splitting happens later in
+    _split_stock (tier2/rebar_lengths_beam.py), which inserts a LAP zone when
+    a single bar exceeds MAX_STOCK_LENGTH_MM.
     """
     if beams_df is None or beams_df.empty:
         return beams_df
@@ -354,13 +356,6 @@ def merge_beam_spans(
             row_start_grid = str(row.get('grid_from', '')).strip()
             if _is_break_point(prev_end_grid, support_grids) or \
                _is_break_point(row_start_grid, support_grids):
-                chains.append(current_chain)
-                current_chain = [row]
-                continue
-
-            # Check max length
-            chain_length = sum(r['length_mm'] for r in current_chain) + row['length_mm']
-            if chain_length > max_length:
                 chains.append(current_chain)
                 current_chain = [row]
                 continue
