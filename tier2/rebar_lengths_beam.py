@@ -22,12 +22,30 @@ import numpy as np
 import re
 import math
 from pathlib import Path
+from typing import Dict, List, Optional, Set
+
+from converters.beam_junction_graph import (
+    BeamRebarCount,
+    BeamRun,
+    build_beam_refs,
+    build_support_node_set,
+    classify_junctions,
+    compute_runs,
+)
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
 COVER_MM = 50.0
 HOOK_EXTENSION_FACTOR = 10
 MAX_STOCK_LENGTH_MM = 12000
+
+# Feature flag — count-matched anchorage per Prof. Sunkuk rule (issue #78 B).
+# When True, beam-to-beam coaxial junctions are classified using the junction
+# graph + runs (TOP and BOT independently). Bar counts determine whether bars
+# continue through as LAP or terminate as HOOK, and remainder bars are emitted
+# for the "extra" bars on the higher-count side.
+# When False, fall back to the legacy zone-width feasibility rule.
+USE_COUNT_MATCHED_ANCHORAGE = True
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -675,6 +693,13 @@ def _add_anchorage(bar, Ldh, Lpt_B, Lpb_B):
     elif role == 'MAIN_END':
         bar.update(anchorage_start='LAP', anchorage_end='HOOK',
                    lap_length_mm=Lpt_B if pos == 'TOP' else Lpb_B)
+    elif role == 'MAIN_REMAINDER':
+        # Case 2 remainder bar: hook on each end (terminates inside adjacent
+        # lower-count beams after Ldh embedment). Structurally identical to
+        # MAIN_SINGLE for the purpose of anchorage type, but physically the
+        # hook ends sit at a beam-beam junction, not a column face.
+        # Issue #78 B Case 2.
+        bar.update(anchorage_start='HOOK', anchorage_end='HOOK', lap_length_mm=None)
     elif role == 'ADD_START':
         bar.update(anchorage_start='HOOK', anchorage_end='STRAIGHT', lap_length_mm=None)
     elif role == 'ADD_END':
@@ -752,9 +777,266 @@ def _add_bar_coords(role, length, direction, xs, ys, zs, xe, ye, ze):
             'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': ze}
 
 
+# ── Run index (Phase 2 count-matched anchorage) ────────────────────────────
+
+class RunIndex:
+    """Precomputed per-beam run membership for TOP and BOT positions.
+
+    Built once at the start of the main bar calculation. Uses the adapter's
+    long-cfg (main bar count per position) to compute junction classifications
+    and walk connected components per Prof. Sunkuk's rule.
+    """
+
+    def __init__(self, adapter):
+        refs = build_beam_refs(adapter.beams_df)
+
+        # Bar counts per beam row_idx, pulled from the adapter's long-config
+        # (not from output rebar rows, which don't exist yet).
+        counts: Dict[int, BeamRebarCount] = {}
+        for idx, row in adapter.beams_df.iterrows():
+            mid = str(row.get('member_id', '') or '')
+            lv = str(row.get('level', '') or '')
+            cfg_top = adapter.get_long_cfg(mid, 'TOP', level=lv)
+            cfg_bot = adapter.get_long_cfg(mid, 'BOT', level=lv)
+            if cfg_top is None or cfg_bot is None:
+                counts[int(idx)] = BeamRebarCount()
+                continue
+            counts[int(idx)] = BeamRebarCount(
+                n_top=int(cfg_top.get('main', 0) or 0),
+                dia_top=int(cfg_top.get('dia', 0) or 0),
+                n_bot=int(cfg_bot.get('main', 0) or 0),
+                dia_bot=int(cfg_bot.get('dia', 0) or 0),
+            )
+
+        supported = build_support_node_set(
+            adapter.columns_df if not adapter.columns_df.empty else None,
+            adapter.walls_df if not adapter.walls_df.empty else None,
+        )
+
+        findings = classify_junctions(refs, counts, supported)
+        self.runs_top: List[BeamRun] = compute_runs(
+            refs, findings, counts, adapter.beams_df, 'TOP'
+        )
+        self.runs_bot: List[BeamRun] = compute_runs(
+            refs, findings, counts, adapter.beams_df, 'BOT'
+        )
+
+        # row_idx → run lookup (per position)
+        self.span_to_run_top: Dict[int, BeamRun] = {}
+        self.span_to_run_bot: Dict[int, BeamRun] = {}
+        for r in self.runs_top:
+            for idx in r.ordered_beams:
+                self.span_to_run_top[idx] = r
+        for r in self.runs_bot:
+            for idx in r.ordered_beams:
+                self.span_to_run_bot[idx] = r
+
+        # Stats for logging
+        self._stat_case2_runs = sum(1 for r in self.runs_top if r.has_case2) \
+                              + sum(1 for r in self.runs_bot if r.has_case2)
+        self._stat_remainders = sum(len(r.remainders) for r in self.runs_top) \
+                              + sum(len(r.remainders) for r in self.runs_bot)
+
+    def summary(self) -> str:
+        return (
+            f'[RunIndex] runs TOP={len(self.runs_top)} BOT={len(self.runs_bot)}, '
+            f'Case2 runs={self._stat_case2_runs}, '
+            f'remainder bars to emit={self._stat_remainders}'
+        )
+
+    def get_run(self, span_row_idx: int, position: str) -> Optional[BeamRun]:
+        if position == 'TOP':
+            return self.span_to_run_top.get(span_row_idx)
+        return self.span_to_run_bot.get(span_row_idx)
+
+
+def _emit_remainder_bars(run_index: RunIndex, adapter, lookup) -> list:
+    """Emit MAIN_REMAINDER rows for every Case 2 remainder span across all runs.
+
+    One physical bar per RemainderSpan at the lowest count level (subsequent
+    levels are implicit in the bar's strip, not separate rows — the strip's
+    level is captured in count_level for future optimization grouping).
+
+    Phase 2 initial formula (approximation):
+        length = sum(l_span of beams in the remainder interval) + 2 * Ldh
+
+    Both ends are Case 2 hooks (anchorage_start=HOOK, anchorage_end=HOOK).
+    The n_bars field carries the strip count — 1 per emitted row at this
+    level. Adjacent strips at the same (interval, position) with consecutive
+    levels are grouped for emission.
+    """
+    out: list = []
+    beams_df = adapter.beams_df
+
+    for run in (*run_index.runs_top, *run_index.runs_bot):
+        if not run.remainders:
+            continue
+
+        # Group remainders by identical beam interval — multiple levels over
+        # the same beams = one grouped row with n_bars = number of strips.
+        from collections import defaultdict
+        grouped: Dict[tuple, list] = defaultdict(list)
+        for rm in run.remainders:
+            key = tuple(rm.beam_row_idxs)
+            grouped[key].append(rm)
+
+        position = run.position
+        dia = run.dia
+        level_str = run.level
+
+        for beam_idxs_tuple, strips in grouped.items():
+            beam_idxs = list(beam_idxs_tuple)
+            if not beam_idxs:
+                continue
+            n_bars = len(strips)
+
+            # Collect geometry from the first and last beams in the interval
+            first_row = beams_df.loc[beam_idxs[0]]
+            last_row = beams_df.loc[beam_idxs[-1]]
+            member_id = str(first_row.get('member_id', '') or '')
+            material_id = str(first_row.get('material_id', 'C35') or 'C35')
+            b_mm = int(round(first_row.get('b_mm') or 400))
+            h_mm = int(round(first_row.get('h_mm') or 600))
+            fy_main = first_row.get('fy_main')
+
+            # Coordinate span: from first beam's "start" to last beam's "end"
+            # Use min/max on the primary axis
+            refs_on_dir = first_row.get('direction', 'X')
+            if refs_on_dir == 'X':
+                all_x = []
+                for idx in beam_idxs:
+                    r = beams_df.loc[idx]
+                    all_x.append(float(r.get('x_from_mm', 0) or 0))
+                    all_x.append(float(r.get('x_to_mm', 0) or 0))
+                xs = min(all_x)
+                xe = max(all_x)
+                ys = float(first_row.get('y_from_mm', 0) or 0)
+                ye = ys
+            else:
+                all_y = []
+                for idx in beam_idxs:
+                    r = beams_df.loc[idx]
+                    all_y.append(float(r.get('y_from_mm', 0) or 0))
+                    all_y.append(float(r.get('y_to_mm', 0) or 0))
+                ys = min(all_y)
+                ye = max(all_y)
+                xs = float(first_row.get('x_from_mm', 0) or 0)
+                xe = xs
+            zs = float(first_row.get('z_mm', 0) or 0)
+            ze = zs
+
+            # Sum of physical span lengths across the interval
+            sum_span = 0.0
+            for idx in beam_idxs:
+                sum_span += float(beams_df.loc[idx].get('length_mm') or 0)
+
+            # Anchorage: Ldh for the diameter + material of the first beam.
+            # (All beams in the run share the same diameter by Case 3 break.)
+            fy = _steel_grade(dia, fy_override=fy_main)
+            fc = _parse_fc(material_id)
+            Ldh, Lpt_B, Lpb_B = lookup.get(fy, dia, fc)
+
+            # Phase 2 length approximation: sum of spans + 2*Ldh
+            # (Refinement pass in Phase 3 can subtract column halves when a
+            #  remainder's end coincides with a run boundary at a column.)
+            length_mm = sum_span + 2 * Ldh
+
+            sec = adapter.get_section(str(first_row.get('section_id', '') or ''))
+            if sec is not None:
+                cover = sec['cover_mm']
+                shape = sec['shape']
+            else:
+                cover = COVER_MM
+                shape = 'RECT'
+
+            z_bar = _bar_z(zs, h_mm, cover, position, 1, dia)
+
+            # Segment id for traceability — tie to the first beam's member
+            seg_hint = f'{member_id}-REMAIN-{beam_idxs[0]}'
+
+            bar = {
+                'segment_id': seg_hint,
+                'level': level_str,
+                'direction': refs_on_dir,
+                'line_grid': str(first_row.get('line_grid', '') or ''),
+                'member_id': member_id,
+                'span_index': beam_idxs[0],
+                'start_grid': str(first_row.get('grid_from', '') or ''),
+                'end_grid': str(last_row.get('grid_to', '') or ''),
+                'b_mm': b_mm,
+                'h_mm': h_mm,
+                'shape': shape,
+                'col_width_start_mm': 0,
+                'col_width_end_mm': 0,
+                'support_extends_below_start': False,
+                'support_extends_below_end': False,
+                'x_start_mm': xs,
+                'y_start_mm': ys,
+                'z_start_mm': z_bar,
+                'x_end_mm': xe,
+                'y_end_mm': ye,
+                'z_end_mm': z_bar,
+                'bar_position': position,
+                'bar_role': 'MAIN_REMAINDER',
+                'bar_type': 'MAIN',
+                'dia_mm': dia,
+                'n_bars': n_bars,
+                'length_mm': int(round(length_mm)),
+                'layer': 1,
+                'reinforcement_type': 'UNIFORM',
+            }
+            bar = _add_anchorage(bar, Ldh, Lpt_B, Lpb_B)
+            # Remainder bars are typically short enough to not need stock split,
+            # but run it through _split_stock anyway for consistency.
+            lap_for_split = Lpt_B if position == 'TOP' else Lpb_B
+            for piece in _split_stock(bar, lap_for_split, refs_on_dir):
+                out.append(piece)
+
+    return out
+
+
+def _resolve_role_from_run(
+    span_row_idx: int,
+    position: str,
+    fallback_role: str,
+    fallback_n: int,
+    run_index: Optional[RunIndex],
+):
+    """Return (role, n_bars) for MAIN_{TOP,BOT} at this span.
+
+    Uses run graph if the span is part of a Case 1/2 run at this position.
+    Otherwise returns the fallback (current zone-width-based role + count).
+
+    Role derivation inside a run:
+        - first beam in the ordered run -> MAIN_START (HOOK far side, LAP into next)
+        - last beam                      -> MAIN_END   (LAP from prev, HOOK far side)
+        - interior                       -> MAIN_INTERMEDIATE (LAP both sides)
+    """
+    if run_index is None:
+        return fallback_role, fallback_n
+    run = run_index.get_run(span_row_idx, position)
+    if run is None:
+        return fallback_role, fallback_n
+    ordered = run.ordered_beams
+    if span_row_idx not in ordered:
+        return fallback_role, fallback_n
+    pos = ordered.index(span_row_idx)
+    n_run = len(ordered)
+    if n_run == 1:
+        return fallback_role, fallback_n
+    if pos == 0:
+        role = 'MAIN_START'
+    elif pos == n_run - 1:
+        role = 'MAIN_END'
+    else:
+        role = 'MAIN_INTERMEDIATE'
+    return role, run.min_count
+
+
 # ── Process one sub-group of same-diameter contiguous spans ──────────────────
 
-def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
+def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
+                     run_index: Optional[RunIndex] = None):
     """Process contiguous same-diameter spans. Returns list of bar dicts."""
     results = []
     n_sub = len(span_list)
@@ -878,33 +1160,47 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
 
         lext = max(d_eff, 12.0 * dia_top)
 
-        role = span_roles[sub_i]
-        is_single_role = (role == 'MAIN_SINGLE')
+        legacy_role = span_roles[sub_i]
+        is_single_legacy = (legacy_role == 'MAIN_SINGLE')
 
-        # Bar counts
-        if is_single_role:
-            main_top = int(cfg_top['zones'].get('INT', cfg_top['main']))
-            main_bot = int(cfg_bot['zones'].get('CTR', cfg_bot['main']))
+        # Legacy bar counts — used as fallback when run graph doesn't apply
+        if is_single_legacy:
+            fb_top = int(cfg_top['zones'].get('INT', cfg_top['main']))
+            fb_bot = int(cfg_bot['zones'].get('CTR', cfg_bot['main']))
         elif is_uniform:
-            main_top = int(cfg_top['main'])
-            main_bot = int(cfg_bot['main'])
+            fb_top = int(cfg_top['main'])
+            fb_bot = int(cfg_bot['main'])
         else:
-            main_top = int(gm_top)
-            main_bot = int(gm_bot)
+            fb_top = int(gm_top)
+            fb_bot = int(gm_bot)
 
-        # Main bar length based on role
-        if role == 'MAIN_SINGLE':
-            Ltop = l_cl + Ldh + Ldh
-            Lbot = l_cl + Ldh + Ldh
-        elif role == 'MAIN_START':
-            Ltop = l_cl + Ldh + Lpt_B
-            Lbot = l_cl + Ldh + Lpb_B
-        elif role == 'MAIN_END':
-            Ltop = l_cl + Ldh
-            Lbot = l_cl + Ldh
-        else:  # MAIN_INTERMEDIATE
-            Ltop = l_span + Lpt_B
-            Lbot = l_span + Lpb_B
+        # Per-position role (TOP and BOT independently when the flag is on)
+        span_row_idx = sp.get('_row_idx')
+        top_role, main_top = _resolve_role_from_run(
+            span_row_idx, 'TOP', legacy_role, fb_top, run_index,
+        )
+        bot_role, main_bot = _resolve_role_from_run(
+            span_row_idx, 'BOT', legacy_role, fb_bot, run_index,
+        )
+
+        def _main_length(role_name: str, lap_len: float) -> float:
+            if role_name == 'MAIN_SINGLE':
+                return l_cl + Ldh + Ldh
+            if role_name == 'MAIN_START':
+                return l_cl + Ldh + lap_len
+            if role_name == 'MAIN_END':
+                return l_cl + Ldh
+            # MAIN_INTERMEDIATE
+            return l_span + lap_len
+
+        Ltop = _main_length(top_role, Lpt_B)
+        Lbot = _main_length(bot_role, Lpb_B)
+
+        # Back-compat local — some downstream ADD-bar logic keys on the old
+        # subgroup-level role. Default to the TOP role when TOP and BOT agree,
+        # otherwise use the legacy role (which is what ADD bars expected).
+        role = top_role if top_role == bot_role else legacy_role
+        is_single_role = (role == 'MAIN_SINGLE')
 
         base = {
             'segment_id': segment_id, 'level': sp.get('level', ''),
@@ -923,7 +1219,7 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
         z_e_top = _bar_z(ze, h_mm, cover, 'TOP', 1, dia_top)
         mt = {**base, 'x_start_mm': xs, 'y_start_mm': ys, 'z_start_mm': z_s_top,
               'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': z_e_top,
-              'bar_position': 'TOP', 'bar_role': role, 'bar_type': 'MAIN',
+              'bar_position': 'TOP', 'bar_role': top_role, 'bar_type': 'MAIN',
               'dia_mm': dia_top, 'n_bars': main_top, 'length_mm': int(round(Ltop)),
               'layer': 1, 'reinforcement_type': 'UNIFORM' if is_uniform else 'VARIABLE'}
         mt = _add_anchorage(mt, Ldh, Lpt_B, Lpb_B)
@@ -935,7 +1231,7 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
         z_e_bot = _bar_z(ze, h_mm, cover, 'BOT', 1, dia_bot)
         mb = {**base, 'x_start_mm': xs, 'y_start_mm': ys, 'z_start_mm': z_s_bot,
               'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': z_e_bot,
-              'bar_position': 'BOT', 'bar_role': role, 'bar_type': 'MAIN',
+              'bar_position': 'BOT', 'bar_role': bot_role, 'bar_type': 'MAIN',
               'dia_mm': dia_bot, 'n_bars': main_bot, 'length_mm': int(round(Lbot)),
               'layer': 1, 'reinforcement_type': 'UNIFORM' if is_uniform else 'VARIABLE'}
         mb = _add_anchorage(mb, Ldh, Lpt_B, Lpb_B)
@@ -949,9 +1245,34 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
             zones_top = cfg_top.get('zones', {})
             zones_bot = cfg_bot.get('zones', {})
 
-            add_top_ext = int(max(0, zones_top.get('EXT', gm_top) - gm_top))
-            add_top_int = int(max(0, zones_top.get('INT', gm_top) - gm_top))
-            add_bot_ctr = int(max(0, zones_bot.get('CTR', gm_bot) - gm_bot))
+            # Baseline for "ADD bar count" = how many bars at each zone minus
+            # the ones already accounted for by MAIN (+ MAIN_REMAINDER).
+            #
+            # Legacy: baseline = gm_top (subgroup min across variable spans).
+            #   This conflates two concepts: (a) "continuous-remainder" bars
+            #   that existed in this beam but not in the subgroup min, and
+            #   (b) true zone-specific ADD bars (extra top reinforcement at
+            #   supports to resist negative moment). Both end up in ADD_* rows.
+            #
+            # Count-matched (flag on) + this span is in a Case 2 run where
+            # cfg['main'] > run.min_count: the continuous-remainder bars are
+            # emitted separately as MAIN_REMAINDER. Use cfg['main'] as the
+            # baseline so ADD bars only represent the true zone extras.
+            #
+            # Span NOT in a Case 2 run (or no flag): keep legacy baseline.
+            add_baseline_top = gm_top
+            add_baseline_bot = gm_bot
+            if run_index is not None and span_row_idx is not None:
+                run_t = run_index.get_run(span_row_idx, 'TOP')
+                if run_t is not None and cfg_top['main'] > run_t.min_count:
+                    add_baseline_top = int(cfg_top['main'])
+                run_b = run_index.get_run(span_row_idx, 'BOT')
+                if run_b is not None and cfg_bot['main'] > run_b.min_count:
+                    add_baseline_bot = int(cfg_bot['main'])
+
+            add_top_ext = int(max(0, zones_top.get('EXT', add_baseline_top) - add_baseline_top))
+            add_top_int = int(max(0, zones_top.get('INT', add_baseline_top) - add_baseline_top))
+            add_bot_ctr = int(max(0, zones_bot.get('CTR', add_baseline_bot) - add_baseline_bot))
 
             # Adjacent clear length
             l_cl_next = l_cl
@@ -1029,6 +1350,12 @@ def _calculate_main_bars(adapter, lookup):
     beams_df = adapter.beams_df
     df_lines = beams_df[beams_df['direction'].isin(['X', 'Y'])].copy()
 
+    # Build run index once for Phase 2 count-matched anchorage.
+    run_index: Optional[RunIndex] = None
+    if USE_COUNT_MATCHED_ANCHORAGE:
+        run_index = RunIndex(adapter)
+        print(run_index.summary())
+
     for key, grp in df_lines.groupby('line_key'):
         if key is None:
             continue
@@ -1036,7 +1363,12 @@ def _calculate_main_bars(adapter, lookup):
 
         sort_col = 'x_from_mm' if direction == 'X' else 'y_from_mm'
         grp = grp.sort_values(sort_col)
-        spans = list(grp.to_dict('records'))
+        # Preserve original DataFrame row index for run-graph lookups.
+        spans = []
+        for idx, row in grp.iterrows():
+            rec = row.to_dict()
+            rec['_row_idx'] = int(idx)
+            spans.append(rec)
 
         # Build span info with rebar config
         span_info = []
@@ -1102,9 +1434,15 @@ def _calculate_main_bars(adapter, lookup):
                 gm_top = gm_bot = 0
 
             sub_results = _process_subgroup(
-                subgroup, gm_top, gm_bot, adapter, lookup, direction
+                subgroup, gm_top, gm_bot, adapter, lookup, direction,
+                run_index=run_index,
             )
             results.extend(sub_results)
+
+    # Emit MAIN_REMAINDER bars from Case 2 runs (after all subgroups processed)
+    if run_index is not None:
+        remainder_results = _emit_remainder_bars(run_index, adapter, lookup)
+        results.extend(remainder_results)
 
     return results
 
