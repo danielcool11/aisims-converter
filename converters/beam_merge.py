@@ -129,27 +129,37 @@ def _merge_chain(chain, span_counter):
     is_diagonal = dx_span > 100 and dy_span > 100 and min(dx_span, dy_span) > max(dx_span, dy_span) * 0.15
     direction = 'X' if dx_span >= dy_span else 'Y'
 
+    # Build endpoint-pool: every (x, y) point that appears as a chain element
+    # endpoint, with the node_id recorded from whichever side it came from.
+    # We then pick the two points with the most extreme primary-axis coord
+    # as the merged span's endpoints. This preserves exact structural
+    # coordinates (no averaging) so beam xy always matches its referenced
+    # node xy — avoids the cosmetic-drift false positives of Error F-style
+    # scans when MIDAS gives slightly-imperfect colinear FEM elements.
+    endpoints = []  # list of (x, y, node_id)
+    for r in chain:
+        endpoints.append((r['x_from_mm'], r['y_from_mm'], r.get('node_from', '')))
+        endpoints.append((r['x_to_mm'], r['y_to_mm'], r.get('node_to', '')))
+
     if is_diagonal:
-        # Diagonal beams: use first element's start and last element's end
-        # (chain is sorted by primary axis, so first→last = full span)
+        # Diagonal: first element's start → last element's end (chain sorted
+        # by primary axis, so first→last is the full span)
         x_from = first['x_from_mm']
         y_from = first['y_from_mm']
         x_to = last['x_to_mm']
         y_to = last['y_to_mm']
     elif direction == 'X':
-        # X-direction: use outermost X, average Y
-        x_from = min(all_x)
-        x_to = max(all_x)
-        y_avg = sum(all_y) / len(all_y)
-        y_from = y_avg
-        y_to = y_avg
+        # X-direction: endpoints are the points with min and max x.
+        min_pt = min(endpoints, key=lambda p: p[0])
+        max_pt = max(endpoints, key=lambda p: p[0])
+        x_from, y_from = min_pt[0], min_pt[1]
+        x_to, y_to = max_pt[0], max_pt[1]
     else:
-        # Y-direction: use outermost Y, average X
-        y_from = min(all_y)
-        y_to = max(all_y)
-        x_avg = sum(all_x) / len(all_x)
-        x_from = x_avg
-        x_to = x_avg
+        # Y-direction: endpoints are the points with min and max y.
+        min_pt = min(endpoints, key=lambda p: p[1])
+        max_pt = max(endpoints, key=lambda p: p[1])
+        x_from, y_from = min_pt[0], min_pt[1]
+        x_to, y_to = max_pt[0], max_pt[1]
 
     # Sum lengths
     total_length = sum(r['length_mm'] for r in chain)
