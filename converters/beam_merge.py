@@ -45,17 +45,27 @@ def _primary_coord(row, direction):
 def _are_contiguous(row_a, row_b, direction):
     """Check if two beam elements connect end-to-end AND are coaxial.
 
-    Endpoint proximity alone is not enough: a straight x-beam at y=0 and a
-    diagonal beam starting at (same node, y=0) going to (y=1300) share a
-    node but are on different physical lines. Merging them into one span
-    would drop the diagonal beam's y-change. We require the direction
-    vectors to be parallel (integer cross product ≈ 0) before chaining.
+    Three-part test:
+      1. Primary-axis endpoint proximity — A's far-primary end ≈ B's
+         near-primary end within CONTIGUITY_TOL.
+      2. Endpoint coincidence (both axes) at the shared join — avoids
+         chaining two parallel beams that happen to have matching
+         primary coords but different perpendicular positions
+         (e.g., two parallel x-beams at y=0 and y=50000).
+      3. Coaxiality — direction vectors must be parallel. Prevents a
+         straight x-beam and a diagonal beam that share a node from
+         merging into one span (which would silently drop the
+         diagonal's y-change).
 
-    Issue #78 / P2 TG8 3F regression: removing the support-grid break
-    (commit c928494) allowed the straight TG8 chain and a diagonal TG8
-    element to merge into one span, losing the straight chain's -28400
-    endpoint in the rendered output.
+    Part (2) replaces the old _perp_key grouping that grouped beams by
+    rounded y_from. That bucketing failed for diagonal chains where
+    successive elements have different y values.
+
+    Issue #78 / P2 TG8 3F: previously hit by removing the support-grid
+    chain-break — the straight TG8 chain and a diagonal TG8 element
+    at a shared corner node got merged.
     """
+    # Part 1: primary-axis proximity
     if direction == 'X':
         a_end = max(row_a['x_from_mm'], row_a['x_to_mm'])
         b_start = min(row_b['x_from_mm'], row_b['x_to_mm'])
@@ -65,17 +75,39 @@ def _are_contiguous(row_a, row_b, direction):
     if abs(a_end - b_start) >= CONTIGUITY_TOL:
         return False
 
-    # Coaxiality: both direction vectors must be parallel.
+    # Part 2: endpoint coincidence — the two elements must share a
+    # physical point, not merely have compatible primary coords.
+    # Find A's far endpoint (the one at a_end on the primary axis) and
+    # B's near endpoint, then compare both x and y.
+    if direction == 'X':
+        if row_a['x_to_mm'] >= row_a['x_from_mm']:
+            a_far = (row_a['x_to_mm'], row_a['y_to_mm'])
+        else:
+            a_far = (row_a['x_from_mm'], row_a['y_from_mm'])
+        if row_b['x_from_mm'] <= row_b['x_to_mm']:
+            b_near = (row_b['x_from_mm'], row_b['y_from_mm'])
+        else:
+            b_near = (row_b['x_to_mm'], row_b['y_to_mm'])
+    else:
+        if row_a['y_to_mm'] >= row_a['y_from_mm']:
+            a_far = (row_a['x_to_mm'], row_a['y_to_mm'])
+        else:
+            a_far = (row_a['x_from_mm'], row_a['y_from_mm'])
+        if row_b['y_from_mm'] <= row_b['y_to_mm']:
+            b_near = (row_b['x_from_mm'], row_b['y_from_mm'])
+        else:
+            b_near = (row_b['x_to_mm'], row_b['y_to_mm'])
+    if (abs(a_far[0] - b_near[0]) >= CONTIGUITY_TOL or
+            abs(a_far[1] - b_near[1]) >= CONTIGUITY_TOL):
+        return False
+
+    # Part 3: coaxiality via integer cross product
     dax = row_a['x_to_mm'] - row_a['x_from_mm']
     day = row_a['y_to_mm'] - row_a['y_from_mm']
     dbx = row_b['x_to_mm'] - row_b['x_from_mm']
     dby = row_b['y_to_mm'] - row_b['y_from_mm']
-    # Integer cross-product tolerance: allow 1mm slop in either component
-    # so slightly-imperfect colinear FEM elements still merge.
     cross = dax * dby - day * dbx
-    # Reference magnitude for tolerance — the larger of the two lengths
     mag = max(abs(dax) + abs(day), abs(dbx) + abs(dby), 1.0)
-    # 0.5% relative tolerance on the cross product (rad ≈ sin ≈ cross/mag²)
     if abs(cross) > 0.005 * mag * mag:
         return False
     return True
@@ -332,25 +364,27 @@ def merge_beam_spans(
         axis=1,
     )
 
-    # Add primary sort key and perpendicular coordinate for grouping
+    # Primary-axis sort key for chain walking.
     beams['_sort_key'] = beams.apply(
         lambda r: _primary_coord(r, r['_direction'])[0],
         axis=1,
     )
-    # Perpendicular coordinate — round to 50mm to group beams on same gridline
-    beams['_perp_key'] = beams.apply(
-        lambda r: round((r['y_from_mm'] if r['_direction'] == 'X' else r['x_from_mm']) / 50) * 50,
-        axis=1,
-    )
 
-    # Group by (level, member_id, direction, perpendicular coordinate)
-    grouped = beams.groupby(['level', 'member_id', '_direction', '_perp_key'])
+    # Group by (level, member_id, direction) — no perpendicular rounding.
+    # The old code grouped by _perp_key = round(y_from_mm / 50) to keep
+    # beams on the same gridline together, but this fails for diagonal
+    # beams (each element has a different y_from), leaving them in
+    # separate perp buckets even when they share nodes and form a
+    # continuous diagonal chain. Chain validity is now fully enforced by
+    # _are_contiguous (primary-axis proximity + perpendicular proximity
+    # + coaxiality), so the perp bucketing is no longer needed.
+    grouped = beams.groupby(['level', 'member_id', '_direction'])
 
     merged_spans = []
     span_counter = 0
     total_elements = 0
 
-    for (level, member_id, direction, perp_key), group in grouped:
+    for (level, member_id, direction), group in grouped:
         # Sort by primary coordinate
         sorted_group = group.sort_values('_sort_key')
         rows = [row.to_dict() for _, row in sorted_group.iterrows()]
