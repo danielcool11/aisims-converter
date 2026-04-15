@@ -35,6 +35,7 @@ from converters.validation import validate_outputs, format_report
 from converters.wall_dedup import deduplicate_walls
 from converters.junction_polygon import run_junction_detection
 from converters.beam_merge import merge_beam_spans
+from converters.concrete_below import build_has_concrete_below
 from tier2.rebar_lengths_beam import calculate_beam_rebar_lengths
 from tier2.rebar_lengths_column import calculate_column_rebar_lengths
 from tier2.rebar_lengths_slab import calculate_slab_rebar_lengths
@@ -548,33 +549,6 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 _level_order = [lv for lv, _ in _ordered_levels]
                 _level_index = {lv: i for i, lv in enumerate(_level_order)}
 
-                def level_directly_below(beam_level):
-                    """Level name immediately below beam_level (None if beam is lowest)."""
-                    idx = _level_index.get(beam_level)
-                    if idx is None or idx == 0:
-                        return None
-                    return _level_order[idx - 1]
-
-                def _member_spans_below_segment(m_from, m_to, beam_level):
-                    """True if member segment [m_from, m_to] physically covers the
-                    segment directly below beam_level — i.e. m_from at or below
-                    the level immediately under beam_level, and m_to at or above
-                    beam_level. This replaces the old "any level below" check,
-                    which incorrectly flagged members far below (e.g. TC1 in
-                    B4->1F range for a beam at 5F). Per Prof. Sunkuk rule
-                    (issue #78 Error A).
-                    """
-                    below = level_directly_below(beam_level)
-                    if below is None:
-                        return False
-                    ef = level_elev.get(m_from)
-                    et = level_elev.get(m_to)
-                    eb = level_elev.get(below)
-                    ebeam = level_elev.get(beam_level)
-                    if None in (ef, et, eb, ebeam):
-                        return False
-                    return ef <= eb and et >= ebeam
-
                 # Build column position index: list of (x, y, level_from, level_to, b, h)
                 col_positions = []
                 for _, c in cols_df.iterrows():
@@ -599,19 +573,6 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                         if w > best:
                             best = w
                     return best
-
-                def column_extends_below(x, y, beam_level):
-                    """True if a column at (x,y) physically covers the directly-below
-                    level segment under beam_level (i.e. it's the column that would
-                    actually receive a downward hook at this beam endpoint).
-                    Per Prof. Sunkuk rule / issue #78 Error A.
-                    """
-                    for cx, cy, clf, clt, cb, ch in col_positions:
-                        if abs(cx - x) > XY_TOL or abs(cy - y) > XY_TOL:
-                            continue
-                        if _member_spans_below_segment(clf, clt, beam_level):
-                            return True
-                    return False
 
                 # Build wall position index for fallback when no column found.
                 # Uses centroid proximity (500mm tolerance) — proven more reliable than
@@ -692,35 +653,18 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                     return wall_node_thickness.get(
                         (str(node_id).strip(), str(beam_level).strip()), 0)
 
-                def wall_extends_below_node(node_id, beam_level):
-                    """True if the wall sharing this node covers the directly-below
-                    level segment under beam_level. Walls are per-storey slices, so
-                    'level' equals the storey the wall rises from — we want a slice
-                    at the level immediately under beam_level.
-                    Per Prof. Sunkuk rule / issue #78 Error A.
-                    """
-                    levels = wall_node_levels.get(str(node_id).strip())
-                    if not levels:
-                        return False
-                    below = level_directly_below(beam_level)
-                    if below is None:
-                        return False
-                    return below in levels
-
-                def wall_extends_below_xy(x, y, beam_level):
-                    """True if a wall at (x,y) proximity covers the directly-below
-                    level segment under beam_level.
-                    Per Prof. Sunkuk rule / issue #78 Error A.
-                    """
-                    below = level_directly_below(beam_level)
-                    if below is None:
-                        return False
-                    for wx, wy, wlv, wt in wall_positions:
-                        if abs(wx - x) > WALL_TOL or abs(wy - y) > WALL_TOL:
-                            continue
-                        if wlv == below:
-                            return True
-                    return False
+                # Issue #78 unified predicate: has_concrete_below = column_below
+                # OR wall_below (both integer-exact, node-based). Replaces the
+                # prior xy-proximity + level-name fallback triplet
+                # (column_extends_below / wall_extends_below_xy /
+                # wall_extends_below_node), which was too loose and missed the
+                # "wall above vs below" distinction.
+                has_concrete_below = build_has_concrete_below(
+                    cols_df,
+                    outputs.get('walls'),
+                    outputs.get('bwall_members'),
+                    nodes_df,
+                )
 
                 cw_start = []
                 cw_end = []
@@ -748,19 +692,12 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                     cw_start.append(int(round(w1)))
                     cw_end.append(int(round(w2)))
 
-                    # support_extends_below: hook goes down only if member continues below
-                    eb_s = False
-                    if w1 > 0:
-                        eb_s = (column_extends_below(x1, y1, lv) or
-                                wall_extends_below_xy(x1, y1, lv) or
-                                wall_extends_below_node(nf, lv))
-                    eb_e = False
-                    if w2 > 0:
-                        eb_e = (column_extends_below(x2, y2, lv) or
-                                wall_extends_below_xy(x2, y2, lv) or
-                                wall_extends_below_node(nt, lv))
-                    below_start.append(bool(eb_s))
-                    below_end.append(bool(eb_e))
+                    # support_extends_below: integer-exact predicate per #78.
+                    # beam axis is xy only (beams are horizontal), z-component 0.
+                    bz = int(round(float(bm.get('z_mm', 0) or 0)))
+                    axis = (int(round(x2 - x1)), int(round(y2 - y1)), 0)
+                    below_start.append(has_concrete_below(nf, lv, bz, axis))
+                    below_end.append(has_concrete_below(nt, lv, bz, axis))
 
                 beams_df['col_width_start_mm'] = cw_start
                 beams_df['col_width_end_mm'] = cw_end
@@ -1118,7 +1055,8 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                         outputs['beams'], outputs['columns'], outputs['sections'],
                         outputs['reinf_beam'], outputs['nodes'], dev_path, lap_path,
                         dia_fy_map=dia_fy_map,
-                        walls_df=outputs.get('walls'))
+                        walls_df=outputs.get('walls'),
+                        bwalls_df=outputs.get('bwall_members'))
                     outputs['rebar_beam'] = rebar_beam
                     log(f"RebarLengthsBeam: {len(rebar_beam)} records")
                     tier2_count += 1

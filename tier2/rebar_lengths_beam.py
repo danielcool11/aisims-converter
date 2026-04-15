@@ -209,10 +209,15 @@ class DevLapLookup:
 
     def get(self, fy, dia_mm, fc, member_type='BEAM_COLUMN'):
         """
-        Returns (Ldh, Lpt, Lpb):
-            Ldh: development length for hook
+        Returns (Ldh, Ldb, Ldt, Lpt, Lpb):
+            Ldh: development length for hook (hooked anchorage)
+            Ldb: basic development length, BOTTOM bars (straight, bond only)
+            Ldt: basic development length, TOP bars (straight, bond only)
             Lpt: top bar lap splice (Class B)
             Lpb: bottom bar lap splice (Class B)
+
+        Ldb/Ldt are for the #78 STRAIGHT anchorage fallback (BOT bars
+        when has_concrete_below is False).
         """
         d_label = _dia_label(dia_mm)
 
@@ -232,10 +237,12 @@ class DevLapLookup:
             ]
             if row_dev.empty:
                 print(f'  [WARN] No dev length for fy={fy}, {d_label}, fc={fc}, {member_type}')
-                return 300, 600, 500  # safe defaults
+                return 300, 800, 1000, 600, 500  # safe defaults
             row_dev = row_dev.iloc[(row_dev['fc'] - fc).abs().argsort()[:1]]
 
         Ldh = float(row_dev['Ldh'].iloc[0])
+        Ldb = float(row_dev['Ldb'].iloc[0]) if 'Ldb' in row_dev.columns else Ldh * 2.5
+        Ldt = float(row_dev['Ldt'].iloc[0]) if 'Ldt' in row_dev.columns else Ldh * 3.2
 
         lap_mt = self.lap_df[self.lap_df['member_type'] == member_type] \
             if 'member_type' in self.lap_df.columns else self.lap_df
@@ -251,7 +258,7 @@ class DevLapLookup:
                 (lap_mt['diameter'] == d_label)
             ]
             if row_lap.empty:
-                return Ldh, 600, 500
+                return Ldh, Ldb, Ldt, 600, 500
             row_lap = row_lap.iloc[(row_lap['fc'] - fc).abs().argsort()[:1]]
 
         # Support both old (Lpt_B/Lpb_B) and new (Lpt/Lpb) column names
@@ -260,7 +267,7 @@ class DevLapLookup:
         Lpt = float(row_lap[lpt_col].iloc[0])
         Lpb = float(row_lap[lpb_col].iloc[0])
 
-        return Ldh, Lpt, Lpb
+        return Ldh, Ldb, Ldt, Lpt, Lpb
 
 
 # ── Data adapter (reads our Tier 1 format) ───────────────────────────────────
@@ -268,13 +275,24 @@ class DevLapLookup:
 class BeamDataAdapter:
     """Adapts our converter output to the calculator's needs."""
 
-    def __init__(self, beams_df, columns_df, sections_df, reinf_df, nodes_df, walls_df=None):
+    def __init__(self, beams_df, columns_df, sections_df, reinf_df, nodes_df,
+                 walls_df=None, bwalls_df=None):
         self.beams_df = beams_df.copy()
         self.columns_df = columns_df.copy()
         self.sections_df = sections_df.copy()
         self.reinf_df = reinf_df.copy()
         self.nodes_df = nodes_df.copy()
         self.walls_df = walls_df.copy() if walls_df is not None else pd.DataFrame()
+        self.bwalls_df = bwalls_df.copy() if bwalls_df is not None else pd.DataFrame()
+
+        # Issue #78 unified anchorage predicate — integer-exact column_below
+        # OR wall_below. Used by _emit_remainder_bars and (eventually) the
+        # other main-bar emit sites to decide HOOK vs STRAIGHT and the hook
+        # direction flag. Built once, queried per terminal.
+        from converters.concrete_below import build_has_concrete_below
+        self.has_concrete_below = build_has_concrete_below(
+            self.columns_df, self.walls_df, self.bwalls_df, self.nodes_df
+        )
 
         self._build_lookups()
 
@@ -890,17 +908,28 @@ def _emit_remainder_bars(run_index: RunIndex, adapter, lookup) -> list:
                 continue
             n_bars = len(strips)
 
-            # Determine which ends are CASE 2 HOOKS (extending into an
-            # adjacent lower-count beam) vs RUN BOUNDARY (at the original
-            # beam's column with a normal HOOK into that column).
-            #
-            # All strips for this interval share the same near/far flags
-            # (interval is keyed by beam_row_idxs), so we read it from
-            # any strip.
+            # Issue #78 unified anchorage rule for MAIN_REMAINDER:
+            #   for each end, decide HOOK vs STRAIGHT based on
+            #   has_concrete_below at the *terminal node*:
+            #     - run-boundary end → original first/last beam's node at
+            #       that side (same node used by MAIN_START/END).
+            #     - extended-into-adjacent-beam end → the adjacent beam's
+            #       node at the shared junction. Despite the bar physically
+            #       ending Ldh/Ld inside the adjacent span, the "concrete
+            #       below" test is about what's under the junction support,
+            #       not under the tip (which is typically mid-span and has
+            #       no node).
+            #   then:
+            #     - TOP bar → always HOOK; support_extends_below flag is
+            #       the predicate result (renderer maps True→down, False→up).
+            #     - BOT bar → HOOK if concrete below (support_extends_below
+            #       = True, renderer draws down tail); STRAIGHT if not
+            #       (no hook, straight development length Ldb instead of Ldh).
             near_into_adj = strips[0].near_hooks_into_beam_idx is not None
             far_into_adj = strips[0].far_hooks_into_beam_idx is not None
+            near_adj_idx = strips[0].near_hooks_into_beam_idx
+            far_adj_idx = strips[0].far_hooks_into_beam_idx
 
-            # Collect geometry from the first and last beams in the interval
             first_row = beams_df.loc[beam_idxs[0]]
             last_row = beams_df.loc[beam_idxs[-1]]
             member_id = str(first_row.get('member_id', '') or '')
@@ -909,95 +938,168 @@ def _emit_remainder_bars(run_index: RunIndex, adapter, lookup) -> list:
             h_mm = int(round(first_row.get('h_mm') or 600))
             fy_main = first_row.get('fy_main')
 
-            # Anchorage: Ldh for the diameter + material of the first beam.
-            # (All beams in the run share the same diameter by Case 3 break.)
+            # Development lengths for the diameter + material of the first
+            # beam (all beams in the run share the same diameter by Case 3
+            # break). Ldh = hooked; Ldb/Ldt = straight (BOT/TOP) for the
+            # STRAIGHT fallback.
             fy = _steel_grade(dia, fy_override=fy_main)
             fc = _parse_fc(material_id)
-            Ldh, Lpt_B, Lpb_B = lookup.get(fy, dia, fc)
+            Ldh, Ldb, Ldt, Lpt_B, Lpb_B = lookup.get(fy, dia, fc)
 
-            # Coordinate span: physical extent of the bar.
-            #   - Interval ends that face an adjacent lower-count beam in
-            #     the run (Case 2 hook) → extend by Ldh into that beam.
-            #     Bar's end is in the adjacent beam's clear span; col_width
-            #     at that end is 0 (no column there).
-            #   - Interval ends at a run boundary → use the original
-            #     beam's endpoint as-is. Bar terminates at the run's
-            #     supporting column with a normal HOOK; col_width at that
-            #     end matches the original beam's col_width on that side.
+            # Straight dev length for this bar position.
+            Ld_straight = Ldt if position == 'TOP' else Ldb
+
             refs_on_dir = first_row.get('direction', 'X')
 
-            # Original interval span (without extension)
+            # Interval min/max on primary axis (un-extended geometry).
             if refs_on_dir == 'X':
-                all_x = []
+                all_primary = []
                 for idx in beam_idxs:
                     r = beams_df.loc[idx]
-                    all_x.append(float(r.get('x_from_mm', 0) or 0))
-                    all_x.append(float(r.get('x_to_mm', 0) or 0))
-                interval_min = min(all_x)
-                interval_max = max(all_x)
-                xs = interval_min - (Ldh if near_into_adj else 0)
-                xe = interval_max + (Ldh if far_into_adj else 0)
-                ys = float(first_row.get('y_from_mm', 0) or 0)
-                ye = ys
+                    all_primary.append(float(r.get('x_from_mm', 0) or 0))
+                    all_primary.append(float(r.get('x_to_mm', 0) or 0))
             else:
-                all_y = []
+                all_primary = []
                 for idx in beam_idxs:
                     r = beams_df.loc[idx]
-                    all_y.append(float(r.get('y_from_mm', 0) or 0))
-                    all_y.append(float(r.get('y_to_mm', 0) or 0))
-                interval_min = min(all_y)
-                interval_max = max(all_y)
-                ys = interval_min - (Ldh if near_into_adj else 0)
-                ye = interval_max + (Ldh if far_into_adj else 0)
+                    all_primary.append(float(r.get('y_from_mm', 0) or 0))
+                    all_primary.append(float(r.get('y_to_mm', 0) or 0))
+            interval_min = min(all_primary)
+            interval_max = max(all_primary)
+
+            # Perp axis values (constant across interval for a run).
+            if refs_on_dir == 'X':
+                perp = float(first_row.get('y_from_mm', 0) or 0)
+            else:
+                perp = float(first_row.get('x_from_mm', 0) or 0)
+            zs = float(first_row.get('z_mm', 0) or 0)
+            beam_z_int = int(round(zs))
+
+            # Terminal-node resolution.
+            #   pick_node(beam_row, target_primary) returns whichever of the
+            #   beam's node_from/node_to sits at target_primary on the
+            #   primary axis.
+            def _pick_node(row, target):
+                nf = str(row.get('node_from', '') or '').strip()
+                nt = str(row.get('node_to', '') or '').strip()
+                if refs_on_dir == 'X':
+                    df_val = float(row.get('x_from_mm', 0) or 0)
+                    dt_val = float(row.get('x_to_mm', 0) or 0)
+                else:
+                    df_val = float(row.get('y_from_mm', 0) or 0)
+                    dt_val = float(row.get('y_to_mm', 0) or 0)
+                return nf if abs(df_val - target) <= abs(dt_val - target) else nt
+
+            # Near (= lower-primary) terminal node.
+            if near_into_adj and near_adj_idx is not None:
+                near_term_node = _pick_node(beams_df.loc[near_adj_idx], interval_min)
+            else:
+                near_term_node = _pick_node(first_row, interval_min)
+
+            # Far (= higher-primary) terminal node.
+            if far_into_adj and far_adj_idx is not None:
+                far_term_node = _pick_node(beams_df.loc[far_adj_idx], interval_max)
+            else:
+                far_term_node = _pick_node(last_row, interval_max)
+
+            # Beam axis (primary-only, z=0 for horizontal beams).
+            if refs_on_dir == 'X':
+                axis_ref = (int(round(interval_max - interval_min)), 0, 0)
+            else:
+                axis_ref = (0, int(round(interval_max - interval_min)), 0)
+
+            # Predicate per end.
+            level_int = str(level_str)
+            near_concrete = adapter.has_concrete_below(
+                near_term_node, level_int, beam_z_int, axis_ref
+            )
+            far_concrete = adapter.has_concrete_below(
+                far_term_node, level_int, beam_z_int, axis_ref
+            )
+
+            # Decide anchorage per end.
+            #   TOP: always HOOK. support_extends_below = predicate result.
+            #   BOT: HOOK if concrete, STRAIGHT if not.
+            if position == 'TOP':
+                near_anchor = 'HOOK'
+                far_anchor = 'HOOK'
+            else:  # BOT
+                near_anchor = 'HOOK' if near_concrete else 'STRAIGHT'
+                far_anchor = 'HOOK' if far_concrete else 'STRAIGHT'
+
+            # Coordinate extension. For ends that extend into an adjacent
+            # span (near/far_into_adj=True), extend by:
+            #   - Ldh past the interval boundary if HOOK
+            #   - Ld_straight past the interval boundary if STRAIGHT
+            # For run-boundary ends, don't extend the coord (the HOOK
+            # geometry sits inside the boundary column, rendered from col
+            # width). STRAIGHT is not valid at a run boundary in the
+            # current spec — MAIN_REMAINDER only arises from Case 2 hooks
+            # into adjacent beams — but if we end up with BOT + no
+            # concrete on a run-boundary end, emit STRAIGHT and trust the
+            # renderer.
+            def _extension(end_into_adj, anchor):
+                if not end_into_adj:
+                    return 0.0
+                return Ld_straight if anchor == 'STRAIGHT' else Ldh
+
+            near_ext = _extension(near_into_adj, near_anchor)
+            far_ext = _extension(far_into_adj, far_anchor)
+
+            if refs_on_dir == 'X':
+                xs = interval_min - near_ext
+                xe = interval_max + far_ext
+                ys = perp
+                ye = perp
+            else:
                 xs = float(first_row.get('x_from_mm', 0) or 0)
                 xe = xs
-            zs = float(first_row.get('z_mm', 0) or 0)
+                ys = interval_min - near_ext
+                ye = interval_max + far_ext
             ze = zs
 
             # col_width at each end:
-            #   - extended-into-adjacent-beam end → 0 (clear space)
-            #   - run-boundary end → use the original beam's col_width on
-            #     the matching side
-            cw_start_mm = 0
-            cw_end_mm = 0
-            if not near_into_adj:
-                # The "near" end of the interval = the LEFT/SMALLER-primary
-                # end. For the FIRST beam in the interval, this is whichever
-                # end has the smaller primary coord, which is its
-                # col_width_start_mm if its own coord direction matches the
-                # run direction (or col_width_end_mm if reversed).
-                fb = beams_df.loc[beam_idxs[0]]
+            #   - extended-into-adjacent end → 0 (bar is in the adjacent
+            #     span's clear zone, renderer mustn't try to place hook
+            #     geometry relative to a column face).
+            #   - run-boundary end → original beam's col_width on the
+            #     matching side so the renderer places the hook at the
+            #     actual column face.
+            def _col_width_for_end(row, at_smaller_primary):
+                """Return row's col_width for whichever side sits at the
+                smaller (or larger) primary coord of the beam itself."""
                 if refs_on_dir == 'X':
-                    if float(fb.get('x_from_mm', 0) or 0) <= float(fb.get('x_to_mm', 0) or 0):
-                        cw_start_mm = int(fb.get('col_width_start_mm', 0) or 0)
-                    else:
-                        cw_start_mm = int(fb.get('col_width_end_mm', 0) or 0)
+                    from_smaller = float(row.get('x_from_mm', 0) or 0) <= float(row.get('x_to_mm', 0) or 0)
                 else:
-                    if float(fb.get('y_from_mm', 0) or 0) <= float(fb.get('y_to_mm', 0) or 0):
-                        cw_start_mm = int(fb.get('col_width_start_mm', 0) or 0)
-                    else:
-                        cw_start_mm = int(fb.get('col_width_end_mm', 0) or 0)
-            if not far_into_adj:
-                lb = beams_df.loc[beam_idxs[-1]]
-                if refs_on_dir == 'X':
-                    if float(lb.get('x_to_mm', 0) or 0) >= float(lb.get('x_from_mm', 0) or 0):
-                        cw_end_mm = int(lb.get('col_width_end_mm', 0) or 0)
-                    else:
-                        cw_end_mm = int(lb.get('col_width_start_mm', 0) or 0)
+                    from_smaller = float(row.get('y_from_mm', 0) or 0) <= float(row.get('y_to_mm', 0) or 0)
+                if at_smaller_primary:
+                    src = 'col_width_start_mm' if from_smaller else 'col_width_end_mm'
                 else:
-                    if float(lb.get('y_to_mm', 0) or 0) >= float(lb.get('y_from_mm', 0) or 0):
-                        cw_end_mm = int(lb.get('col_width_end_mm', 0) or 0)
-                    else:
-                        cw_end_mm = int(lb.get('col_width_start_mm', 0) or 0)
+                    src = 'col_width_end_mm' if from_smaller else 'col_width_start_mm'
+                return int(row.get(src, 0) or 0)
 
-            # Sum of physical span lengths across the interval
+            cw_start_mm = 0 if near_into_adj else _col_width_for_end(first_row, at_smaller_primary=True)
+            cw_end_mm = 0 if far_into_adj else _col_width_for_end(last_row, at_smaller_primary=False)
+
+            # length_mm = sum of in-run span lengths + extension on each
+            # extended end. Run-boundary ends add 0 (hook allowance is
+            # handled by _split_stock / renderer from col_width).
             sum_span = 0.0
             for idx in beam_idxs:
                 sum_span += float(beams_df.loc[idx].get('length_mm') or 0)
+            length_mm = sum_span + near_ext + far_ext
 
-            # length_mm = interval span + Ldh on each extended end + 0 on
-            # each non-extended end. Matches the coord extent above.
-            length_mm = sum_span + (Ldh if near_into_adj else 0) + (Ldh if far_into_adj else 0)
+            # support_extends_below flag.
+            #   BOT + HOOK → True (concrete below, hook down).
+            #   BOT + STRAIGHT → False (no concrete, no hook anyway).
+            #   TOP + HOOK → predicate result (True=down into wall/col,
+            #                False=up into slab).
+            if position == 'TOP':
+                seb_near = bool(near_concrete)
+                seb_far = bool(far_concrete)
+            else:
+                seb_near = bool(near_concrete) and near_anchor == 'HOOK'
+                seb_far = bool(far_concrete) and far_anchor == 'HOOK'
 
             sec = adapter.get_section(str(first_row.get('section_id', '') or ''))
             if sec is not None:
@@ -1026,8 +1128,8 @@ def _emit_remainder_bars(run_index: RunIndex, adapter, lookup) -> list:
                 'shape': shape,
                 'col_width_start_mm': cw_start_mm,
                 'col_width_end_mm': cw_end_mm,
-                'support_extends_below_start': False,
-                'support_extends_below_end': False,
+                'support_extends_below_start': seb_near,
+                'support_extends_below_end': seb_far,
                 'x_start_mm': xs,
                 'y_start_mm': ys,
                 'z_start_mm': z_bar,
@@ -1042,8 +1144,15 @@ def _emit_remainder_bars(run_index: RunIndex, adapter, lookup) -> list:
                 'length_mm': int(round(length_mm)),
                 'layer': 1,
                 'reinforcement_type': 'UNIFORM',
+                # Issue #78: terminal node refs for predicate audit.
+                'terminal_node_start': near_term_node,
+                'terminal_node_end': far_term_node,
             }
             bar = _add_anchorage(bar, Ldh, Lpt_B, Lpb_B)
+            # Override _add_anchorage (which hardcodes HOOK/HOOK for
+            # MAIN_REMAINDER) with the per-end decision from the predicate.
+            bar['anchorage_start'] = near_anchor
+            bar['anchorage_end'] = far_anchor
             # Remainder bars are typically short enough to not need stock split,
             # but run it through _split_stock anyway for consistency.
             lap_for_split = Lpt_B if position == 'TOP' else Lpb_B
@@ -1126,12 +1235,13 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
         dia_top = info['cfg_top']['dia']
         fy = _steel_grade(dia_top, fy_override=sp.get('fy_main'))
         fc = _parse_fc(sp.get('material_id', 'C35'))
-        Ldh, Lpt_B, Lpb_B = lookup.get(fy, dia_top, fc)
+        Ldh, Ldb, Ldt, Lpt_B, Lpb_B = lookup.get(fy, dia_top, fc)
 
         span_data.append({
             'l_span': l_span, 'l_cl': l_cl,
             'Wc1': Wc1, 'Wc2': Wc2,
-            'Ldh': Ldh, 'Lpt_B': Lpt_B, 'Lpb_B': Lpb_B,
+            'Ldh': Ldh, 'Ldb': Ldb, 'Ldt': Ldt,
+            'Lpt_B': Lpt_B, 'Lpb_B': Lpb_B,
             'L_lap': max(Lpt_B, Lpb_B),
         })
 
@@ -1673,6 +1783,7 @@ def calculate_beam_rebar_lengths(
     lap_splice_path: str,
     dia_fy_map: dict = None,
     walls_df: pd.DataFrame = None,
+    bwalls_df: pd.DataFrame = None,
 ) -> pd.DataFrame:
     """
     Calculate beam rebar lengths from Tier 1 converter output.
@@ -1685,7 +1796,8 @@ def calculate_beam_rebar_lengths(
         nodes_df: Nodes.csv
         dev_lengths_path: path to development_lengths.csv
         lap_splice_path: path to lap_splice.csv
-        walls_df: MembersWall.csv (optional, for wall anchorage extension)
+        walls_df: MembersWall.csv (optional, for wall_below predicate)
+        bwalls_df: MembersBasementWall.csv (optional, for wall_below predicate)
 
     Returns:
         DataFrame for RebarLengthsBeam.csv
@@ -1694,7 +1806,10 @@ def calculate_beam_rebar_lengths(
     lookup = DevLapLookup(dev_lengths_path, lap_splice_path)
 
     print('[RebarBeam] Building data adapter...')
-    adapter = BeamDataAdapter(beams_df, columns_df, sections_df, reinf_df, nodes_df, walls_df)
+    adapter = BeamDataAdapter(
+        beams_df, columns_df, sections_df, reinf_df, nodes_df,
+        walls_df=walls_df, bwalls_df=bwalls_df,
+    )
     print(f'[RebarBeam] {len(adapter.long_cfg)} longitudinal configs, '
           f'{len(adapter.stirrup_cfg)} stirrup configs')
 
@@ -1727,6 +1842,10 @@ def calculate_beam_rebar_lengths(
         'b_mm', 'h_mm', 'shape',
         'col_width_start_mm', 'col_width_end_mm',
         'support_extends_below_start', 'support_extends_below_end',
+        # Issue #78: node reference at each bar terminal for auditability
+        # of the has_concrete_below predicate without re-running the
+        # converter. Renderer ignores these columns.
+        'terminal_node_start', 'terminal_node_end',
     ]
 
     df = pd.DataFrame(all_results)
