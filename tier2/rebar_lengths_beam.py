@@ -914,6 +914,8 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction):
             'b_mm': b_mm, 'h_mm': h_mm, 'shape': shape,
             'col_width_start_mm': int(round(Wc1)) if Wc1 else 0,
             'col_width_end_mm': int(round(Wc2)) if Wc2 else 0,
+            'support_extends_below_start': bool(sp.get('support_extends_below_start', False)),
+            'support_extends_below_end': bool(sp.get('support_extends_below_end', False)),
         }
 
         # MAIN TOP
@@ -1176,6 +1178,8 @@ def _calculate_stirrups(adapter):
             'b_mm': int(b_mm), 'h_mm': int(h_mm), 'shape': shape,
             'col_width_start_mm': int(round(Wc1)) if Wc1 else 0,
             'col_width_end_mm': int(round(Wc2)) if Wc2 else 0,
+            'support_extends_below_start': bool(row.get('support_extends_below_start', False)),
+            'support_extends_below_end': bool(row.get('support_extends_below_end', False)),
         }
 
         for zn, zl in zone_lengths.items():
@@ -1309,6 +1313,7 @@ def calculate_beam_rebar_lengths(
         'x_end_mm', 'y_end_mm', 'z_end_mm',
         'b_mm', 'h_mm', 'shape',
         'col_width_start_mm', 'col_width_end_mm',
+        'support_extends_below_start', 'support_extends_below_end',
     ]
 
     df = pd.DataFrame(all_results)

@@ -219,33 +219,124 @@ def log(msg: str):
 # ══════════════════════════════════════════════════════════════
 st.header("Step 1: Upload Files")
 
+# Bulk upload by Part — files auto-assigned by filename (case-insensitive)
+
+def _match_files(uploaded_files, expected_map):
+    """Map uploaded files to expected slots by filename (case-insensitive).
+    expected_map: {expected_filename_lowercase: variable_name}
+    Returns: {variable_name: uploaded_file} + set of matched filenames
+    """
+    result = {v: None for v in expected_map.values()}
+    matched = set()
+    if not uploaded_files:
+        return result, matched
+    for f in uploaded_files:
+        name_lc = f.name.lower()
+        if name_lc in expected_map:
+            result[expected_map[name_lc]] = f
+            matched.add(f.name)
+    return result, matched
+
+
+def _show_checklist(expected_map, found_map, required_keys):
+    """Show a checklist of expected files: ✓ found, ✗ missing."""
+    for expected_name, var_name in expected_map.items():
+        is_required = var_name in required_keys
+        found = found_map.get(var_name) is not None
+        icon = "✅" if found else ("❌" if is_required else "⚪")
+        label = f"{icon} {expected_name.split('.')[0]}"
+        if is_required and not found:
+            label += " *required*"
+        st.caption(label)
+
+
+# Expected filenames (lowercase for case-insensitive matching)
+PART_A_MAP = {
+    'nodes.csv': 'nodes',
+    'materials.csv': 'materials',
+    'sections.csv': 'sections',
+    'elements.csv': 'elements',
+    'thickness.csv': 'thickness',
+    'storydefinition.csv': 'story',
+    'designbeam.csv': 'design_beam',
+    'designcolumn.csv': 'design_col',
+    'designwall.csv': 'design_wall',
+    'project.mgt': 'mgt',
+}
+PART_A_REQUIRED = {'nodes', 'materials', 'sections', 'elements', 'story'}
+
+PART_B_MAP = {
+    'slabboundary.csv': 'slab_boundary',
+    'slabreinforcement.csv': 'slab_reinf',
+    'stairreinforcement.csv': 'stair_reinf',
+    'footboundary.csv': 'foot_boundary',
+    'footreinforcement.csv': 'foot_reinf',
+}
+PART_B_REQUIRED = set()  # all Part B files optional
+
 col_a, col_b = st.columns(2)
 
 with col_a:
     st.subheader("Part A - MIDAS Gen Exports")
+    part_a_upload = st.file_uploader(
+        "Drop all Part A files (CSVs + project.mgt)",
+        type=['csv', 'mgt', 'txt'],
+        accept_multiple_files=True,
+        key='part_a_bulk',
+        help="Expected: Nodes, Materials, Sections, Elements, Thickness, StoryDefinition, DesignBeam, DesignColumn, DesignWall, project.mgt",
+    )
+    part_a_files, part_a_matched = _match_files(part_a_upload, PART_A_MAP)
 
-    nodes_file = st.file_uploader("Nodes.csv", type=['csv'], key='nodes')
-    materials_file = st.file_uploader("Materials.csv", type=['csv'], key='materials')
-    sections_file = st.file_uploader("Sections.csv", type=['csv'], key='sections')
-    elements_file = st.file_uploader("Elements.csv", type=['csv'], key='elements')
-    thickness_file = st.file_uploader("Thickness.csv", type=['csv'], key='thickness')
-    story_file = st.file_uploader("StoryDefinition.csv", type=['csv'], key='story')
-    design_beam_file = st.file_uploader("DesignBeam.csv", type=['csv'], key='design_beam')
-    design_col_file = st.file_uploader("DesignColumn.csv", type=['csv'], key='design_col')
-    design_wall_file = st.file_uploader("DesignWall.csv", type=['csv'], key='design_wall')
-    mgt_file = st.file_uploader("project.mgt (optional)", type=['mgt', 'txt'], key='mgt')
+    nodes_file = part_a_files['nodes']
+    materials_file = part_a_files['materials']
+    sections_file = part_a_files['sections']
+    elements_file = part_a_files['elements']
+    thickness_file = part_a_files['thickness']
+    story_file = part_a_files['story']
+    design_beam_file = part_a_files['design_beam']
+    design_col_file = part_a_files['design_col']
+    design_wall_file = part_a_files['design_wall']
+    mgt_file = part_a_files['mgt']
+
+    with st.expander("Part A checklist", expanded=True):
+        _show_checklist(PART_A_MAP, part_a_files, PART_A_REQUIRED)
+        if part_a_upload:
+            unmatched = [f.name for f in part_a_upload if f.name not in part_a_matched]
+            if unmatched:
+                st.warning(f"Unmatched files (name mismatch): {', '.join(unmatched)}")
 
 with col_b:
     st.subheader("Part B - Engineer Data")
+    part_b_upload = st.file_uploader(
+        "Drop all Part B files",
+        type=['csv'],
+        accept_multiple_files=True,
+        key='part_b_bulk',
+        help="Expected: SlabBoundary, SlabReinforcement, StairReinforcement, FootBoundary, FootReinforcement",
+    )
+    part_b_files, part_b_matched = _match_files(part_b_upload, PART_B_MAP)
 
-    slab_boundary_file = st.file_uploader("SlabBoundary.csv", type=['csv'], key='slab_boundary')
-    slab_reinf_file = st.file_uploader("SlabReinforcement.csv", type=['csv'], key='slab_reinf')
-    stair_reinf_file = st.file_uploader("StairReinforcement.csv", type=['csv'], key='stair_reinf')
-    foot_boundary_file = st.file_uploader("FootBoundary.csv", type=['csv'], key='foot_boundary')
-    foot_reinf_file = st.file_uploader("FootReinforcement.csv", type=['csv'], key='foot_reinf')
+    slab_boundary_file = part_b_files['slab_boundary']
+    slab_reinf_file = part_b_files['slab_reinf']
+    stair_reinf_file = part_b_files['stair_reinf']
+    foot_boundary_file = part_b_files['foot_boundary']
+    foot_reinf_file = part_b_files['foot_reinf']
+
+    with st.expander("Part B checklist", expanded=True):
+        _show_checklist(PART_B_MAP, part_b_files, PART_B_REQUIRED)
+        if part_b_upload:
+            unmatched = [f.name for f in part_b_upload if f.name not in part_b_matched]
+            if unmatched:
+                st.warning(f"Unmatched files: {', '.join(unmatched)}")
 
     st.subheader("Part C - Basement Walls")
-    bwall_file = st.file_uploader("Part C Excel (BasementWall)", type=['xlsx'], key='bwall')
+    bwall_file = st.file_uploader(
+        "Part C Excel (BasementWall)",
+        type=['xlsx'],
+        key='bwall',
+        help="Basement wall input Excel file (xlsx)",
+    )
+    st.caption("✅ Part C loaded" if bwall_file else "⚪ Part C (optional)")
 
 # ══════════════════════════════════════════════════════════════
 # STEP 2: GRID DEFINITION
@@ -426,6 +517,32 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 cols_df = outputs['columns']
                 XY_TOL = 200  # mm tolerance for coordinate matching
 
+                # Build level → elevation map from StoryDefinition for "extends below" check
+                level_elev = {}  # level_name → elevation_mm
+                if story_raw is not None:
+                    try:
+                        # StoryDefinition: Module Name | Story Name | Level_mm | Height_mm
+                        for _, row in story_raw.iterrows():
+                            lv = str(row.iloc[1]).strip() if len(row) > 1 else ''
+                            try:
+                                elev = float(row.iloc[2]) if len(row) > 2 else 0
+                            except (ValueError, TypeError):
+                                continue
+                            if lv:
+                                level_elev[lv] = elev
+                    except Exception:
+                        pass
+
+                def _below(a_level, b_level):
+                    """True if a_level is strictly below b_level per elevation."""
+                    if not a_level or not b_level:
+                        return False
+                    ea = level_elev.get(a_level)
+                    eb = level_elev.get(b_level)
+                    if ea is None or eb is None:
+                        return False
+                    return ea < eb
+
                 # Build column position index: list of (x, y, level_from, level_to, b, h)
                 col_positions = []
                 for _, c in cols_df.iterrows():
@@ -450,6 +567,15 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                         if w > best:
                             best = w
                     return best
+
+                def column_extends_below(x, y, beam_level):
+                    """True if any column at (x,y) has level_from strictly below beam_level."""
+                    for cx, cy, clf, clt, cb, ch in col_positions:
+                        if abs(cx - x) > XY_TOL or abs(cy - y) > XY_TOL:
+                            continue
+                        if _below(clf, beam_level):
+                            return True
+                    return False
 
                 # Build wall position index for fallback when no column found.
                 # Uses centroid proximity (500mm tolerance) — proven more reliable than
@@ -497,7 +623,9 @@ if st.button("CONVERT", type="primary", use_container_width=True):
 
                 # Node-sharing: beam node in wall boundary → anchored to wall.
                 # Most reliable method (M3 from Suhwan's analysis: 73-84% coverage).
+                # Also track per-node wall levels for "extends below" check.
                 wall_node_thickness = {}  # node_id → max wall thickness
+                wall_node_levels = {}     # node_id → set of wall levels at this node
                 for wall_src in ['walls', 'bwall_members']:
                     wdf = outputs.get(wall_src)
                     if wdf is None or wdf.empty:
@@ -506,18 +634,42 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                         wt = float(w.get('thickness_mm', 0) or 0)
                         if wt <= 0:
                             continue
+                        wlv = str(w.get('level', '') or '').strip()
                         for nc in ['node_i', 'node_j', 'node_k', 'node_l']:
                             n = str(w.get(nc, '') or '').strip()
                             if n and n != 'nan':
                                 wall_node_thickness[n] = max(
                                     wall_node_thickness.get(n, 0), wt)
+                                if wlv:
+                                    wall_node_levels.setdefault(n, set()).add(wlv)
 
                 def find_wall_by_node(node_id):
                     """Find wall thickness if beam node is shared with a wall."""
                     return wall_node_thickness.get(str(node_id).strip(), 0)
 
+                def wall_extends_below_node(node_id, beam_level):
+                    """True if the wall sharing this node has a level strictly below beam_level."""
+                    levels = wall_node_levels.get(str(node_id).strip())
+                    if not levels:
+                        return False
+                    for lv in levels:
+                        if _below(lv, beam_level):
+                            return True
+                    return False
+
+                def wall_extends_below_xy(x, y, beam_level):
+                    """True if any wall at (x,y) proximity has a level strictly below beam_level."""
+                    for wx, wy, wlv, wt in wall_positions:
+                        if abs(wx - x) > WALL_TOL or abs(wy - y) > WALL_TOL:
+                            continue
+                        if _below(wlv, beam_level):
+                            return True
+                    return False
+
                 cw_start = []
                 cw_end = []
+                below_start = []
+                below_end = []
                 for _, bm in beams_df.iterrows():
                     d = str(bm.get('direction', 'X'))
                     lv = str(bm.get('level', '')).strip()
@@ -539,8 +691,25 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                         w2 = find_wall_by_node(nt)
                     cw_start.append(int(round(w1)))
                     cw_end.append(int(round(w2)))
+
+                    # support_extends_below: hook goes down only if member continues below
+                    eb_s = False
+                    if w1 > 0:
+                        eb_s = (column_extends_below(x1, y1, lv) or
+                                wall_extends_below_xy(x1, y1, lv) or
+                                wall_extends_below_node(nf, lv))
+                    eb_e = False
+                    if w2 > 0:
+                        eb_e = (column_extends_below(x2, y2, lv) or
+                                wall_extends_below_xy(x2, y2, lv) or
+                                wall_extends_below_node(nt, lv))
+                    below_start.append(bool(eb_s))
+                    below_end.append(bool(eb_e))
+
                 beams_df['col_width_start_mm'] = cw_start
                 beams_df['col_width_end_mm'] = cw_end
+                beams_df['support_extends_below_start'] = below_start
+                beams_df['support_extends_below_end'] = below_end
                 outputs['beams'] = beams_df
             except Exception as e:
                 log(f"Column width on beams FAILED: {e}")
