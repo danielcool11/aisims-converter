@@ -348,6 +348,224 @@ def classify_junctions(
     return findings
 
 
+# ── Run-level analysis ──────────────────────────────────────────────────────
+#
+# A "run" (per Prof. Sunkuk rule) is a maximal set of beams connected by
+# Case 1 or Case 2 junctions at a given position (TOP or BOT). Case 3 and
+# Case 0 junctions terminate the run. We analyze runs per position because
+# the same physical junction can be Case 1 at TOP but Case 2 at BOT.
+#
+# Within a run the count profile matters: profile [2, 3, 3, 2] means two bars
+# continue as LAP through the whole run, plus one "remainder" bar that exists
+# only in the middle two beams and hooks at its two endpoints. Multiple
+# remainder bars can exist at different levels when the profile has nested
+# plateaus (e.g. [2, 3, 4, 3, 2] → one remainder bar across the 3+ region and
+# another across the 4+ region).
+
+
+@dataclass
+class RemainderSpan:
+    """One physical remainder bar spanning a contiguous slice of a run.
+
+    The span covers beam indices [start_beam_idx_in_run .. end_beam_idx_in_run]
+    (inclusive) at level `count_level`. Near/far hook ends each may be:
+      - a Case 2 hook into an adjacent lower-count beam (inside the run), or
+      - the run's own far-end anchorage if this span reaches a run boundary.
+    """
+    count_level: int              # the count "strip" this bar belongs to
+    beam_row_idxs: List[int]      # beams this bar physically passes through
+    near_hooks_into_beam_idx: Optional[int]  # adjacent lower-count beam at near end
+    far_hooks_into_beam_idx: Optional[int]   # adjacent lower-count beam at far end
+
+
+@dataclass
+class BeamRun:
+    """A connected run of beams joined by Case 1/2 junctions at one position."""
+    position: str                 # 'TOP' or 'BOT'
+    level: str
+    ordered_beams: List[int]      # row_idxs in structural order (along the axis)
+    counts: List[int]             # bar count at each beam (parallel to ordered_beams)
+    dia: int                      # diameter (all same for a run — Case 3 terminates)
+    case1_count: int              # edges in the run with equal counts
+    case2_count: int              # edges with unequal counts
+    remainders: List[RemainderSpan] = field(default_factory=list)
+
+    @property
+    def has_case2(self) -> bool:
+        return self.case2_count > 0
+
+    @property
+    def min_count(self) -> int:
+        return min(self.counts) if self.counts else 0
+
+    @property
+    def max_count(self) -> int:
+        return max(self.counts) if self.counts else 0
+
+    @property
+    def n_main_intermediate(self) -> int:
+        """Number of bars that continue through the entire run as LAP."""
+        return self.min_count
+
+
+def _find_strip_intervals(counts: List[int], level: int) -> List[Tuple[int, int]]:
+    """Find contiguous [start, end] intervals where counts[i] >= level."""
+    intervals: List[Tuple[int, int]] = []
+    i = 0
+    n = len(counts)
+    while i < n:
+        if counts[i] >= level:
+            start = i
+            while i < n and counts[i] >= level:
+                i += 1
+            intervals.append((start, i - 1))
+        else:
+            i += 1
+    return intervals
+
+
+def _order_beams_along_axis(refs: List[BeamRef], beam_idxs: Set[int]) -> List[int]:
+    """Sort a set of beam row_idxs by primary-axis position.
+
+    All beams in a run are coaxial, so they share a direction. We sort by the
+    smaller of (x_from, x_to) for X-spans, or (y_from, y_to) for Y-spans.
+    """
+    idx_to_ref = {b.row_idx: b for b in refs}
+    subset = [idx_to_ref[i] for i in beam_idxs if i in idx_to_ref]
+    if not subset:
+        return []
+    # Direction from the first beam
+    first = subset[0]
+    is_x = abs(first.dx) >= abs(first.dy)
+    # Anchor keys: use node_from coordinate to sort. We fetch them from refs.
+    def key(b: BeamRef) -> int:
+        # Reconstruct x_from / y_from via node_from coords in ref.
+        # BeamRef doesn't store absolute coords, only deltas. We infer from
+        # whichever FROM coord is "smaller" using dx/dy signs.
+        # Workaround: use dx/dy signs to pick min coord from the beam's
+        # endpoint (the BeamRef doesn't carry absolute xy, so we key on
+        # row_idx order as a stable fallback and rely on caller to have the
+        # right set). In practice the caller passes refs that also carry
+        # absolute coords via beams_df — see compute_runs below.
+        return b.row_idx
+    return [b.row_idx for b in sorted(subset, key=key)]
+
+
+def compute_runs(
+    refs: List[BeamRef],
+    findings: List[JunctionFinding],
+    counts: Dict[int, BeamRebarCount],
+    beams_df: pd.DataFrame,
+    position: str,
+) -> List[BeamRun]:
+    """Build position-specific run graph from Case 1/2 findings, walk components."""
+    assert position in ('TOP', 'BOT')
+
+    # Adjacency: beam_idx → set of connected beam_idxs (via Case 1 or 2 edges at this position)
+    adj: Dict[int, Set[int]] = defaultdict(set)
+    idx_to_ref = {b.row_idx: b for b in refs}
+    case1_edges: Dict[frozenset, int] = defaultdict(int)
+    case2_edges: Dict[frozenset, int] = defaultdict(int)
+
+    for f in findings:
+        if f.position != position:
+            continue
+        if f.case in (1, 2):
+            a_idx = f.beam_a_idx
+            b_idx = f.beam_b_idx
+            adj[a_idx].add(b_idx)
+            adj[b_idx].add(a_idx)
+            key = frozenset((a_idx, b_idx))
+            if f.case == 1:
+                case1_edges[key] += 1
+            else:
+                case2_edges[key] += 1
+
+    visited: Set[int] = set()
+    runs: List[BeamRun] = []
+
+    for start_idx in list(adj.keys()):
+        if start_idx in visited:
+            continue
+        # BFS
+        component: Set[int] = set()
+        queue = [start_idx]
+        while queue:
+            cur = queue.pop()
+            if cur in component:
+                continue
+            component.add(cur)
+            for nxt in adj[cur]:
+                if nxt not in component:
+                    queue.append(nxt)
+        visited.update(component)
+
+        # Order beams by primary axis using beams_df absolute coords.
+        def axis_key(idx: int) -> float:
+            row = beams_df.loc[idx]
+            b = idx_to_ref[idx]
+            is_x = abs(b.dx) >= abs(b.dy)
+            if is_x:
+                return min(float(row.get('x_from_mm', 0) or 0),
+                           float(row.get('x_to_mm', 0) or 0))
+            return min(float(row.get('y_from_mm', 0) or 0),
+                       float(row.get('y_to_mm', 0) or 0))
+
+        ordered = sorted(component, key=axis_key)
+        if not ordered:
+            continue
+
+        first_ref = idx_to_ref[ordered[0]]
+        c_first = counts.get(ordered[0], BeamRebarCount())
+        if position == 'TOP':
+            dia = c_first.dia_top
+        else:
+            dia = c_first.dia_bot
+
+        counts_seq: List[int] = []
+        for idx in ordered:
+            cnt = counts.get(idx, BeamRebarCount())
+            counts_seq.append(cnt.n_top if position == 'TOP' else cnt.n_bot)
+
+        # Count internal edges by case
+        c1 = 0
+        c2 = 0
+        for i in range(len(ordered) - 1):
+            k = frozenset((ordered[i], ordered[i + 1]))
+            c1 += case1_edges.get(k, 0)
+            c2 += case2_edges.get(k, 0)
+
+        run = BeamRun(
+            position=position,
+            level=first_ref.level,
+            ordered_beams=ordered,
+            counts=counts_seq,
+            dia=dia,
+            case1_count=c1,
+            case2_count=c2,
+        )
+
+        # Remainder spans: one per (level, interval) above min_count
+        n_min = run.min_count
+        n_max = run.max_count
+        for level in range(n_min + 1, n_max + 1):
+            intervals = _find_strip_intervals(counts_seq, level)
+            for (lo, hi) in intervals:
+                beam_slice = ordered[lo:hi + 1]
+                near_hook = ordered[lo - 1] if lo > 0 else None
+                far_hook = ordered[hi + 1] if hi < len(ordered) - 1 else None
+                run.remainders.append(RemainderSpan(
+                    count_level=level,
+                    beam_row_idxs=beam_slice,
+                    near_hooks_into_beam_idx=near_hook,
+                    far_hooks_into_beam_idx=far_hook,
+                ))
+
+        runs.append(run)
+
+    return runs
+
+
 # ── Summary ─────────────────────────────────────────────────────────────────
 
 def summarize(findings: Iterable[JunctionFinding]) -> Dict[str, int]:
@@ -358,3 +576,17 @@ def summarize(findings: Iterable[JunctionFinding]) -> Dict[str, int]:
         counts[f'case_{f.case}'] += 1
         counts[f'case_{f.case}_{f.position}'] += 1
     return dict(counts)
+
+
+def summarize_runs(runs: List[BeamRun]) -> Dict[str, int]:
+    """Count runs and their transitions."""
+    out = defaultdict(int)
+    for r in runs:
+        out['total_runs'] += 1
+        out[f'runs_{r.position}'] += 1
+        if r.has_case2:
+            out['runs_with_case2'] += 1
+            out[f'runs_with_case2_{r.position}'] += 1
+        out['total_remainders'] += len(r.remainders)
+        out[f'remainders_{r.position}'] += len(r.remainders)
+    return dict(out)

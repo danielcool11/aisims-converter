@@ -33,7 +33,9 @@ from converters.beam_junction_graph import (
     build_rebar_counts,
     build_support_node_set,
     classify_junctions,
+    compute_runs,
     summarize,
+    summarize_runs,
 )
 
 
@@ -93,6 +95,38 @@ def analyze_folder(folder: Path) -> None:
                 f'{f.beam_a_member:>6s}({f.n_a}-D{f.dia_a}) vs '
                 f'{f.beam_b_member:>6s}({f.n_b}-D{f.dia_b}) '
                 f'@ {f.node_id}'
+            )
+
+    # Run-level analysis (per Prof. Sunkuk: a run is a maximal Case 1/2 component)
+    print(f'\n  Run-level analysis (physical bars, not per-junction findings):')
+    all_runs = []
+    for position in ('TOP', 'BOT'):
+        runs = compute_runs(refs, findings, counts, beams_df, position)
+        all_runs.extend(runs)
+    run_summary = summarize_runs(all_runs)
+    print(f'    total runs: {run_summary.get("total_runs", 0)} '
+          f'(TOP={run_summary.get("runs_TOP", 0)}, '
+          f'BOT={run_summary.get("runs_BOT", 0)})')
+    print(f'    runs with Case 2 (count variance): '
+          f'{run_summary.get("runs_with_case2", 0)} '
+          f'(TOP={run_summary.get("runs_with_case2_TOP", 0)}, '
+          f'BOT={run_summary.get("runs_with_case2_BOT", 0)})')
+    print(f'    total remainder bars to emit: '
+          f'{run_summary.get("total_remainders", 0)} '
+          f'(TOP={run_summary.get("remainders_TOP", 0)}, '
+          f'BOT={run_summary.get("remainders_BOT", 0)})')
+
+    # Detail: runs that have Case 2 transitions
+    case2_runs = [r for r in all_runs if r.has_case2]
+    if case2_runs:
+        print(f'\n  Case 2 runs with count profile:')
+        for r in case2_runs:
+            members = [str(beams_df.loc[i].get("member_id", "?")) for i in r.ordered_beams]
+            profile_str = " -> ".join(f'{m}({c})' for m, c in zip(members, r.counts))
+            print(
+                f'    {r.level:>5s} {r.position} D{r.dia}  '
+                f'{profile_str}   min={r.min_count} max={r.max_count} '
+                f'remainders={len(r.remainders)}'
             )
 
 
