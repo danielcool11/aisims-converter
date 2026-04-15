@@ -286,9 +286,8 @@ def merge_beam_spans(
     if beams_df is None or beams_df.empty:
         return beams_df
 
-    # Build support grids
-    support_grids = _build_support_grids(columns_df, walls_df, beams_df)
-    print(f'[BeamMerge] {len(support_grids)} support grids detected')
+    # Support-grid detection is no longer used for chain-break decisions
+    # (same-member merging per #78 Error C). Kept as a comment for history.
 
     # Add direction column
     beams = beams_df.copy()
@@ -350,16 +349,16 @@ def merge_beam_spans(
                 current_chain = [row]
                 continue
 
-            # Check if intermediate junction is a support grid
-            # The junction node is prev's end grid or row's start grid
-            prev_end_grid = str(prev.get('grid_to', '')).strip()
-            row_start_grid = str(row.get('grid_from', '')).strip()
-            if _is_break_point(prev_end_grid, support_grids) or \
-               _is_break_point(row_start_grid, support_grids):
-                chains.append(current_chain)
-                current_chain = [row]
-                continue
-
+            # No support-grid break here.
+            #
+            # The outer grouping (level, member_id, direction, perp_key)
+            # already guarantees every row in the chain shares the same
+            # member_id. Per Prof. Sunkuk's rule (issue #78 Error C):
+            # identical member_id + same section + shared node + coaxial
+            # means MIDAS considers this one physical structural element
+            # and it must merge, even when the shared node is a column
+            # grid. Breaking at support grids over-fragmented same-member
+            # spans that MIDAS intentionally continued through the column.
             current_chain.append(row)
 
         if current_chain:
