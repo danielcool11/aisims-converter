@@ -543,6 +543,38 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                         return False
                     return ea < eb
 
+                # Ordered list of level names by elevation (ascending)
+                _ordered_levels = sorted(level_elev.items(), key=lambda kv: kv[1])
+                _level_order = [lv for lv, _ in _ordered_levels]
+                _level_index = {lv: i for i, lv in enumerate(_level_order)}
+
+                def level_directly_below(beam_level):
+                    """Level name immediately below beam_level (None if beam is lowest)."""
+                    idx = _level_index.get(beam_level)
+                    if idx is None or idx == 0:
+                        return None
+                    return _level_order[idx - 1]
+
+                def _member_spans_below_segment(m_from, m_to, beam_level):
+                    """True if member segment [m_from, m_to] physically covers the
+                    segment directly below beam_level — i.e. m_from at or below
+                    the level immediately under beam_level, and m_to at or above
+                    beam_level. This replaces the old "any level below" check,
+                    which incorrectly flagged members far below (e.g. TC1 in
+                    B4->1F range for a beam at 5F). Per Prof. Sunkuk rule
+                    (issue #78 Error A).
+                    """
+                    below = level_directly_below(beam_level)
+                    if below is None:
+                        return False
+                    ef = level_elev.get(m_from)
+                    et = level_elev.get(m_to)
+                    eb = level_elev.get(below)
+                    ebeam = level_elev.get(beam_level)
+                    if None in (ef, et, eb, ebeam):
+                        return False
+                    return ef <= eb and et >= ebeam
+
                 # Build column position index: list of (x, y, level_from, level_to, b, h)
                 col_positions = []
                 for _, c in cols_df.iterrows():
@@ -569,11 +601,15 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                     return best
 
                 def column_extends_below(x, y, beam_level):
-                    """True if any column at (x,y) has level_from strictly below beam_level."""
+                    """True if a column at (x,y) physically covers the directly-below
+                    level segment under beam_level (i.e. it's the column that would
+                    actually receive a downward hook at this beam endpoint).
+                    Per Prof. Sunkuk rule / issue #78 Error A.
+                    """
                     for cx, cy, clf, clt, cb, ch in col_positions:
                         if abs(cx - x) > XY_TOL or abs(cy - y) > XY_TOL:
                             continue
-                        if _below(clf, beam_level):
+                        if _member_spans_below_segment(clf, clt, beam_level):
                             return True
                     return False
 
@@ -648,21 +684,32 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                     return wall_node_thickness.get(str(node_id).strip(), 0)
 
                 def wall_extends_below_node(node_id, beam_level):
-                    """True if the wall sharing this node has a level strictly below beam_level."""
+                    """True if the wall sharing this node covers the directly-below
+                    level segment under beam_level. Walls are per-storey slices, so
+                    'level' equals the storey the wall rises from — we want a slice
+                    at the level immediately under beam_level.
+                    Per Prof. Sunkuk rule / issue #78 Error A.
+                    """
                     levels = wall_node_levels.get(str(node_id).strip())
                     if not levels:
                         return False
-                    for lv in levels:
-                        if _below(lv, beam_level):
-                            return True
-                    return False
+                    below = level_directly_below(beam_level)
+                    if below is None:
+                        return False
+                    return below in levels
 
                 def wall_extends_below_xy(x, y, beam_level):
-                    """True if any wall at (x,y) proximity has a level strictly below beam_level."""
+                    """True if a wall at (x,y) proximity covers the directly-below
+                    level segment under beam_level.
+                    Per Prof. Sunkuk rule / issue #78 Error A.
+                    """
+                    below = level_directly_below(beam_level)
+                    if below is None:
+                        return False
                     for wx, wy, wlv, wt in wall_positions:
                         if abs(wx - x) > WALL_TOL or abs(wy - y) > WALL_TOL:
                             continue
-                        if _below(wlv, beam_level):
+                        if wlv == below:
                             return True
                     return False
 

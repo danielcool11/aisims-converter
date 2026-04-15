@@ -182,9 +182,28 @@ def _merge_chain(chain, span_counter):
                 grid_to = gf
                 break
 
-    # Nodes: first and last in chain (sorted by primary coordinate)
-    node_from = first.get('node_from', '')
-    node_to = last.get('node_to', '')
+    # Nodes: match merged endpoints to the original element endpoint that sits
+    # there. Previous behaviour took first.node_from / last.node_to, which
+    # silently swaps labels whenever an original element's own xy direction
+    # is reverse of the merged-span direction. This caused ~48% of P2 beams
+    # to have node_from/to pointing to the opposite xy field than the merged
+    # x/y_from/to they're emitted with (issue #78 Error F).
+    def _find_node_at(xt, yt):
+        best = ''
+        best_d = float('inf')
+        for r in chain:
+            for tag, rx, ry in (
+                ('node_from', r['x_from_mm'], r['y_from_mm']),
+                ('node_to',   r['x_to_mm'],   r['y_to_mm']),
+            ):
+                d = abs(rx - xt) + abs(ry - yt)
+                if d < best_d:
+                    best_d = d
+                    best = r.get(tag, '')
+        return best
+
+    node_from = _find_node_at(x_from, y_from)
+    node_to = _find_node_at(x_to, y_to)
 
     # Use the first element's properties (all should be same within merged span)
     member_id = first['member_id']
