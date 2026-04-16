@@ -477,12 +477,18 @@ class BeamDataAdapter:
                 self.base_to_raw[base_mid] = set()
             self.base_to_raw[base_mid].add(raw_mid)
 
-            # Map I/M/J to zones: I=EXT, M=INT (or CTR), J=EXT
+            # Map I/M/J to zones.
+            # Legacy zone keys (EXT/INT/CTR) are kept for backward compat
+            # with stirrup and ADD_INTERMEDIATE formulas. New I/M/J keys
+            # store the per-position totals separately so the emission code
+            # can distinguish asymmetric I vs J (e.g. G2A TOP I=12 J=4).
+            #
+            # 'main' = min(I, M, J) = true through-bar count, NOT min(EXT, INT).
             # TOP bars — keyed by RAW member_id (level-specific)
             top_total = row.get('top_total')
             top_dia = row.get('top_dia_mm')
             if pd.notna(top_total) and pd.notna(top_dia) and int(top_total) > 0:
-                zone = 'EXT' if pos in ('I', 'J') else 'INT'
+                legacy_zone = 'EXT' if pos in ('I', 'J') else 'INT'
                 key = (raw_mid, 'TOP')
                 if key not in self.long_cfg:
                     self.long_cfg[key] = {
@@ -490,15 +496,21 @@ class BeamDataAdapter:
                         'zones': {},
                         'main': 0,
                     }
-                self.long_cfg[key]['zones'][zone] = max(
-                    self.long_cfg[key]['zones'].get(zone, 0), int(top_total)
+                cfg = self.long_cfg[key]
+                cfg['zones'][legacy_zone] = max(
+                    cfg['zones'].get(legacy_zone, 0), int(top_total)
+                )
+                # Per-position totals (I/M/J)
+                imj_key = pos  # 'I', 'M', or 'J'
+                cfg['zones'][imj_key] = max(
+                    cfg['zones'].get(imj_key, 0), int(top_total)
                 )
 
             # BOT bars — keyed by RAW member_id (level-specific)
             bot_total = row.get('bot_total')
             bot_dia = row.get('bot_dia_mm')
             if pd.notna(bot_total) and pd.notna(bot_dia) and int(bot_total) > 0:
-                zone = 'EXT' if pos in ('I', 'J') else 'CTR'
+                legacy_zone = 'EXT' if pos in ('I', 'J') else 'CTR'
                 key = (raw_mid, 'BOT')
                 if key not in self.long_cfg:
                     self.long_cfg[key] = {
@@ -506,8 +518,13 @@ class BeamDataAdapter:
                         'zones': {},
                         'main': 0,
                     }
-                self.long_cfg[key]['zones'][zone] = max(
-                    self.long_cfg[key]['zones'].get(zone, 0), int(bot_total)
+                cfg = self.long_cfg[key]
+                cfg['zones'][legacy_zone] = max(
+                    cfg['zones'].get(legacy_zone, 0), int(bot_total)
+                )
+                imj_key = pos
+                cfg['zones'][imj_key] = max(
+                    cfg['zones'].get(imj_key, 0), int(bot_total)
                 )
 
             # Stirrups — keyed by BASE member_id (level-invariant in practice)
@@ -599,13 +616,24 @@ class BeamDataAdapter:
                 for lv in uncovered:
                     self.level_prefix_map[(base_mid, lv)] = unassigned[0]
 
-        # Finalize: compute 'main' count (minimum across zones) and is_uniform
+        # Finalize: compute 'main' count (minimum across I/M/J zones)
+        # and is_uniform. Use per-position (I/M/J) values when available,
+        # fall back to legacy (EXT/INT/CTR) for backward compat.
         for key, cfg in self.long_cfg.items():
             zones = cfg['zones']
             if zones:
-                cfg['main'] = min(zones.values())
+                # Prefer I/M/J for 'main' computation (true through-count)
+                imj_vals = [zones[k] for k in ('I', 'M', 'J') if k in zones]
+                if imj_vals:
+                    cfg['main'] = min(imj_vals)
+                    cfg['is_uniform'] = (len(set(imj_vals)) == 1)
+                else:
+                    # Legacy fallback (EXT/INT or EXT/CTR)
+                    legacy_vals = [v for k, v in zones.items()
+                                   if k in ('EXT', 'INT', 'CTR')]
+                    cfg['main'] = min(legacy_vals) if legacy_vals else 0
+                    cfg['is_uniform'] = (len(set(legacy_vals)) == 1) if legacy_vals else True
                 cfg['num_zones'] = len(zones)
-                cfg['is_uniform'] = (len(set(zones.values())) == 1)
             else:
                 cfg['main'] = 0
                 cfg['is_uniform'] = True
@@ -1382,6 +1410,19 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
             'support_extends_below_end': bool(sp.get('support_extends_below_end', False)),
         }
 
+        # Continuity type for chain-continuous bars (from _resolve_role_from_run).
+        # FULL_CHAIN = runs the entire chain (SLP-eligible).
+        # Standalone beams (not in any run) get None.
+        def _cont_type(role_name, row_idx, pos_label):
+            if run_index is None or row_idx is None:
+                return None
+            r = run_index.get_run(row_idx, pos_label)
+            if r is None:
+                return None
+            if role_name in ('MAIN_START', 'MAIN_INTERMEDIATE', 'MAIN_END'):
+                return 'FULL_CHAIN'
+            return None  # MAIN_SINGLE from legacy path
+
         # MAIN TOP
         z_s_top = _bar_z(zs, h_mm, cover, 'TOP', 1, dia_top)
         z_e_top = _bar_z(ze, h_mm, cover, 'TOP', 1, dia_top)
@@ -1389,7 +1430,8 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
               'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': z_e_top,
               'bar_position': 'TOP', 'bar_role': top_role, 'bar_type': 'MAIN',
               'dia_mm': dia_top, 'n_bars': main_top, 'length_mm': int(round(Ltop)),
-              'layer': 1, 'reinforcement_type': 'UNIFORM' if is_uniform else 'VARIABLE'}
+              'layer': 1, 'reinforcement_type': 'UNIFORM' if is_uniform else 'VARIABLE',
+              'continuity_type': _cont_type(top_role, span_row_idx, 'TOP')}
         mt = _add_anchorage(mt, Ldh, Lpt_B, Lpb_B)
         for piece in _split_stock(mt, Lpt_B, direction):
             results.append(piece)
@@ -1401,10 +1443,65 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
               'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': z_e_bot,
               'bar_position': 'BOT', 'bar_role': bot_role, 'bar_type': 'MAIN',
               'dia_mm': dia_bot, 'n_bars': main_bot, 'length_mm': int(round(Lbot)),
-              'layer': 1, 'reinforcement_type': 'UNIFORM' if is_uniform else 'VARIABLE'}
+              'layer': 1, 'reinforcement_type': 'UNIFORM' if is_uniform else 'VARIABLE',
+              'continuity_type': _cont_type(bot_role, span_row_idx, 'BOT')}
         mb = _add_anchorage(mb, Ldh, Lpt_B, Lpb_B)
         for piece in _split_stock(mb, Lpb_B, direction):
             results.append(piece)
+
+        # ── Gap bars: excess through-bars above chain continuous count ──
+        # When a beam's through-count (cfg['main']) exceeds the chain's
+        # min_count, excess bars are assigned roles based on the pairwise
+        # handoff: if the adjacent beam also has excess, the bar forms a
+        # partial chain (MAIN_START / MAIN_END with LAP). If not, it stays
+        # local (MAIN_SINGLE with HOOK/HOOK).
+        #
+        # The strip-interval structure from beam_junction_graph.py already
+        # computes this: each RemainderSpan is a contiguous sub-run of
+        # beams at a given excess level. BeamRun.gap_bar_roles() maps
+        # these to per-beam role assignments.
+        if run_index is not None and span_row_idx is not None:
+            for pos_label, cfg_pos, dia_pos, z_s, z_e in [
+                ('TOP', cfg_top, dia_top, z_s_top, z_e_top),
+                ('BOT', cfg_bot, dia_bot, z_s_bot, z_e_bot),
+            ]:
+                run_pos = run_index.get_run(span_row_idx, pos_label)
+                if run_pos is None:
+                    continue
+                gap_roles = run_pos.gap_bar_roles().get(span_row_idx, {})
+                if not gap_roles:
+                    continue
+                lap_len = Lpt_B if pos_label == 'TOP' else Lpb_B
+                for gap_role, gap_n in gap_roles.items():
+                    if gap_n <= 0:
+                        continue
+                    # Continuity type: MAIN_SINGLE = LOCAL (one span),
+                    # anything with LAP = PARTIAL_CHAIN (multi-span sub-run
+                    # but not the entire chain).
+                    if gap_role == 'MAIN_SINGLE':
+                        cont_type = 'LOCAL'
+                    else:
+                        cont_type = 'PARTIAL_CHAIN'
+                    L_gap = _main_length(gap_role, lap_len)
+                    seg_gap = f"{member_id}-GAP{span_idx:03d}"
+                    gap_bar = {
+                        **base,
+                        'segment_id': seg_gap,
+                        'x_start_mm': xs, 'y_start_mm': ys, 'z_start_mm': z_s,
+                        'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': z_e,
+                        'bar_position': pos_label,
+                        'bar_role': gap_role,
+                        'bar_type': 'MAIN',
+                        'dia_mm': dia_pos,
+                        'n_bars': gap_n,
+                        'length_mm': int(round(L_gap)),
+                        'layer': 1,
+                        'reinforcement_type': 'UNIFORM' if is_uniform else 'VARIABLE',
+                        'continuity_type': cont_type,
+                    }
+                    gap_bar = _add_anchorage(gap_bar, Ldh, Lpt_B, Lpb_B)
+                    for piece in _split_stock(gap_bar, lap_len, direction):
+                        results.append(piece)
 
         # ADD bars (VARIABLE only, with continuity)
         is_first = (sub_i == 0)
@@ -1438,9 +1535,14 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
                 if run_b is not None and cfg_bot['main'] > run_b.min_count:
                     add_baseline_bot = int(cfg_bot['main'])
 
-            add_top_ext = int(max(0, zones_top.get('EXT', add_baseline_top) - add_baseline_top))
-            add_top_int = int(max(0, zones_top.get('INT', add_baseline_top) - add_baseline_top))
-            add_bot_ctr = int(max(0, zones_bot.get('CTR', add_baseline_bot) - add_baseline_bot))
+            # Per-zone ADD bar counts. Use I/M/J keys when available (accurate
+            # for asymmetric I≠J like G2A), fall back to legacy EXT/INT/CTR.
+            add_top_I = int(max(0, zones_top.get('I', zones_top.get('EXT', add_baseline_top)) - add_baseline_top))
+            add_top_J = int(max(0, zones_top.get('J', zones_top.get('EXT', add_baseline_top)) - add_baseline_top))
+            add_top_int = int(max(0, zones_top.get('M', zones_top.get('INT', add_baseline_top)) - add_baseline_top))
+            add_bot_I = int(max(0, zones_bot.get('I', zones_bot.get('EXT', add_baseline_bot)) - add_baseline_bot))
+            add_bot_J = int(max(0, zones_bot.get('J', zones_bot.get('EXT', add_baseline_bot)) - add_baseline_bot))
+            add_bot_ctr = int(max(0, zones_bot.get('M', zones_bot.get('CTR', add_baseline_bot)) - add_baseline_bot))
 
             # Adjacent clear length
             l_cl_next = l_cl
@@ -1455,15 +1557,15 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
                     next_Wc2 = adapter.get_wall_thickness(next_sp.get('grid_to', ''), direction, next_level)
                 l_cl_next = float(next_sp['length_mm']) - 0.5 * (next_Wc1 + next_Wc2)
 
-            # ADD_START (first span, EXT zone has more bars than main)
-            if is_first and add_top_ext > 0:
+            # ADD_START (first span, I-zone has more bars than main)
+            if is_first and add_top_I > 0:
                 L = Ldh + 0.25 * l_cl + lext
                 ac = _add_bar_coords('ADD_START', L, direction, xs, ys, zs, xe, ye, ze)
                 zsa = _bar_z(ac['z_start_mm'], h_mm, cover, 'TOP', 3, dia_top)
                 zea = _bar_z(ac['z_end_mm'], h_mm, cover, 'TOP', 3, dia_top)
                 d = {**base, **ac, 'z_start_mm': zsa, 'z_end_mm': zea,
                      'bar_position': 'TOP', 'bar_role': 'ADD_START', 'bar_type': 'ADD',
-                     'dia_mm': dia_top, 'n_bars': add_top_ext,
+                     'dia_mm': dia_top, 'n_bars': add_top_I,
                      'length_mm': int(round(L)), 'layer': 3,
                      'reinforcement_type': 'VARIABLE'}
                 results.append(_add_anchorage(d, Ldh, Lpt_B, Lpb_B))
@@ -1481,20 +1583,33 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
                      'reinforcement_type': 'VARIABLE'}
                 results.append(_add_anchorage(d, Ldh, Lpt_B, Lpb_B))
 
-            # ADD_END (last span)
-            if is_last and add_top_ext > 0:
+            # ADD_END (last span, J-zone has more bars than main)
+            if is_last and add_top_J > 0:
                 L = Ldh + 0.25 * l_cl + lext
                 ac = _add_bar_coords('ADD_END', L, direction, xs, ys, zs, xe, ye, ze)
                 zsa = _bar_z(ac['z_start_mm'], h_mm, cover, 'TOP', 3, dia_top)
                 zea = _bar_z(ac['z_end_mm'], h_mm, cover, 'TOP', 3, dia_top)
                 d = {**base, **ac, 'z_start_mm': zsa, 'z_end_mm': zea,
                      'bar_position': 'TOP', 'bar_role': 'ADD_END', 'bar_type': 'ADD',
-                     'dia_mm': dia_top, 'n_bars': add_top_ext,
+                     'dia_mm': dia_top, 'n_bars': add_top_J,
                      'length_mm': int(round(L)), 'layer': 3,
                      'reinforcement_type': 'VARIABLE'}
                 results.append(_add_anchorage(d, Ldh, Lpt_B, Lpb_B))
 
-            # ADD_MIDSPAN (bottom bars in CTR zone)
+            # ADD_START for BOT (bottom bars at I-support, asymmetric beams)
+            if is_first and add_bot_I > 0:
+                L = Ldh + 0.25 * l_cl + lext
+                ac = _add_bar_coords('ADD_START', L, direction, xs, ys, zs, xe, ye, ze)
+                zsa = _bar_z(ac['z_start_mm'], h_mm, cover, 'BOT', 2, dia_bot)
+                zea = _bar_z(ac['z_end_mm'], h_mm, cover, 'BOT', 2, dia_bot)
+                d = {**base, **ac, 'z_start_mm': zsa, 'z_end_mm': zea,
+                     'bar_position': 'BOT', 'bar_role': 'ADD_START', 'bar_type': 'ADD',
+                     'dia_mm': dia_bot, 'n_bars': add_bot_I,
+                     'length_mm': int(round(L)), 'layer': 2,
+                     'reinforcement_type': 'VARIABLE'}
+                results.append(_add_anchorage(d, Ldh, Lpt_B, Lpb_B))
+
+            # ADD_MIDSPAN (bottom bars in M/CTR zone)
             if add_bot_ctr > 0:
                 L = 0.5 * l_cl + 2 * lext
                 ac = _add_bar_coords('ADD_MIDSPAN', L, direction, xs, ys, zs, xe, ye, ze)
@@ -1503,6 +1618,19 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
                 d = {**base, **ac, 'z_start_mm': zsa, 'z_end_mm': zea,
                      'bar_position': 'BOT', 'bar_role': 'ADD_MIDSPAN', 'bar_type': 'ADD',
                      'dia_mm': dia_bot, 'n_bars': add_bot_ctr,
+                     'length_mm': int(round(L)), 'layer': 2,
+                     'reinforcement_type': 'VARIABLE'}
+                results.append(_add_anchorage(d, Ldh, Lpt_B, Lpb_B))
+
+            # ADD_END for BOT (bottom bars at J-support, asymmetric beams)
+            if is_last and add_bot_J > 0:
+                L = Ldh + 0.25 * l_cl + lext
+                ac = _add_bar_coords('ADD_END', L, direction, xs, ys, zs, xe, ye, ze)
+                zsa = _bar_z(ac['z_start_mm'], h_mm, cover, 'BOT', 2, dia_bot)
+                zea = _bar_z(ac['z_end_mm'], h_mm, cover, 'BOT', 2, dia_bot)
+                d = {**base, **ac, 'z_start_mm': zsa, 'z_end_mm': zea,
+                     'bar_position': 'BOT', 'bar_role': 'ADD_END', 'bar_type': 'ADD',
+                     'dia_mm': dia_bot, 'n_bars': add_bot_J,
                      'length_mm': int(round(L)), 'layer': 2,
                      'reinforcement_type': 'VARIABLE'}
                 results.append(_add_anchorage(d, Ldh, Lpt_B, Lpb_B))
@@ -1624,10 +1752,15 @@ def _calculate_main_bars(adapter, lookup):
             )
             results.extend(sub_results)
 
-    # Emit MAIN_REMAINDER bars from Case 2 runs (after all subgroups processed)
-    if run_index is not None:
-        remainder_results = _emit_remainder_bars(run_index, adapter, lookup)
-        results.extend(remainder_results)
+    # Gap bars (cfg['main'] - run.min_count) are now emitted inline by
+    # _process_subgroup as MAIN_SINGLE (local through-bars, HOOK/HOOK).
+    # MAIN_REMAINDER is no longer emitted for self-sufficient spans.
+    # The old _emit_remainder_bars is kept in the codebase but disabled —
+    # can be re-enabled for deficit-based remainder if a project's zone
+    # counts are designed as deficits rather than totals.
+    # if run_index is not None:
+    #     remainder_results = _emit_remainder_bars(run_index, adapter, lookup)
+    #     results.extend(remainder_results)
 
     return results
 
@@ -1846,6 +1979,9 @@ def calculate_beam_rebar_lengths(
         # of the has_concrete_below predicate without re-running the
         # converter. Renderer ignores these columns.
         'terminal_node_start', 'terminal_node_end',
+        # Continuity type: FULL_CHAIN (SLP-eligible), PARTIAL_CHAIN (ILP),
+        # LOCAL (ILP), or empty (ADD / stirrup / standalone).
+        'continuity_type',
     ]
 
     df = pd.DataFrame(all_results)

@@ -9,15 +9,19 @@ arithmetic on node coordinates (per Prof. Sunkuk's spec).
 Classification outcomes:
 
     Case 0  — junction has a column/wall at the node, OR at least one side is
-              not coaxial / not same-section. The Prof. Sunkuk rule does not
+              not coaxial / not same-depth. The Prof. Sunkuk rule does not
               apply; current per-beam anchorage stands.
-    Case 1  — coaxial + same section + same diameter + same bar count at this
+    Case 1  — coaxial + same depth + same diameter + same bar count at this
               position. Bars run straight through with LAP (MAIN_INTERMEDIATE).
-    Case 2  — coaxial + same section + same diameter + different bar count.
-              min(count) bars run through as LAP; remainder bars hook into the
-              opposite span (new MAIN_REMAINDER role).
-    Case 3  — coaxial + same section + different diameter. Each side HOOKs
+    Case 2  — coaxial + same depth + same diameter + different bar count.
+              min(count) bars run through as LAP; excess bars stay local
+              within their own span (MAIN_SINGLE / through-bar with HOOK).
+              MAIN_REMAINDER only emitted when receiving zone has a genuine
+              deficit (rare for Korean-designed beams).
+    Case 3  — coaxial + same depth + different diameter. Each side HOOKs
               independently at the junction node.
+    Note: different width (b_mm) is allowed — bars can lap across different
+    widths as long as h_mm matches (same z-level for bars).
 
 Phase 1 use: build the graph and emit counts so we can verify against issue
 #78's baseline (P1: 15 real Case 2+3 false positives, P2: 53) before touching
@@ -110,7 +114,11 @@ def _is_coaxial(a: BeamRef, b: BeamRef) -> bool:
 
 
 def _same_section(a: BeamRef, b: BeamRef) -> bool:
-    return a.b_mm == b.b_mm and a.h_mm == b.h_mm
+    # Same depth required for chain continuity (bars at same z-level).
+    # Different width is allowed — bars can lap across different b_mm
+    # as long as they fit within the narrower beam. Per supervisor
+    # clarification 2026-04-16 on issue #78.
+    return a.h_mm == b.h_mm
 
 
 # ── Graph builder ────────────────────────────────────────────────────────────
@@ -284,9 +292,10 @@ def _classify_pair_at_node(
     if not _is_coaxial(a, b):
         finding.reason = 'not coaxial'
         return finding
-    # Gate 3: different section
+    # Gate 3: different depth (different h_mm breaks the chain; different
+    # b_mm is allowed — bars can lap across different widths)
     if not _same_section(a, b):
-        finding.reason = f'section mismatch ({a.b_mm}x{a.h_mm} vs {b.b_mm}x{b.h_mm})'
+        finding.reason = f'depth mismatch ({a.h_mm} vs {b.h_mm})'
         return finding
     # Gate 4: no rebar info on one side
     if n_a == 0 or n_b == 0:
@@ -294,7 +303,7 @@ def _classify_pair_at_node(
         return finding
 
     # NOTE: column/wall support at the junction is NOT a gate.
-    # Prof. Sunkuk's rule (issue #78) applies to any coaxial same-section
+    # Prof. Sunkuk's rule (issue #78) applies to any coaxial same-depth
     # same-diameter beam-to-beam junction regardless of whether a column is
     # between them. Lapping inside a column cage is standard detailing
     # (the cage provides lateral confinement for the lap zone), and is
@@ -410,6 +419,33 @@ class BeamRun:
     def n_main_intermediate(self) -> int:
         """Number of bars that continue through the entire run as LAP."""
         return self.min_count
+
+    def gap_bar_roles(self) -> Dict[int, Dict[str, int]]:
+        """Per-beam gap bar role breakdown.
+
+        Returns {beam_row_idx: {'MAIN_START': n, 'MAIN_SINGLE': n, ...}}.
+        Each remainder strip (contiguous sub-run of excess bars above
+        min_count) maps to partial-chain roles: single-beam strips become
+        MAIN_SINGLE, multi-beam strips become MAIN_START / INTERMEDIATE /
+        MAIN_END within the strip.
+        """
+        result: Dict[int, Dict[str, int]] = {}
+        for rem in self.remainders:
+            beams = rem.beam_row_idxs
+            n = len(beams)
+            for i, bidx in enumerate(beams):
+                if n == 1:
+                    role = 'MAIN_SINGLE'
+                elif i == 0:
+                    role = 'MAIN_START'
+                elif i == n - 1:
+                    role = 'MAIN_END'
+                else:
+                    role = 'MAIN_INTERMEDIATE'
+                if bidx not in result:
+                    result[bidx] = {}
+                result[bidx][role] = result[bidx].get(role, 0) + 1
+        return result
 
 
 def _find_strip_intervals(counts: List[int], level: int) -> List[Tuple[int, int]]:
