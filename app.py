@@ -647,6 +647,46 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                                         wall_node_thickness.get(key, 0), wt)
                                     wall_node_levels.setdefault(n, set()).add(wlv)
 
+                # Polygon containment: for long walls (e.g. RW1 at 44900mm)
+                # where the centroid is far from beam endpoints. Build bbox
+                # index from poly_0..poly_3 vertices.
+                wall_poly_bboxes = []  # (xmin, xmax, ymin, ymax, thickness)
+
+                def _add_wall_bboxes(wall_df):
+                    if wall_df is None or wall_df.empty:
+                        return
+                    for _, w in wall_df.iterrows():
+                        wt = float(w.get('thickness_mm', 0) or 0)
+                        if wt <= 0:
+                            continue
+                        xs, ys = [], []
+                        for i in range(4):
+                            px = w.get(f'poly_{i}x_mm')
+                            py = w.get(f'poly_{i}y_mm')
+                            if pd.notna(px) and pd.notna(py):
+                                xs.append(float(px))
+                                ys.append(float(py))
+                        if len(xs) >= 3:
+                            wall_poly_bboxes.append((
+                                min(xs), max(xs), min(ys), max(ys), wt))
+
+                _add_wall_bboxes(outputs.get('walls'))
+                _add_wall_bboxes(outputs.get('bwall_members'))
+
+                def find_wall_by_polygon(x, y):
+                    """Find wall thickness if beam endpoint lies within a wall
+                    panel's bounding box. Catches long walls (like RW1) where
+                    the centroid is far from the beam endpoint but the beam
+                    is physically inside the wall's extent. No level filter —
+                    basement walls physically span multiple levels."""
+                    best = 0
+                    for xmin, xmax, ymin, ymax, wt in wall_poly_bboxes:
+                        if x < xmin or x > xmax or y < ymin or y > ymax:
+                            continue
+                        if wt > best:
+                            best = wt
+                    return best
+
                 def find_wall_by_node(node_id, beam_level):
                     """Find wall thickness if beam node is shared with a wall
                     AT THE SAME LEVEL as the beam (issue #79)."""
@@ -684,11 +724,15 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                         w1 = find_wall_thickness(x1, y1, lv)
                     if w1 == 0:
                         w1 = find_wall_by_node(nf, lv)
+                    if w1 == 0:
+                        w1 = find_wall_by_polygon(x1, y1)
                     w2 = find_col_width(x2, y2, lv, d)
                     if w2 == 0:
                         w2 = find_wall_thickness(x2, y2, lv)
                     if w2 == 0:
                         w2 = find_wall_by_node(nt, lv)
+                    if w2 == 0:
+                        w2 = find_wall_by_polygon(x2, y2)
                     cw_start.append(int(round(w1)))
                     cw_end.append(int(round(w2)))
 

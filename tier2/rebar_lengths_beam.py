@@ -1263,17 +1263,25 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
         grid_to = sp.get('grid_to', '')
         l_span = float(sp['length_mm'])
         beam_level = sp.get('level', '')
-        # Prefer precomputed col_width from Phase 2.7 (coordinate-based, includes wall fallback)
-        Wc1 = float(sp.get('col_width_start_mm', 0) or 0)
-        Wc2 = float(sp.get('col_width_end_mm', 0) or 0)
-        if Wc1 == 0:
+        # Prefer precomputed col_width from Phase 2.7 (coordinate-based,
+        # includes wall fallback). Only fall back to grid-based lookup when
+        # the Phase 2.7 field is genuinely missing (NaN), NOT when it's 0
+        # (which means "no support at this end"). Same fix as stirrups —
+        # prevents grid_from == grid_to double-count (e.g. G5A-E33907).
+        cw_s = sp.get('col_width_start_mm')
+        cw_e = sp.get('col_width_end_mm')
+        if pd.notna(cw_s):
+            Wc1 = float(cw_s)
+        else:
             Wc1 = adapter.get_column_width(grid_from, direction, beam_level)
-        if Wc1 == 0:
-            Wc1 = adapter.get_wall_thickness(grid_from, direction, beam_level)
-        if Wc2 == 0:
+            if Wc1 == 0:
+                Wc1 = adapter.get_wall_thickness(grid_from, direction, beam_level)
+        if pd.notna(cw_e):
+            Wc2 = float(cw_e)
+        else:
             Wc2 = adapter.get_column_width(grid_to, direction, beam_level)
-        if Wc2 == 0:
-            Wc2 = adapter.get_wall_thickness(grid_to, direction, beam_level)
+            if Wc2 == 0:
+                Wc2 = adapter.get_wall_thickness(grid_to, direction, beam_level)
         l_cl = l_span - 0.5 * (Wc1 + Wc2)
 
         dia_top = info['cfg_top']['dia']
