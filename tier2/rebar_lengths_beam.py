@@ -1912,33 +1912,36 @@ def _calculate_stirrups(adapter):
         zone_lengths = {'EXT': 0.25 * l_cl, 'INT': 0.25 * l_cl, 'CTR': 0.5 * l_cl}
 
         # Zone coordinate partitioning along the beam axis (issue #81).
-        # EXT = I-side support zone (first quarter of clear span).
-        # CTR = central zone (middle half).
-        # INT = J-side support zone (last quarter).
-        # Coordinates are measured from beam start, offset by half the
-        # start support width to get the clear-span face.
-        if direction == 'X':
-            face_start = xs + 0.5 * Wc1
-            face_end = xe - 0.5 * Wc2
-            zone_coords = {
-                'EXT': (face_start, face_start + 0.25 * l_cl,
-                        ys, ys),
-                'CTR': (face_start + 0.25 * l_cl, face_start + 0.75 * l_cl,
-                        ys, ys),
-                'INT': (face_start + 0.75 * l_cl, face_end,
-                        ys, ys),
-            }
+        # Uses parametric interpolation so diagonal beams (e.g. TG8 at
+        # 43.9°) get correct (x,y) at each zone boundary, not just
+        # primary-axis partitioning with fixed perpendicular coord.
+        #
+        # Zone boundaries as fraction of beam span (l_span):
+        #   face_start = 0.5*Wc1 / l_span
+        #   face_end   = 1 - 0.5*Wc2 / l_span
+        #   EXT: [face_start, face_start + 0.25*l_cl/l_span]
+        #   CTR: [+0.25*l_cl, +0.75*l_cl]
+        #   INT: [+0.75*l_cl, face_end]
+        def _interp(t):
+            return (xs + t * (xe - xs), ys + t * (ye - ys))
+
+        if l_span > 0:
+            t_face_s = 0.5 * Wc1 / l_span
+            t_quarter = 0.25 * l_cl / l_span
+            t_face_e = 1.0 - 0.5 * Wc2 / l_span
         else:
-            face_start = ys + 0.5 * Wc1
-            face_end = ye - 0.5 * Wc2
-            zone_coords = {
-                'EXT': (xs, xs,
-                        face_start, face_start + 0.25 * l_cl),
-                'CTR': (xs, xs,
-                        face_start + 0.25 * l_cl, face_start + 0.75 * l_cl),
-                'INT': (xs, xs,
-                        face_start + 0.75 * l_cl, face_end),
-            }
+            t_face_s, t_quarter, t_face_e = 0, 0.25, 1.0
+
+        zone_t = {
+            'EXT': (t_face_s, t_face_s + t_quarter),
+            'CTR': (t_face_s + t_quarter, t_face_s + 3 * t_quarter),
+            'INT': (t_face_s + 3 * t_quarter, t_face_e),
+        }
+        zone_coords = {}
+        for zn, (t1, t2) in zone_t.items():
+            x1, y1 = _interp(t1)
+            x2, y2 = _interp(t2)
+            zone_coords[zn] = (x1, x2, y1, y2)
 
         base = {
             'segment_id': segment_id, 'level': row.get('level', ''),
