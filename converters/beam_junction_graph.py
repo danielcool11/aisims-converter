@@ -420,6 +420,33 @@ class BeamRun:
         """Number of bars that continue through the entire run as LAP."""
         return self.min_count
 
+    def chain_min_b(self, b_lookup: Dict[int, float]) -> float:
+        """Min beam width across the entire run (for FULL_CHAIN bars)."""
+        return min(b_lookup.get(idx, 9999) for idx in self.ordered_beams)
+
+    def gap_min_b(self, b_lookup: Dict[int, float]) -> Dict[int, Dict[str, float]]:
+        """Per-beam min_b per gap-bar continuity group.
+
+        Returns {beam_row_idx: {'PARTIAL_CHAIN': min_b, 'LOCAL': own_b}}.
+        Each RemainderSpan strip constrains its bars to the narrowest
+        beam in that sub-run.
+        """
+        result: Dict[int, Dict[str, float]] = {}
+        for rem in self.remainders:
+            beams = rem.beam_row_idxs
+            strip_min_b = min(b_lookup.get(idx, 9999) for idx in beams)
+            n = len(beams)
+            for i, bidx in enumerate(beams):
+                cont = 'LOCAL' if n == 1 else 'PARTIAL_CHAIN'
+                min_b_val = b_lookup.get(bidx, 9999) if cont == 'LOCAL' else strip_min_b
+                if bidx not in result:
+                    result[bidx] = {}
+                # Multiple strips may contribute; keep the tightest constraint
+                result[bidx][cont] = min(
+                    result[bidx].get(cont, 9999), min_b_val
+                )
+        return result
+
     def gap_bar_roles(self) -> Dict[int, Dict[str, int]]:
         """Per-beam gap bar role breakdown.
 

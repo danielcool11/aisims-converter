@@ -38,6 +38,22 @@ from converters.beam_junction_graph import (
 COVER_MM = 50.0
 HOOK_EXTENSION_FACTOR = 10
 MAX_STOCK_LENGTH_MM = 12000
+DEFAULT_STIRRUP_DIA = 13.0  # D13 — used when stirrup cfg unavailable
+
+
+def _bars_per_layer(b_mm, cover_mm, stirrup_dia_mm, bar_dia_mm):
+    """Max bars that fit in one layer of a beam cross-section.
+
+    Layout: cover + stirrup + [bar + gap]*n + bar + stirrup + cover = b.
+    Effective width = b - 2*(cover + stirrup).
+    Clear gap = max(25, 1.5*bar_dia) per KCI.
+    """
+    eff = float(b_mm) - 2 * (float(cover_mm) + float(stirrup_dia_mm))
+    if eff <= 0:
+        return 1
+    gap = max(25.0, 1.5 * float(bar_dia_mm))
+    pitch = float(bar_dia_mm) + gap
+    return max(1, int((eff - float(bar_dia_mm)) / pitch) + 1)
 
 # Feature flag — count-matched anchorage per Prof. Sunkuk rule (issue #78 B).
 # When True, beam-to-beam coaxial junctions are classified using the junction
@@ -1410,60 +1426,106 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
             'support_extends_below_end': bool(sp.get('support_extends_below_end', False)),
         }
 
-        # Continuity type for chain-continuous bars (from _resolve_role_from_run).
-        # FULL_CHAIN = runs the entire chain (SLP-eligible).
-        # Standalone beams (not in any run) get None.
-        def _cont_type(role_name, row_idx, pos_label):
-            if run_index is None or row_idx is None:
-                return None
-            r = run_index.get_run(row_idx, pos_label)
-            if r is None:
-                return None
-            if role_name in ('MAIN_START', 'MAIN_INTERMEDIATE', 'MAIN_END'):
-                return 'FULL_CHAIN'
-            return None  # MAIN_SINGLE from legacy path
+        # ── Pre-compute z-layer and width constraint per bar group ──
+        # Through bars (MAIN_*) go to layer 1. If the total through count
+        # exceeds the layer capacity for this beam, FULL_CHAIN bars have
+        # priority for layer 1 and the rest overflow to layer 2.
+        # Width constraint: each bar's lateral distribution is limited to
+        # the narrowest beam in its chain/sub-run (chain_min_b_mm).
+        st_cfg = adapter.get_stirrup_cfg(member_id, 'EXT') or \
+                 adapter.get_stirrup_cfg(member_id, 'INT')
+        stirrup_dia = st_cfg['dia_mm'] if st_cfg else DEFAULT_STIRRUP_DIA
+        # b_lookup for chain_min_b: beam_row_idx → b_mm
+        b_lookup = {int(idx): float(adapter.beams_df.loc[idx].get('b_mm', 300) or 300)
+                    for idx in adapter.beams_df.index}
+
+        def _layer_and_width(pos_label, cfg_pos, dia_pos):
+            """Return {continuity_type: (layer, chain_min_b_mm)} for this
+            beam at this position. Handles capacity overflow."""
+            run_pos = run_index.get_run(span_row_idx, pos_label) \
+                if run_index and span_row_idx is not None else None
+
+            # Default for non-chain beams
+            if run_pos is None:
+                return {None: (1, float(b_mm))}
+
+            capacity = _bars_per_layer(b_mm, cover, stirrup_dia, dia_pos)
+            chain_n = run_pos.min_count
+            gap_roles = run_pos.gap_bar_roles().get(span_row_idx, {})
+            total_gap = sum(gap_roles.values())
+            total_through = chain_n + total_gap
+
+            # Width constraints
+            full_min_b = run_pos.chain_min_b(b_lookup)
+            gap_min_bs = run_pos.gap_min_b(b_lookup).get(span_row_idx, {})
+
+            result = {}
+
+            if total_through <= capacity:
+                # All through bars fit in layer 1
+                result['FULL_CHAIN'] = (1, full_min_b)
+                for cont, min_b_val in gap_min_bs.items():
+                    result[cont] = (1, min_b_val)
+            else:
+                # Overflow: FULL_CHAIN stays layer 1, gaps go to layer 2
+                result['FULL_CHAIN'] = (1, full_min_b)
+                remaining = capacity - chain_n
+                for cont, min_b_val in gap_min_bs.items():
+                    gap_n_this = sum(
+                        n for r, n in gap_roles.items()
+                        if (r == 'MAIN_SINGLE') == (cont == 'LOCAL')
+                    )
+                    if remaining >= gap_n_this:
+                        result[cont] = (1, min_b_val)
+                        remaining -= gap_n_this
+                    else:
+                        result[cont] = (2, min_b_val)
+
+            return result
+
+        layer_width_top = _layer_and_width('TOP', cfg_top, dia_top)
+        layer_width_bot = _layer_and_width('BOT', cfg_bot, dia_bot)
+
+        def _get_lw(lw_map, cont_type):
+            return lw_map.get(cont_type, lw_map.get(None, (1, float(b_mm))))
 
         # MAIN TOP
-        z_s_top = _bar_z(zs, h_mm, cover, 'TOP', 1, dia_top)
-        z_e_top = _bar_z(ze, h_mm, cover, 'TOP', 1, dia_top)
+        top_cont = 'FULL_CHAIN' if top_role in ('MAIN_START', 'MAIN_INTERMEDIATE', 'MAIN_END') \
+            and run_index and run_index.get_run(span_row_idx, 'TOP') else None
+        top_layer, top_min_b = _get_lw(layer_width_top, top_cont)
+        z_s_top = _bar_z(zs, h_mm, cover, 'TOP', top_layer, dia_top)
+        z_e_top = _bar_z(ze, h_mm, cover, 'TOP', top_layer, dia_top)
         mt = {**base, 'x_start_mm': xs, 'y_start_mm': ys, 'z_start_mm': z_s_top,
               'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': z_e_top,
               'bar_position': 'TOP', 'bar_role': top_role, 'bar_type': 'MAIN',
               'dia_mm': dia_top, 'n_bars': main_top, 'length_mm': int(round(Ltop)),
-              'layer': 1, 'reinforcement_type': 'UNIFORM' if is_uniform else 'VARIABLE',
-              'continuity_type': _cont_type(top_role, span_row_idx, 'TOP')}
+              'layer': top_layer, 'reinforcement_type': 'UNIFORM' if is_uniform else 'VARIABLE',
+              'continuity_type': top_cont, 'chain_min_b_mm': int(round(top_min_b))}
         mt = _add_anchorage(mt, Ldh, Lpt_B, Lpb_B)
         for piece in _split_stock(mt, Lpt_B, direction):
             results.append(piece)
 
         # MAIN BOT
-        z_s_bot = _bar_z(zs, h_mm, cover, 'BOT', 1, dia_bot)
-        z_e_bot = _bar_z(ze, h_mm, cover, 'BOT', 1, dia_bot)
+        bot_cont = 'FULL_CHAIN' if bot_role in ('MAIN_START', 'MAIN_INTERMEDIATE', 'MAIN_END') \
+            and run_index and run_index.get_run(span_row_idx, 'BOT') else None
+        bot_layer, bot_min_b = _get_lw(layer_width_bot, bot_cont)
+        z_s_bot = _bar_z(zs, h_mm, cover, 'BOT', bot_layer, dia_bot)
+        z_e_bot = _bar_z(ze, h_mm, cover, 'BOT', bot_layer, dia_bot)
         mb = {**base, 'x_start_mm': xs, 'y_start_mm': ys, 'z_start_mm': z_s_bot,
               'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': z_e_bot,
               'bar_position': 'BOT', 'bar_role': bot_role, 'bar_type': 'MAIN',
               'dia_mm': dia_bot, 'n_bars': main_bot, 'length_mm': int(round(Lbot)),
-              'layer': 1, 'reinforcement_type': 'UNIFORM' if is_uniform else 'VARIABLE',
-              'continuity_type': _cont_type(bot_role, span_row_idx, 'BOT')}
+              'layer': bot_layer, 'reinforcement_type': 'UNIFORM' if is_uniform else 'VARIABLE',
+              'continuity_type': bot_cont, 'chain_min_b_mm': int(round(bot_min_b))}
         mb = _add_anchorage(mb, Ldh, Lpt_B, Lpb_B)
         for piece in _split_stock(mb, Lpb_B, direction):
             results.append(piece)
 
         # ── Gap bars: excess through-bars above chain continuous count ──
-        # When a beam's through-count (cfg['main']) exceeds the chain's
-        # min_count, excess bars are assigned roles based on the pairwise
-        # handoff: if the adjacent beam also has excess, the bar forms a
-        # partial chain (MAIN_START / MAIN_END with LAP). If not, it stays
-        # local (MAIN_SINGLE with HOOK/HOOK).
-        #
-        # The strip-interval structure from beam_junction_graph.py already
-        # computes this: each RemainderSpan is a contiguous sub-run of
-        # beams at a given excess level. BeamRun.gap_bar_roles() maps
-        # these to per-beam role assignments.
         if run_index is not None and span_row_idx is not None:
-            for pos_label, cfg_pos, dia_pos, z_s, z_e in [
-                ('TOP', cfg_top, dia_top, z_s_top, z_e_top),
-                ('BOT', cfg_bot, dia_bot, z_s_bot, z_e_bot),
+            for pos_label, cfg_pos, dia_pos in [
+                ('TOP', cfg_top, dia_top),
+                ('BOT', cfg_bot, dia_bot),
             ]:
                 run_pos = run_index.get_run(span_row_idx, pos_label)
                 if run_pos is None:
@@ -1471,33 +1533,35 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
                 gap_roles = run_pos.gap_bar_roles().get(span_row_idx, {})
                 if not gap_roles:
                     continue
+                lw_map = layer_width_top if pos_label == 'TOP' else layer_width_bot
                 lap_len = Lpt_B if pos_label == 'TOP' else Lpb_B
                 for gap_role, gap_n in gap_roles.items():
                     if gap_n <= 0:
                         continue
-                    # Continuity type: MAIN_SINGLE = LOCAL (one span),
-                    # anything with LAP = PARTIAL_CHAIN (multi-span sub-run
-                    # but not the entire chain).
                     if gap_role == 'MAIN_SINGLE':
                         cont_type = 'LOCAL'
                     else:
                         cont_type = 'PARTIAL_CHAIN'
+                    gap_layer, gap_min_b = _get_lw(lw_map, cont_type)
+                    z_s_gap = _bar_z(zs, h_mm, cover, pos_label, gap_layer, dia_pos)
+                    z_e_gap = _bar_z(ze, h_mm, cover, pos_label, gap_layer, dia_pos)
                     L_gap = _main_length(gap_role, lap_len)
                     seg_gap = f"{member_id}-GAP{span_idx:03d}"
                     gap_bar = {
                         **base,
                         'segment_id': seg_gap,
-                        'x_start_mm': xs, 'y_start_mm': ys, 'z_start_mm': z_s,
-                        'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': z_e,
+                        'x_start_mm': xs, 'y_start_mm': ys, 'z_start_mm': z_s_gap,
+                        'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': z_e_gap,
                         'bar_position': pos_label,
                         'bar_role': gap_role,
                         'bar_type': 'MAIN',
                         'dia_mm': dia_pos,
                         'n_bars': gap_n,
                         'length_mm': int(round(L_gap)),
-                        'layer': 1,
+                        'layer': gap_layer,
                         'reinforcement_type': 'UNIFORM' if is_uniform else 'VARIABLE',
                         'continuity_type': cont_type,
+                        'chain_min_b_mm': int(round(gap_min_b)),
                     }
                     gap_bar = _add_anchorage(gap_bar, Ldh, Lpt_B, Lpb_B)
                     for piece in _split_stock(gap_bar, lap_len, direction):
@@ -1839,13 +1903,40 @@ def _calculate_stirrups(adapter):
 
         zone_lengths = {'EXT': 0.25 * l_cl, 'INT': 0.25 * l_cl, 'CTR': 0.5 * l_cl}
 
+        # Zone coordinate partitioning along the beam axis (issue #81).
+        # EXT = I-side support zone (first quarter of clear span).
+        # CTR = central zone (middle half).
+        # INT = J-side support zone (last quarter).
+        # Coordinates are measured from beam start, offset by half the
+        # start support width to get the clear-span face.
+        if direction == 'X':
+            face_start = xs + 0.5 * Wc1
+            face_end = xe - 0.5 * Wc2
+            zone_coords = {
+                'EXT': (face_start, face_start + 0.25 * l_cl,
+                        ys, ys),
+                'CTR': (face_start + 0.25 * l_cl, face_start + 0.75 * l_cl,
+                        ys, ys),
+                'INT': (face_start + 0.75 * l_cl, face_end,
+                        ys, ys),
+            }
+        else:
+            face_start = ys + 0.5 * Wc1
+            face_end = ye - 0.5 * Wc2
+            zone_coords = {
+                'EXT': (xs, xs,
+                        face_start, face_start + 0.25 * l_cl),
+                'CTR': (xs, xs,
+                        face_start + 0.25 * l_cl, face_start + 0.75 * l_cl),
+                'INT': (xs, xs,
+                        face_start + 0.75 * l_cl, face_end),
+            }
+
         base = {
             'segment_id': segment_id, 'level': row.get('level', ''),
             'direction': direction, 'line_grid': line_grid,
             'member_id': mid, 'span_index': span_idx,
             'start_grid': grid_from, 'end_grid': grid_to,
-            'x_start_mm': xs, 'y_start_mm': ys, 'z_start_mm': zs,
-            'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': zs,
             'b_mm': int(b_mm), 'h_mm': int(h_mm), 'shape': shape,
             'col_width_start_mm': int(round(Wc1)) if Wc1 else 0,
             'col_width_end_mm': int(round(Wc2)) if Wc2 else 0,
@@ -1863,8 +1954,13 @@ def _calculate_stirrups(adapter):
             L_st = 2 * (b_cl + h_cl) + 2 * nl * HOOK_EXTENSION_FACTOR * dia
             n_st = int(zl / sp_mm) + 1
 
+            zc = zone_coords.get(zn, (xs, xe, ys, ye))
             results.append({
                 **base,
+                'x_start_mm': zc[0], 'y_start_mm': zc[2],
+                'z_start_mm': zs,
+                'x_end_mm': zc[1], 'y_end_mm': zc[3],
+                'z_end_mm': zs,
                 'bar_position': 'STIRRUP', 'bar_role': zn, 'bar_type': 'STIRRUP',
                 'dia_mm': int(dia), 'n_bars': nl,
                 'length_mm': int(round(L_st)), 'layer': None,
@@ -1997,6 +2093,10 @@ def calculate_beam_rebar_lengths(
         # Continuity type: FULL_CHAIN (SLP-eligible), PARTIAL_CHAIN (ILP),
         # LOCAL (ILP), or empty (ADD / stirrup / standalone).
         'continuity_type',
+        # Width constraint: narrowest beam in this bar's chain/sub-run.
+        # Renderer uses this for lateral bar distribution instead of the
+        # host beam's own b_mm.
+        'chain_min_b_mm',
     ]
 
     df = pd.DataFrame(all_results)
