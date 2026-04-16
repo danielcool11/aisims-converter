@@ -1791,12 +1791,27 @@ def _calculate_stirrups(adapter):
         grid_from = row.get('grid_from', '')
         grid_to = row.get('grid_to', '')
         st_level = row.get('level', '')
-        Wc1 = adapter.get_column_width(grid_from, direction, st_level)
-        if Wc1 == 0:
-            Wc1 = adapter.get_wall_thickness(grid_from, direction, st_level)
-        Wc2 = adapter.get_column_width(grid_to, direction, st_level)
-        if Wc2 == 0:
-            Wc2 = adapter.get_wall_thickness(grid_to, direction, st_level)
+        # Prefer Phase 2.7 coordinate-based col_width (already in
+        # MembersBeam). The grid-based lookup double-counts when
+        # grid_from == grid_to (e.g. G5A-E33907 where both ends
+        # map to X11Y11 but only one has a real support).
+        # Only fall back to grid lookup when the Phase 2.7 field is
+        # genuinely missing (NaN), NOT when it's 0 (which means
+        # "no support at this end" — a valid value).
+        cw_start_raw = row.get('col_width_start_mm')
+        cw_end_raw = row.get('col_width_end_mm')
+        if pd.notna(cw_start_raw):
+            Wc1 = float(cw_start_raw)
+        else:
+            Wc1 = adapter.get_column_width(grid_from, direction, st_level)
+            if Wc1 == 0:
+                Wc1 = adapter.get_wall_thickness(grid_from, direction, st_level)
+        if pd.notna(cw_end_raw):
+            Wc2 = float(cw_end_raw)
+        else:
+            Wc2 = adapter.get_column_width(grid_to, direction, st_level)
+            if Wc2 == 0:
+                Wc2 = adapter.get_wall_thickness(grid_to, direction, st_level)
         l_cl = l_span - 0.5 * (Wc1 + Wc2)
 
         xs = row.get('x_from_mm', 0) or 0
