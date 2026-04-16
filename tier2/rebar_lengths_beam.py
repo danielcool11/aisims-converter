@@ -1403,6 +1403,84 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
             span_row_idx, 'BOT', legacy_role, fb_bot, run_index,
         )
 
+        # Feasibility gate: if the run gives a LAP-based role but the
+        # ADJACENT beam in the run can't accommodate the lap (50% rule:
+        # 0.5*adjacent_l_cl < L_lap), fall back to HOOK at that end.
+        # With member_id breaks, subgroup joints are always empty (n_sub=1),
+        # so we check feasibility from the RUN context directly.
+        def _check_run_feasibility(pos_label):
+            """Check if the junctions to the left/right of this beam
+            in the run are feasible. Returns (left_ok, right_ok)."""
+            if run_index is None or span_row_idx is None:
+                return True, True
+            run = run_index.get_run(span_row_idx, pos_label)
+            if run is None:
+                return True, True
+            ordered = run.ordered_beams
+            if span_row_idx not in ordered:
+                return True, True
+            pos = ordered.index(span_row_idx)
+
+            # This beam's L_lap (conservative: use max of TOP/BOT)
+            sd = span_data[sub_i]
+            my_llap = sd['L_lap']
+
+            # Check right neighbor: can it receive a lap from this beam?
+            right_ok = True
+            if pos < len(ordered) - 1:
+                right_idx = ordered[pos + 1]
+                right_row = adapter.beams_df.loc[right_idx]
+                r_span = float(right_row.get('length_mm', 0) or 0)
+                r_cw1 = float(right_row.get('col_width_start_mm', 0) or 0)
+                r_cw2 = float(right_row.get('col_width_end_mm', 0) or 0)
+                r_lcl = r_span - 0.5 * (r_cw1 + r_cw2)
+                right_ok = (0.5 * max(0, r_lcl) >= my_llap)
+
+            # Check left neighbor: can it receive a lap from this beam?
+            left_ok = True
+            if pos > 0:
+                left_idx = ordered[pos - 1]
+                left_row = adapter.beams_df.loc[left_idx]
+                l_span = float(left_row.get('length_mm', 0) or 0)
+                l_cw1 = float(left_row.get('col_width_start_mm', 0) or 0)
+                l_cw2 = float(left_row.get('col_width_end_mm', 0) or 0)
+                l_lcl = l_span - 0.5 * (l_cw1 + l_cw2)
+                left_ok = (0.5 * max(0, l_lcl) >= my_llap)
+
+            # Also check: can THIS beam receive a lap from its neighbors?
+            my_lcl = sd['l_cl']
+            self_ok = (0.5 * max(0, my_lcl) >= my_llap)
+            if not self_ok:
+                left_ok = False
+                right_ok = False
+
+            return left_ok, right_ok
+
+        def _gate_feasibility(role, n_bars, pos_label, fb_n):
+            """Downgrade LAP-based role if the receiving joint is infeasible."""
+            left_ok, right_ok = _check_run_feasibility(pos_label)
+            if role == 'MAIN_START' and not right_ok:
+                return 'MAIN_SINGLE', fb_n
+            if role == 'MAIN_END' and not left_ok:
+                return 'MAIN_SINGLE', fb_n
+            if role == 'MAIN_INTERMEDIATE':
+                if not left_ok and not right_ok:
+                    return 'MAIN_SINGLE', fb_n
+                if not right_ok:
+                    return 'MAIN_END', fb_n
+                if not left_ok:
+                    return 'MAIN_START', fb_n
+            return role, n_bars
+
+        top_role, main_top = _gate_feasibility(top_role, main_top, 'TOP', fb_top)
+        bot_role, main_bot = _gate_feasibility(bot_role, main_bot, 'BOT', fb_bot)
+
+        # Track which positions were downgraded — skip gap bars for those.
+        top_downgraded = (top_role == 'MAIN_SINGLE' and run_index is not None
+                          and run_index.get_run(span_row_idx, 'TOP') is not None)
+        bot_downgraded = (bot_role == 'MAIN_SINGLE' and run_index is not None
+                          and run_index.get_run(span_row_idx, 'BOT') is not None)
+
         def _main_length(role_name: str, lap_len: float) -> float:
             if role_name == 'MAIN_SINGLE':
                 return l_cl + Ldh + Ldh
@@ -1530,11 +1608,17 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
             results.append(piece)
 
         # ── Gap bars: excess through-bars above chain continuous count ──
+        # Skip gap bars for positions where the feasibility gate
+        # downgraded the main role — the beam is standalone there.
         if run_index is not None and span_row_idx is not None:
             for pos_label, cfg_pos, dia_pos in [
                 ('TOP', cfg_top, dia_top),
                 ('BOT', cfg_bot, dia_bot),
             ]:
+                if pos_label == 'TOP' and top_downgraded:
+                    continue
+                if pos_label == 'BOT' and bot_downgraded:
+                    continue
                 run_pos = run_index.get_run(span_row_idx, pos_label)
                 if run_pos is None:
                     continue
