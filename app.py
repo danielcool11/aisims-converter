@@ -886,6 +886,79 @@ if st.button("CONVERT", type="primary", use_container_width=True):
             except Exception as e:
                 log(f"Basement wall element processing: {e}")
 
+        # ── Phase 2.7b: Fill missing beam col_width from basement wall polygons ──
+        # Phase 2.7 ran before basement walls were available. Now that
+        # bwall_members exists, scan beams with col_width=0 and check if
+        # their endpoints fall within a basement wall panel polygon.
+        # Level-aware: only match the wall level directly below the beam
+        # (e.g. B1 for a 1F beam, not B4/B5 which are thicker retaining
+        # walls much deeper in the ground).
+        if 'beams' in outputs and 'bwall_members' in outputs:
+            try:
+                bw_df = outputs['bwall_members']
+                beams_df = outputs['beams']
+                if bw_df is not None and not bw_df.empty:
+                    # Build bbox index keyed by wall level
+                    bw_bboxes_by_level = {}
+                    for _, w in bw_df.iterrows():
+                        wt = float(w.get('thickness_mm', 0) or 0)
+                        if wt <= 0:
+                            continue
+                        wlv = str(w.get('level', '') or '').strip()
+                        if not wlv:
+                            continue
+                        xs, ys = [], []
+                        for i in range(4):
+                            px = w.get(f'poly_{i}x_mm')
+                            py = w.get(f'poly_{i}y_mm')
+                            if pd.notna(px) and pd.notna(py):
+                                xs.append(float(px))
+                                ys.append(float(py))
+                        if len(xs) >= 3:
+                            bw_bboxes_by_level.setdefault(wlv, []).append((
+                                min(xs), max(xs), min(ys), max(ys), wt))
+
+                    def _level_below_2_7b(beam_level):
+                        """Level directly below beam_level, using _level_order
+                        from Phase 2.7. Returns None if unavailable."""
+                        try:
+                            i = _level_index.get(beam_level)
+                            if i is None or i == 0:
+                                return None
+                            return _level_order[i - 1]
+                        except NameError:
+                            return None
+
+                    fixed = 0
+                    for idx, bm in beams_df.iterrows():
+                        beam_level = str(bm.get('level', '')).strip()
+                        below = _level_below_2_7b(beam_level)
+                        if not below:
+                            continue
+                        bboxes = bw_bboxes_by_level.get(below, [])
+                        if not bboxes:
+                            continue
+                        for end, xc, yc, col_field in [
+                            ('start', float(bm.get('x_from_mm', 0) or 0),
+                                      float(bm.get('y_from_mm', 0) or 0),
+                                      'col_width_start_mm'),
+                            ('end',   float(bm.get('x_to_mm', 0) or 0),
+                                      float(bm.get('y_to_mm', 0) or 0),
+                                      'col_width_end_mm'),
+                        ]:
+                            if beams_df.at[idx, col_field] != 0:
+                                continue
+                            for xmin, xmax, ymin, ymax, wt in bboxes:
+                                if xmin <= xc <= xmax and ymin <= yc <= ymax:
+                                    beams_df.at[idx, col_field] = int(round(wt))
+                                    fixed += 1
+                                    break
+                    if fixed > 0:
+                        outputs['beams'] = beams_df
+                        log(f"Phase 2.7b: {fixed} beam endpoints matched basement wall polygons")
+            except Exception as e:
+                log(f"Phase 2.7b basement wall polygon check: {e}")
+
         # ── Phase 3: Reinforcement ──
         if design_beam_file:
             progress.progress(65, text="Phase 3: Beam reinforcement...")
