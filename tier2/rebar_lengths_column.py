@@ -860,6 +860,12 @@ def calculate_column_rebar_lengths(
                         x_start = prev_s['col_x_top'] - u_prev[0] * dist_along
                         y_start = prev_s['col_y_top'] - u_prev[1] * dist_along
 
+                # Splice layer alternation: even segment index → layer 1 (outer
+                # perimeter), odd → layer 2 (shifted inward by 1d for contact
+                # splice). The renderer uses this to offset the bar distribution
+                # toward the column center at splice zones.
+                splice_layer = 1 if j % 2 == 0 else 2
+
                 record = {
                     'member_id': member_id, 'start_grid': grid,
                     'level_from': s['level_from'], 'level_to': s['level_to'],
@@ -877,6 +883,7 @@ def calculate_column_rebar_lengths(
                     'segment_id': s['segment_id'],
                     'b_mm': s['b_mm'], 'h_mm': s['h_mm'],
                     'shape': s['shape'],
+                    'splice_layer': splice_layer,
                 }
 
                 # Add bend point fields for viewer rendering

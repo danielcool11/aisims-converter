@@ -13,6 +13,7 @@ Output: MembersStair.csv (71 columns, 8-point model)
 
 import pandas as pd
 import math
+import re
 from parsers.level_normalizer import normalize_level
 
 
@@ -87,6 +88,8 @@ def convert_stairs(
 
     for _, row in stair_df.iterrows():
         member_id = str(row.get('member_id', '')).strip()
+        # Normalize stair suffix: ST → SS (e.g. "B4ST1" → "B4SS1") for AISIMS-V2 compat
+        member_id = re.sub(r'ST(\d)', r'SS\1', member_id)
         if not member_id:
             continue
 

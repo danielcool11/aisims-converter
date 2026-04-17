@@ -8,6 +8,7 @@ Input:  StairReinforcement.csv — each row has 8 rebar specs:
 Output: ReinforcementStair.csv — expanded rows per rebar position
 """
 
+import re
 import pandas as pd
 from parsers.rebar_spec import parse_bar_at_spacing, parse_composite_bar
 from parsers.level_normalizer import normalize_level
@@ -62,6 +63,8 @@ def convert_reinforcement_stair(
 
     for _, row in stair_df.iterrows():
         member_id = str(row.get('member_id', row.iloc[0] if len(row) > 0 else '')).strip()
+        # Normalize stair suffix: ST → SS (e.g. "B4ST1" → "B4SS1") for AISIMS-V2 compat
+        member_id = re.sub(r'ST(\d)', r'SS\1', member_id)
         if not member_id:
             continue
 
