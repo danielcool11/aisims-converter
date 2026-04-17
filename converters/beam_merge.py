@@ -22,6 +22,7 @@ from typing import Dict
 
 
 CONTIGUITY_TOL = 100.0  # mm — max gap between consecutive element endpoints
+SUPPORT_XY_TOL = 500.0  # mm — proximity tolerance for column/beam support matching
 
 
 def _beam_direction(x_from, y_from, x_to, y_to):
@@ -330,6 +331,128 @@ def _merge_chain(chain, span_counter):
     return merged, span_counter
 
 
+def _build_support_index(columns_df, beams_df):
+    """Build spatial indices for intermediate support detection.
+
+    Returns:
+        col_nodes: {level: set(node_ids)} — column nodes per level
+        beam_supports: list of (x, y, level, h_mm, direction) — beam centerlines
+    """
+    col_nodes = {}
+    if columns_df is not None and not columns_df.empty:
+        for _, c in columns_df.iterrows():
+            for nf, lf in [('node_from', 'level_from'), ('node_to', 'level_to')]:
+                n = str(c.get(nf, '')).strip()
+                lv = str(c.get(lf, '')).strip()
+                if n and n != 'nan' and lv:
+                    col_nodes.setdefault(lv, set()).add(n)
+
+    beam_supports = []
+    if beams_df is not None and not beams_df.empty:
+        for _, b in beams_df.iterrows():
+            d = _beam_direction(b['x_from_mm'], b['y_from_mm'],
+                                b['x_to_mm'], b['y_to_mm'])
+            beam_supports.append({
+                'x_from': float(b['x_from_mm'] or 0),
+                'y_from': float(b['y_from_mm'] or 0),
+                'x_to': float(b['x_to_mm'] or 0),
+                'y_to': float(b['y_to_mm'] or 0),
+                'h': float(b.get('h_mm', 0) or 0),
+                'level': str(b.get('level', '')).strip(),
+                'dir': d,
+                'eid': b.get('element_id'),
+            })
+
+    return col_nodes, beam_supports
+
+
+def _is_intermediate_support(prev_elem, next_elem, direction, level,
+                              h_mm, col_nodes, beam_supports):
+    """Check if the junction between two consecutive FEM elements has
+    a structural support (column or deeper/equal perpendicular beam).
+
+    The junction point is prev_elem's far-end ≈ next_elem's near-end.
+    """
+    # Junction point coordinates
+    if direction == 'X':
+        jx = max(prev_elem['x_from_mm'], prev_elem['x_to_mm'])
+        jy = (prev_elem['y_from_mm'] + prev_elem['y_to_mm']) / 2
+    else:
+        jx = (prev_elem['x_from_mm'] + prev_elem['x_to_mm']) / 2
+        jy = max(prev_elem['y_from_mm'], prev_elem['y_to_mm'])
+
+    # Junction node (prev's far-end node)
+    if direction == 'X':
+        if prev_elem['x_to_mm'] >= prev_elem['x_from_mm']:
+            jnode = str(prev_elem.get('node_to', '')).strip()
+        else:
+            jnode = str(prev_elem.get('node_from', '')).strip()
+    else:
+        if prev_elem['y_to_mm'] >= prev_elem['y_from_mm']:
+            jnode = str(prev_elem.get('node_to', '')).strip()
+        else:
+            jnode = str(prev_elem.get('node_from', '')).strip()
+
+    # Test 1: column at this node
+    level_cols = col_nodes.get(level, set())
+    if jnode and jnode in level_cols:
+        return True
+
+    # Test 2: perpendicular beam of equal/greater depth crossing here
+    perp_dir = 'Y' if direction == 'X' else 'X'
+    for bs in beam_supports:
+        if bs['level'] != level or bs['dir'] != perp_dir:
+            continue
+        if bs['h'] < h_mm:
+            continue  # shallower beam doesn't provide support
+
+        # Check if this perpendicular beam crosses the junction point
+        if perp_dir == 'Y':
+            # Perpendicular beam runs in Y; check if its x ≈ junction x
+            # and its y-range covers junction y
+            bx = bs['x_from']
+            if abs(bx - jx) > SUPPORT_XY_TOL:
+                continue
+            by_min = min(bs['y_from'], bs['y_to'])
+            by_max = max(bs['y_from'], bs['y_to'])
+            if by_min - SUPPORT_XY_TOL <= jy <= by_max + SUPPORT_XY_TOL:
+                return True
+        else:
+            by = bs['y_from']
+            if abs(by - jy) > SUPPORT_XY_TOL:
+                continue
+            bx_min = min(bs['x_from'], bs['x_to'])
+            bx_max = max(bs['x_from'], bs['x_to'])
+            if bx_min - SUPPORT_XY_TOL <= jx <= bx_max + SUPPORT_XY_TOL:
+                return True
+
+    return False
+
+
+def _split_chain_at_supports(chain, direction, level, h_mm,
+                              col_nodes, beam_supports):
+    """Split a merged chain at intermediate support points.
+
+    Returns a list of sub-chains. Each sub-chain is a list of element dicts.
+    """
+    if len(chain) <= 1:
+        return [chain]
+
+    sub_chains = []
+    current = [chain[0]]
+
+    for i in range(1, len(chain)):
+        if _is_intermediate_support(chain[i - 1], chain[i], direction, level,
+                                     h_mm, col_nodes, beam_supports):
+            sub_chains.append(current)
+            current = [chain[i]]
+        else:
+            current.append(chain[i])
+    sub_chains.append(current)
+
+    return sub_chains
+
+
 def merge_beam_spans(
     beams_df: pd.DataFrame,
     columns_df: pd.DataFrame,
@@ -355,8 +478,10 @@ def merge_beam_spans(
     if beams_df is None or beams_df.empty:
         return beams_df
 
-    # Support-grid detection is no longer used for chain-break decisions
-    # (same-member merging per #78 Error C). Kept as a comment for history.
+    # Build support index for intermediate support detection.
+    # Chains break at column nodes and perpendicular beams of equal/greater
+    # depth. Uses the RAW (pre-merge) beams_df for beam support detection.
+    col_nodes, beam_supports = _build_support_index(columns_df, beams_df)
 
     # Add direction column
     beams = beams_df.copy()
@@ -444,11 +569,19 @@ def merge_beam_spans(
             indices.sort(key=lambda i: rows[i]['_sort_key'])
             chains.append([rows[i] for i in indices])
 
-        # Merge each chain
+        # Split chains at intermediate supports (columns + deeper beams),
+        # then merge each sub-chain into one structural span.
+        h_mm = chain[0]['h_mm'] if chains and chains[0] else 700
         for chain in chains:
-            merged, span_counter = _merge_chain(chain, span_counter)
-            if merged:
-                merged_spans.append(merged)
+            if chain:
+                h_mm = chain[0].get('h_mm', 700) or 700
+            sub_chains = _split_chain_at_supports(
+                chain, direction, level, h_mm, col_nodes, beam_supports
+            )
+            for sub_chain in sub_chains:
+                merged, span_counter = _merge_chain(sub_chain, span_counter)
+                if merged:
+                    merged_spans.append(merged)
 
     result = pd.DataFrame(merged_spans)
 
