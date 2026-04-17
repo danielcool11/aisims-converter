@@ -183,27 +183,45 @@ def _expand_level_prefix(prefix, level_order):
     return None
 
 
-def _bar_z(z_ref, h_mm, cover_mm, position, layer, dia_mm):
-    """Calculate bar Z coordinate within beam cross-section."""
-    layer_spacing = max(25.0, float(dia_mm))
+def _bar_z(z_ref, h_mm, cover_mm, position, layer, dia_mm, splice_layer=False):
+    """Calculate bar Z coordinate within beam cross-section.
+
+    Layer stacking (inward from beam face):
+      Layer 1: MAIN outer (at stirrup) — even span index in chain
+      Layer 2: MAIN splice pair (odd span) — touching (offset=db) when
+               splice_layer=True, standard gap otherwise
+      Layer 3: ADD bars — always standard gap from layer 2
+
+    splice_layer: True for layer 2 contact splice (bars touch, 0 gap).
+    Same concept applies to columns (shift inward by 1d at splice zone).
+    """
+    d = float(dia_mm)
+    std_gap = max(25.0, d)
+    gap_1_2 = 0.0 if splice_layer else std_gap
+    gap_2_3 = std_gap
+
     if position == 'TOP':
         z_top = z_ref + h_mm / 2
+        z1 = z_top - cover_mm - d / 2
         if layer == 1:
-            return z_top - cover_mm - dia_mm / 2
-        elif layer == 2:
-            z1 = z_top - cover_mm - dia_mm / 2
-            return z1 - dia_mm - layer_spacing
-        elif layer == 3:
-            z1 = z_top - cover_mm - dia_mm / 2
-            z2 = z1 - dia_mm - layer_spacing
-            return z2 - dia_mm - layer_spacing
+            return z1
+        z2 = z1 - d - gap_1_2
+        if layer == 2:
+            return z2
+        z3 = z2 - d - gap_2_3
+        if layer == 3:
+            return z3
     elif position == 'BOT':
         z_bot = z_ref - h_mm / 2
+        z1 = z_bot + cover_mm + d / 2
         if layer == 1:
-            return z_bot + cover_mm + dia_mm / 2
-        elif layer == 2:
-            z1 = z_bot + cover_mm + dia_mm / 2
-            return z1 + dia_mm + layer_spacing
+            return z1
+        z2 = z1 + d + gap_1_2
+        if layer == 2:
+            return z2
+        z3 = z2 + d + gap_2_3
+        if layer == 3:
+            return z3
     return z_ref
 
 
@@ -1213,35 +1231,34 @@ def _resolve_role_from_run(
     fallback_n: int,
     run_index: Optional[RunIndex],
 ):
-    """Return (role, n_bars) for MAIN_{TOP,BOT} at this span.
+    """Return (role, n_bars, chain_pos) for MAIN_{TOP,BOT} at this span.
+
+    chain_pos: 0-based index of this span within the run's ordered beams.
+    Used for layer alternation at splices (even→layer 1, odd→layer 2).
+    Returns -1 if not in a run.
 
     Uses run graph if the span is part of a Case 1/2 run at this position.
     Otherwise returns the fallback (current zone-width-based role + count).
-
-    Role derivation inside a run:
-        - first beam in the ordered run -> MAIN_START (HOOK far side, LAP into next)
-        - last beam                      -> MAIN_END   (LAP from prev, HOOK far side)
-        - interior                       -> MAIN_INTERMEDIATE (LAP both sides)
     """
     if run_index is None:
-        return fallback_role, fallback_n
+        return fallback_role, fallback_n, -1
     run = run_index.get_run(span_row_idx, position)
     if run is None:
-        return fallback_role, fallback_n
+        return fallback_role, fallback_n, -1
     ordered = run.ordered_beams
     if span_row_idx not in ordered:
-        return fallback_role, fallback_n
+        return fallback_role, fallback_n, -1
     pos = ordered.index(span_row_idx)
     n_run = len(ordered)
     if n_run == 1:
-        return fallback_role, fallback_n
+        return fallback_role, fallback_n, -1
     if pos == 0:
         role = 'MAIN_START'
     elif pos == n_run - 1:
         role = 'MAIN_END'
     else:
         role = 'MAIN_INTERMEDIATE'
-    return role, run.min_count
+    return role, run.min_count, pos
 
 
 # ── Process one sub-group of same-diameter contiguous spans ──────────────────
@@ -1396,10 +1413,10 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
 
         # Per-position role (TOP and BOT independently when the flag is on)
         span_row_idx = sp.get('_row_idx')
-        top_role, main_top = _resolve_role_from_run(
+        top_role, main_top, top_chain_pos = _resolve_role_from_run(
             span_row_idx, 'TOP', legacy_role, fb_top, run_index,
         )
-        bot_role, main_bot = _resolve_role_from_run(
+        bot_role, main_bot, bot_chain_pos = _resolve_role_from_run(
             span_row_idx, 'BOT', legacy_role, fb_bot, run_index,
         )
 
@@ -1575,12 +1592,27 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
         def _get_lw(lw_map, cont_type):
             return lw_map.get(cont_type, lw_map.get(None, (1, float(b_mm))))
 
+        # Splice layer alternation: even chain_pos → layer 1 (outer),
+        # odd chain_pos → layer 2 (inner, touching = contact splice).
+        # At the splice zone between span N (layer 1) and span N+1 (layer 2),
+        # both bars are visible as stacked circles in cross-section.
+        # Standalone beams (chain_pos == -1) stay at layer 1.
+        def _splice_layer_for(chain_pos):
+            if chain_pos < 0:
+                return 1, False  # not in chain → layer 1, no splice
+            if chain_pos % 2 == 0:
+                return 1, False  # even → outer layer
+            return 2, True       # odd → inner layer (splice, touching)
+
         # MAIN TOP
         top_cont = 'FULL_CHAIN' if top_role in ('MAIN_START', 'MAIN_INTERMEDIATE', 'MAIN_END') \
             and run_index and run_index.get_run(span_row_idx, 'TOP') else None
-        top_layer, top_min_b = _get_lw(layer_width_top, top_cont)
-        z_s_top = _bar_z(zs, h_mm, cover, 'TOP', top_layer, dia_top)
-        z_e_top = _bar_z(ze, h_mm, cover, 'TOP', top_layer, dia_top)
+        top_splice_layer, top_is_splice = _splice_layer_for(top_chain_pos)
+        top_layer_resolved, top_min_b = _get_lw(layer_width_top, top_cont)
+        # Use splice layer for chain bars, capacity overflow layer otherwise
+        top_layer = top_splice_layer if top_cont else top_layer_resolved
+        z_s_top = _bar_z(zs, h_mm, cover, 'TOP', top_layer, dia_top, splice_layer=top_is_splice)
+        z_e_top = _bar_z(ze, h_mm, cover, 'TOP', top_layer, dia_top, splice_layer=top_is_splice)
         mt = {**base, 'x_start_mm': xs, 'y_start_mm': ys, 'z_start_mm': z_s_top,
               'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': z_e_top,
               'bar_position': 'TOP', 'bar_role': top_role, 'bar_type': 'MAIN',
@@ -1594,9 +1626,11 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
         # MAIN BOT
         bot_cont = 'FULL_CHAIN' if bot_role in ('MAIN_START', 'MAIN_INTERMEDIATE', 'MAIN_END') \
             and run_index and run_index.get_run(span_row_idx, 'BOT') else None
-        bot_layer, bot_min_b = _get_lw(layer_width_bot, bot_cont)
-        z_s_bot = _bar_z(zs, h_mm, cover, 'BOT', bot_layer, dia_bot)
-        z_e_bot = _bar_z(ze, h_mm, cover, 'BOT', bot_layer, dia_bot)
+        bot_splice_layer, bot_is_splice = _splice_layer_for(bot_chain_pos)
+        bot_layer_resolved, bot_min_b = _get_lw(layer_width_bot, bot_cont)
+        bot_layer = bot_splice_layer if bot_cont else bot_layer_resolved
+        z_s_bot = _bar_z(zs, h_mm, cover, 'BOT', bot_layer, dia_bot, splice_layer=bot_is_splice)
+        z_e_bot = _bar_z(ze, h_mm, cover, 'BOT', bot_layer, dia_bot, splice_layer=bot_is_splice)
         mb = {**base, 'x_start_mm': xs, 'y_start_mm': ys, 'z_start_mm': z_s_bot,
               'x_end_mm': xe, 'y_end_mm': ye, 'z_end_mm': z_e_bot,
               'bar_position': 'BOT', 'bar_role': bot_role, 'bar_type': 'MAIN',
@@ -1731,11 +1765,11 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
                 L = 0.25 * (l_cl + l_cl_next) + Wc2 + 2 * lext
                 ac = _add_bar_coords('ADD_INTERMEDIATE', L, direction, xs, ys, zs, xe, ye, ze)
                 zsa = _bar_z(ac['z_start_mm'], h_mm, cover, 'TOP', 2, dia_top)
-                zea = _bar_z(ac['z_end_mm'], h_mm, cover, 'TOP', 2, dia_top)
+                zea = _bar_z(ac['z_end_mm'], h_mm, cover, 'TOP', 3, dia_top)
                 d = {**base, **ac, 'z_start_mm': zsa, 'z_end_mm': zea,
                      'bar_position': 'TOP', 'bar_role': 'ADD_INTERMEDIATE', 'bar_type': 'ADD',
                      'dia_mm': dia_top, 'n_bars': add_top_int,
-                     'length_mm': int(round(L)), 'layer': 2,
+                     'length_mm': int(round(L)), 'layer': 3,
                      'reinforcement_type': 'VARIABLE'}
                 results.append(_add_anchorage(d, Ldh, Lpt_B, Lpb_B))
 
@@ -1756,12 +1790,12 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
             if is_first and add_bot_I > 0:
                 L = Ldh + 0.25 * l_cl + lext
                 ac = _add_bar_coords('ADD_START', L, direction, xs, ys, zs, xe, ye, ze)
-                zsa = _bar_z(ac['z_start_mm'], h_mm, cover, 'BOT', 2, dia_bot)
-                zea = _bar_z(ac['z_end_mm'], h_mm, cover, 'BOT', 2, dia_bot)
+                zsa = _bar_z(ac['z_start_mm'], h_mm, cover, 'BOT', 3, dia_bot)
+                zea = _bar_z(ac['z_end_mm'], h_mm, cover, 'BOT', 3, dia_bot)
                 d = {**base, **ac, 'z_start_mm': zsa, 'z_end_mm': zea,
                      'bar_position': 'BOT', 'bar_role': 'ADD_START', 'bar_type': 'ADD',
                      'dia_mm': dia_bot, 'n_bars': add_bot_I,
-                     'length_mm': int(round(L)), 'layer': 2,
+                     'length_mm': int(round(L)), 'layer': 3,
                      'reinforcement_type': 'VARIABLE'}
                 results.append(_add_anchorage(d, Ldh, Lpt_B, Lpb_B))
 
@@ -1769,12 +1803,12 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
             if add_bot_ctr > 0:
                 L = 0.5 * l_cl + 2 * lext
                 ac = _add_bar_coords('ADD_MIDSPAN', L, direction, xs, ys, zs, xe, ye, ze)
-                zsa = _bar_z(ac['z_start_mm'], h_mm, cover, 'BOT', 2, dia_bot)
-                zea = _bar_z(ac['z_end_mm'], h_mm, cover, 'BOT', 2, dia_bot)
+                zsa = _bar_z(ac['z_start_mm'], h_mm, cover, 'BOT', 3, dia_bot)
+                zea = _bar_z(ac['z_end_mm'], h_mm, cover, 'BOT', 3, dia_bot)
                 d = {**base, **ac, 'z_start_mm': zsa, 'z_end_mm': zea,
                      'bar_position': 'BOT', 'bar_role': 'ADD_MIDSPAN', 'bar_type': 'ADD',
                      'dia_mm': dia_bot, 'n_bars': add_bot_ctr,
-                     'length_mm': int(round(L)), 'layer': 2,
+                     'length_mm': int(round(L)), 'layer': 3,
                      'reinforcement_type': 'VARIABLE'}
                 results.append(_add_anchorage(d, Ldh, Lpt_B, Lpb_B))
 
@@ -1782,12 +1816,12 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
             if is_last and add_bot_J > 0:
                 L = Ldh + 0.25 * l_cl + lext
                 ac = _add_bar_coords('ADD_END', L, direction, xs, ys, zs, xe, ye, ze)
-                zsa = _bar_z(ac['z_start_mm'], h_mm, cover, 'BOT', 2, dia_bot)
-                zea = _bar_z(ac['z_end_mm'], h_mm, cover, 'BOT', 2, dia_bot)
+                zsa = _bar_z(ac['z_start_mm'], h_mm, cover, 'BOT', 3, dia_bot)
+                zea = _bar_z(ac['z_end_mm'], h_mm, cover, 'BOT', 3, dia_bot)
                 d = {**base, **ac, 'z_start_mm': zsa, 'z_end_mm': zea,
                      'bar_position': 'BOT', 'bar_role': 'ADD_END', 'bar_type': 'ADD',
                      'dia_mm': dia_bot, 'n_bars': add_bot_J,
-                     'length_mm': int(round(L)), 'layer': 2,
+                     'length_mm': int(round(L)), 'layer': 3,
                      'reinforcement_type': 'VARIABLE'}
                 results.append(_add_anchorage(d, Ldh, Lpt_B, Lpb_B))
 
