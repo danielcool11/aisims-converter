@@ -563,14 +563,139 @@ def merge_beam_spans(
                     merged_spans.append(merged)
 
     result = pd.DataFrame(merged_spans)
+    pass1_count = len(result)
+
+    # ── Pass 2: split at perpendicular MERGED beam supports ──
+    # Now that beams are merged, perpendicular beams are structural spans
+    # (7-10m), not raw FEM elements (500-1500mm). Safe to check crossings.
+    # Only re-split beams that are still long (> 15m) — short beams are
+    # already at correct span boundaries from Pass 1.
+    if not result.empty:
+        # Build beam support index from MERGED result
+        merged_beam_supports = []
+        for _, mb in result.iterrows():
+            d = _beam_direction(mb['x_from_mm'], mb['y_from_mm'],
+                                mb['x_to_mm'], mb['y_to_mm'])
+            merged_beam_supports.append({
+                'x_from': float(mb['x_from_mm'] or 0),
+                'y_from': float(mb['y_from_mm'] or 0),
+                'x_to': float(mb['x_to_mm'] or 0),
+                'y_to': float(mb['y_to_mm'] or 0),
+                'h': float(mb.get('h_mm', 0) or 0),
+                'level': str(mb.get('level', '')).strip(),
+                'dir': d,
+            })
+
+        pass2_splits = 0
+        pass2_results = []
+        for _, row in result.iterrows():
+            if row['length_mm'] <= 15000:
+                pass2_results.append(row.to_dict())
+                continue
+
+            direction = _beam_direction(row['x_from_mm'], row['y_from_mm'],
+                                        row['x_to_mm'], row['y_to_mm'])
+            level = str(row.get('level', '')).strip()
+            h_mm = float(row.get('h_mm', 700) or 700)
+
+            # Find perpendicular MERGED beams that cross this beam
+            perp_dir = 'Y' if direction == 'X' else 'X'
+            cross_positions = []
+
+            if direction == 'X':
+                x_min = min(row['x_from_mm'], row['x_to_mm'])
+                x_max = max(row['x_from_mm'], row['x_to_mm'])
+                y_mid = (row['y_from_mm'] + row['y_to_mm']) / 2
+                for bs in merged_beam_supports:
+                    if bs['level'] != level or bs['dir'] != perp_dir:
+                        continue
+                    if bs['h'] < h_mm:
+                        continue
+                    bx = bs['x_from']
+                    if x_min + SUPPORT_XY_TOL < bx < x_max - SUPPORT_XY_TOL:
+                        by_min = min(bs['y_from'], bs['y_to'])
+                        by_max = max(bs['y_from'], bs['y_to'])
+                        if by_min - SUPPORT_XY_TOL <= y_mid <= by_max + SUPPORT_XY_TOL:
+                            cross_positions.append(bx)
+            else:
+                y_min = min(row['y_from_mm'], row['y_to_mm'])
+                y_max = max(row['y_from_mm'], row['y_to_mm'])
+                x_mid = (row['x_from_mm'] + row['x_to_mm']) / 2
+                for bs in merged_beam_supports:
+                    if bs['level'] != level or bs['dir'] != perp_dir:
+                        continue
+                    if bs['h'] < h_mm:
+                        continue
+                    by = bs['y_from']
+                    if y_min + SUPPORT_XY_TOL < by < y_max - SUPPORT_XY_TOL:
+                        bx_min = min(bs['x_from'], bs['x_to'])
+                        bx_max = max(bs['x_from'], bs['x_to'])
+                        if bx_min - SUPPORT_XY_TOL <= x_mid <= bx_max + SUPPORT_XY_TOL:
+                            cross_positions.append(by)
+
+            if not cross_positions:
+                pass2_results.append(row.to_dict())
+                continue
+
+            # Split at each crossing position
+            cross_positions = sorted(set(round(p) for p in cross_positions))
+            pieces = []
+            r = row.to_dict()
+
+            if direction == 'X':
+                prev_x = min(r['x_from_mm'], r['x_to_mm'])
+                end_x = max(r['x_from_mm'], r['x_to_mm'])
+                y_val = r['y_from_mm']
+                for cx in cross_positions:
+                    if prev_x + SUPPORT_XY_TOL < cx < end_x - SUPPORT_XY_TOL:
+                        piece = dict(r)
+                        piece['x_from_mm'] = prev_x
+                        piece['x_to_mm'] = cx
+                        piece['length_mm'] = abs(cx - prev_x)
+                        pieces.append(piece)
+                        prev_x = cx
+                # Last piece
+                piece = dict(r)
+                piece['x_from_mm'] = prev_x
+                piece['x_to_mm'] = end_x
+                piece['length_mm'] = abs(end_x - prev_x)
+                pieces.append(piece)
+            else:
+                prev_y = min(r['y_from_mm'], r['y_to_mm'])
+                end_y = max(r['y_from_mm'], r['y_to_mm'])
+                x_val = r['x_from_mm']
+                for cy in cross_positions:
+                    if prev_y + SUPPORT_XY_TOL < cy < end_y - SUPPORT_XY_TOL:
+                        piece = dict(r)
+                        piece['y_from_mm'] = prev_y
+                        piece['y_to_mm'] = cy
+                        piece['length_mm'] = abs(cy - prev_y)
+                        pieces.append(piece)
+                        prev_y = cy
+                piece = dict(r)
+                piece['y_from_mm'] = prev_y
+                piece['y_to_mm'] = end_y
+                piece['length_mm'] = abs(end_y - prev_y)
+                pieces.append(piece)
+
+            if len(pieces) > 1:
+                pass2_splits += 1
+                pass2_results.extend(pieces)
+            else:
+                pass2_results.append(row.to_dict())
+
+        result = pd.DataFrame(pass2_results)
+        if pass2_splits > 0:
+            print(f'[BeamMerge] Pass 2: {pass2_splits} long beams split at '
+                  f'perpendicular supports → {len(result)} spans')
 
     # Sanity check: total length should be preserved
     orig_total = beams_df['length_mm'].sum()
     merged_total = result['length_mm'].sum() if not result.empty else 0
     length_diff = abs(orig_total - merged_total)
 
-    print(f'[BeamMerge] {total_elements} elements → {len(result)} spans '
-          f'({total_elements - len(result)} elements merged)')
+    print(f'[BeamMerge] {total_elements} elements → {pass1_count} spans (pass 1) '
+          f'→ {len(result)} spans (pass 2)')
     if length_diff > 1.0:
         print(f'[BeamMerge] WARNING: length mismatch! '
               f'original={orig_total:.0f} merged={merged_total:.0f} diff={length_diff:.0f}')
