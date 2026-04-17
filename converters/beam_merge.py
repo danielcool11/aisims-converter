@@ -551,7 +551,6 @@ def merge_beam_spans(
 
         # Split chains at intermediate supports (columns + deeper beams),
         # then merge each sub-chain into one structural span.
-        h_mm = chain[0]['h_mm'] if chains and chains[0] else 700
         for chain in chains:
             if chain:
                 h_mm = chain[0].get('h_mm', 700) or 700
