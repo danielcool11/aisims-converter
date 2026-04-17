@@ -2144,6 +2144,194 @@ def _compute_splice_coords(results, adapter):
             bar['splice_end_end_mm'] = round(face + lap, 1)
 
 
+# ── Diagonal beam bend points ───────────────────────────────────────────────
+
+_DIAG_XY_TOL = 300  # mm — endpoint proximity tolerance
+
+
+def _is_diagonal_beam(row):
+    """True if a beam has both significant dx AND dy (not axis-aligned)."""
+    dx = abs(float(row.get('x_to_mm', 0) or 0) - float(row.get('x_from_mm', 0) or 0))
+    dy = abs(float(row.get('y_to_mm', 0) or 0) - float(row.get('y_from_mm', 0) or 0))
+    return dx > 100 and dy > 100
+
+
+def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
+    """Post-process: for main bars on diagonal beams, detect non-coaxial
+    neighbor beams at each end and add LAP anchorage with bend points.
+
+    Bend rule (per supervisor): at the junction face, the bar transitions
+    from its own beam's axis to the neighbor's axis. Half the lap is straight
+    (along source), half follows the neighbor direction.
+
+    Uses L_lap (Lpt for TOP, Lpb for BOT) — not Ldh — because the
+    anchorage is changed from HOOK to LAP.
+    """
+    from collections import defaultdict
+
+    # 1. Build list of all beam segment rows with their endpoints
+    all_segments = []  # list of dicts with level, member_id, xf, yf, xt, yt, dx, dy
+    for _, row in beams_df.iterrows():
+        rd = row.to_dict()
+        xf = float(rd.get('x_from_mm', 0) or 0)
+        yf = float(rd.get('y_from_mm', 0) or 0)
+        xt = float(rd.get('x_to_mm', 0) or 0)
+        yt = float(rd.get('y_to_mm', 0) or 0)
+        all_segments.append({
+            'level': rd.get('level', ''),
+            'member_id': rd.get('member_id', ''),
+            'xf': xf, 'yf': yf, 'xt': xt, 'yt': yt,
+            'dx': xt - xf, 'dy': yt - yf,
+            'is_diag': abs(xt - xf) > 100 and abs(yt - yf) > 100,
+        })
+
+    # 2. Find diagonal segments only
+    diag_segs = [s for s in all_segments if s['is_diag']]
+    if not diag_segs:
+        return
+
+    def _find_neighbor_at(level, px, py, exclude_mid):
+        """Find a beam segment endpoint near (px, py) from a different member."""
+        best = None
+        best_dist = _DIAG_XY_TOL
+        for seg in all_segments:
+            if seg['level'] != level or seg['member_id'] == exclude_mid:
+                continue
+            for ex, ey in [(seg['xf'], seg['yf']), (seg['xt'], seg['yt'])]:
+                dist = math.sqrt((ex - px)**2 + (ey - py)**2)
+                if dist < best_dist:
+                    best = seg
+                    best_dist = dist
+        return best
+
+    # 3. Build a map: for each diagonal segment, find neighbors at start & end
+    #    Key: (level, member_id, round_xf, round_yf, round_xt, round_yt)
+    diag_info = {}  # (level, member_id, xf, yf, xt, yt) → {start_nb, end_nb}
+    for ds in diag_segs:
+        nb_start = _find_neighbor_at(ds['level'], ds['xf'], ds['yf'], ds['member_id'])
+        nb_end = _find_neighbor_at(ds['level'], ds['xt'], ds['yt'], ds['member_id'])
+        diag_info[(ds['level'], ds['member_id'],
+                   round(ds['xf']), round(ds['yf']),
+                   round(ds['xt']), round(ds['yt']))] = {
+            'xf': ds['xf'], 'yf': ds['yf'], 'xt': ds['xt'], 'yt': ds['yt'],
+            'dx': ds['dx'], 'dy': ds['dy'],
+            'nb_start': nb_start, 'nb_end': nb_end,
+        }
+
+    def _neighbor_direction(nb, junction_x, junction_y, diag_mid_x, diag_mid_y):
+        """Get unit vector along neighbor beam, pointing AWAY from diagonal body."""
+        ndx, ndy = nb['dx'], nb['dy']
+        nlen = math.sqrt(ndx**2 + ndy**2)
+        if nlen < 1:
+            return None
+        nux, nuy = ndx / nlen, ndy / nlen
+        # Pick direction that goes away from diagonal beam center
+        d_pos = (junction_x + nux * 100 - diag_mid_x)**2 + (junction_y + nuy * 100 - diag_mid_y)**2
+        d_neg = (junction_x - nux * 100 - diag_mid_x)**2 + (junction_y - nuy * 100 - diag_mid_y)**2
+        if d_neg > d_pos:
+            return nux, nuy
+        return -nux, -nuy
+
+    # 4. Match rebar results to diagonal segments by coordinate proximity
+    count = 0
+    for bar in results:
+        if bar.get('bar_type') != 'MAIN':
+            continue
+
+        bxs = float(bar.get('x_start_mm', 0) or 0)
+        bys = float(bar.get('y_start_mm', 0) or 0)
+        bzs = float(bar.get('z_start_mm', 0) or 0)
+        bxe = float(bar.get('x_end_mm', 0) or 0)
+        bye = float(bar.get('y_end_mm', 0) or 0)
+        bze = float(bar.get('z_end_mm', 0) or 0)
+        level = bar.get('level', '')
+
+        # Find matching diagonal segment: bar start/end must be near segment from/to
+        matched = None
+        for dkey, dinfo in diag_info.items():
+            dlevel, dmid = dkey[0], dkey[1]
+            if dlevel != level or dmid != bar.get('member_id', ''):
+                continue
+            ds_bar = math.sqrt((bxs - dinfo['xf'])**2 + (bys - dinfo['yf'])**2)
+            de_bar = math.sqrt((bxe - dinfo['xt'])**2 + (bye - dinfo['yt'])**2)
+            # Bar coords may be extended by hook/lap, so use generous tolerance
+            if ds_bar < 2000 and de_bar < 2000:
+                matched = dinfo
+                break
+            # Also try reversed (bar coords might be flipped)
+            ds_bar2 = math.sqrt((bxs - dinfo['xt'])**2 + (bys - dinfo['yt'])**2)
+            de_bar2 = math.sqrt((bxe - dinfo['xf'])**2 + (bye - dinfo['yf'])**2)
+            if ds_bar2 < 2000 and de_bar2 < 2000:
+                matched = {**dinfo,
+                           'xf': dinfo['xt'], 'yf': dinfo['yt'],
+                           'xt': dinfo['xf'], 'yt': dinfo['yf'],
+                           'nb_start': dinfo['nb_end'], 'nb_end': dinfo['nb_start']}
+                break
+
+        if not matched:
+            continue
+
+        # Use L_lap (Lpt for TOP, Lpb for BOT) — the proper lap splice length.
+        # If bar already has lap_length_mm (e.g. from chain), use it.
+        # Otherwise compute from lookup.
+        lap = bar.get('lap_length_mm')
+        if not lap and lookup:
+            dia = bar.get('dia_mm', 25)
+            fy = (dia_fy_map or {}).get(int(dia), 400)
+            fc = _parse_fc(bar.get('material_id', 'C35'))
+            _, _, _, Lpt, Lpb = lookup.get(fy, dia, fc)
+            lap = Lpt if bar.get('bar_position') == 'TOP' else Lpb
+        lap = lap or 0
+        half_lap = lap / 2.0
+        mid_x = (matched['xf'] + matched['xt']) / 2
+        mid_y = (matched['yf'] + matched['yt']) / 2
+        applied = False
+
+        # Start end
+        nb = matched['nb_start']
+        if nb:
+            ndir = _neighbor_direction(nb, matched['xf'], matched['yf'], mid_x, mid_y)
+            if ndir:
+                nux, nuy = ndir
+                bar['anchorage_start'] = 'LAP'
+                if not bar.get('lap_length_mm'):
+                    bar['lap_length_mm'] = lap
+                bar['bend1_x_mm'] = round(matched['xf'], 1)
+                bar['bend1_y_mm'] = round(matched['yf'], 1)
+                bar['bend1_z_mm'] = round(bzs, 1)
+                bar['bend1_end_x_mm'] = round(matched['xf'] + nux * half_lap, 1)
+                bar['bend1_end_y_mm'] = round(matched['yf'] + nuy * half_lap, 1)
+                bar['bend1_end_z_mm'] = round(bzs, 1)
+                bar['x_start_mm'] = round(matched['xf'] + nux * half_lap, 1)
+                bar['y_start_mm'] = round(matched['yf'] + nuy * half_lap, 1)
+                applied = True
+
+        # End end
+        nb = matched['nb_end']
+        if nb:
+            ndir = _neighbor_direction(nb, matched['xt'], matched['yt'], mid_x, mid_y)
+            if ndir:
+                nux, nuy = ndir
+                bar['anchorage_end'] = 'LAP'
+                if not bar.get('lap_length_mm'):
+                    bar['lap_length_mm'] = lap
+                bar['bend2_x_mm'] = round(matched['xt'], 1)
+                bar['bend2_y_mm'] = round(matched['yt'], 1)
+                bar['bend2_z_mm'] = round(bze, 1)
+                bar['bend2_end_x_mm'] = round(matched['xt'] + nux * half_lap, 1)
+                bar['bend2_end_y_mm'] = round(matched['yt'] + nuy * half_lap, 1)
+                bar['bend2_end_z_mm'] = round(bze, 1)
+                bar['x_end_mm'] = round(matched['xt'] + nux * half_lap, 1)
+                bar['y_end_mm'] = round(matched['yt'] + nuy * half_lap, 1)
+                applied = True
+
+        if applied:
+            count += 1
+
+    if count:
+        print(f'[RebarBeam] Diagonal bend points applied to {count} bars')
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 def calculate_beam_rebar_lengths(
@@ -2197,6 +2385,9 @@ def calculate_beam_rebar_lengths(
     print('[RebarBeam] Computing splice coordinates...')
     _compute_splice_coords(all_results, adapter)
 
+    print('[RebarBeam] Applying diagonal beam bend points...')
+    _apply_diagonal_bends(all_results, beams_df, lookup=lookup, dia_fy_map=dia_fy_map)
+
     # Output column order
     column_order = [
         'segment_id', 'level', 'direction', 'line_grid',
@@ -2212,6 +2403,11 @@ def calculate_beam_rebar_lengths(
         'split_piece', 'original_length_mm',
         'x_start_mm', 'y_start_mm', 'z_start_mm',
         'x_end_mm', 'y_end_mm', 'z_end_mm',
+        # Bend points for diagonal beam junctions (bar changes direction)
+        'bend1_x_mm', 'bend1_y_mm', 'bend1_z_mm',
+        'bend1_end_x_mm', 'bend1_end_y_mm', 'bend1_end_z_mm',
+        'bend2_x_mm', 'bend2_y_mm', 'bend2_z_mm',
+        'bend2_end_x_mm', 'bend2_end_y_mm', 'bend2_end_z_mm',
         'b_mm', 'h_mm', 'shape',
         'col_width_start_mm', 'col_width_end_mm',
         'support_extends_below_start', 'support_extends_below_end',

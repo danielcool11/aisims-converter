@@ -352,8 +352,8 @@ def classify_junctions(
         for i in range(len(unique_beams)):
             for j in range(i + 1, len(unique_beams)):
                 a, b = unique_beams[i], unique_beams[j]
-                if a.member_id == b.member_id:
-                    continue  # self-pair (should be 0 after #78 Error C fix)
+                if a.row_idx == b.row_idx:
+                    continue  # skip actual self-pair (same beam at both endpoints)
                 for position in ('TOP', 'BOT'):
                     findings.append(_classify_pair_at_node(
                         node_id, a, b, counts, supported_nodes, position

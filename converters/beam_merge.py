@@ -702,6 +702,21 @@ def merge_beam_spans(
     else:
         print(f'[BeamMerge] Length check OK (total={orig_total:.0f}mm)')
 
+    # Generate unique segment_id per row: member_id + '-E' + element_id + '-S' + index
+    # This prevents duplicate segment_ids when Pass 2 splits a beam into pieces
+    # that share the same element_id.
+    if not result.empty:
+        seg_ids = []
+        seg_counter = {}
+        for _, row in result.iterrows():
+            base = f"{row['member_id']}-E{int(row['element_id'])}"
+            seg_counter[base] = seg_counter.get(base, 0) + 1
+            if seg_counter[base] == 1:
+                seg_ids.append(base)
+            else:
+                seg_ids.append(f"{base}-S{seg_counter[base]}")
+        result['segment_id'] = seg_ids
+
     # Drop internal columns
     for col in ['_direction', '_sort_key', '_perp_key']:
         if col in result.columns:
