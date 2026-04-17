@@ -398,33 +398,13 @@ def _is_intermediate_support(prev_elem, next_elem, direction, level,
     if jnode and jnode in level_cols:
         return True
 
-    # Test 2: perpendicular beam of equal/greater depth crossing here
-    perp_dir = 'Y' if direction == 'X' else 'X'
-    for bs in beam_supports:
-        if bs['level'] != level or bs['dir'] != perp_dir:
-            continue
-        if bs['h'] < h_mm:
-            continue  # shallower beam doesn't provide support
-
-        # Check if this perpendicular beam crosses the junction point
-        if perp_dir == 'Y':
-            # Perpendicular beam runs in Y; check if its x ≈ junction x
-            # and its y-range covers junction y
-            bx = bs['x_from']
-            if abs(bx - jx) > SUPPORT_XY_TOL:
-                continue
-            by_min = min(bs['y_from'], bs['y_to'])
-            by_max = max(bs['y_from'], bs['y_to'])
-            if by_min - SUPPORT_XY_TOL <= jy <= by_max + SUPPORT_XY_TOL:
-                return True
-        else:
-            by = bs['y_from']
-            if abs(by - jy) > SUPPORT_XY_TOL:
-                continue
-            bx_min = min(bs['x_from'], bs['x_to'])
-            bx_max = max(bs['x_from'], bs['x_to'])
-            if bx_min - SUPPORT_XY_TOL <= jx <= bx_max + SUPPORT_XY_TOL:
-                return True
+    # Test 2: perpendicular beam support.
+    # DISABLED for now — checking raw FEM elements is too aggressive
+    # (each 500-1500mm FEM element triggers a break, shattering transfer
+    # beams into 100+ tiny pieces). Needs a two-pass approach: merge
+    # first without beam support, then check against MERGED perpendicular
+    # beams. Column-node check alone correctly handles most cases.
+    # TODO: implement two-pass beam support detection.
 
     return False
 
