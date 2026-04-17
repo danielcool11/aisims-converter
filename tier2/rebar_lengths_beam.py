@@ -792,6 +792,55 @@ def _add_anchorage(bar, Ldh, Lpt_B, Lpb_B):
     return bar
 
 
+def _extend_lap_coords(bar, direction):
+    """Extend bar end coordinate by L_lap at the LAP-anchored end.
+
+    Per the length formula:
+      MAIN_START:        l_cl + Ldh + L_lap  → LAP at END only
+      MAIN_INTERMEDIATE: l_span + L_lap      → LAP extension at END
+      MAIN_END:          l_cl + Ldh          → no L_lap added (receives overlap)
+
+    The bar physically extends L_lap past the column face into the next span.
+    Only the END coordinate is extended (the "forward" direction of the chain).
+    The START side receives overlap from the previous bar's extension.
+    """
+    role = bar.get('bar_role', '')
+    lap = bar.get('lap_length_mm')
+    if not lap or lap <= 0:
+        return bar
+    # Only extend for roles that include L_lap in their length formula
+    if role not in ('MAIN_START', 'MAIN_INTERMEDIATE'):
+        return bar
+
+    xs = float(bar.get('x_start_mm', 0) or 0)
+    ys = float(bar.get('y_start_mm', 0) or 0)
+    xe = float(bar.get('x_end_mm', 0) or 0)
+    ye = float(bar.get('y_end_mm', 0) or 0)
+
+    if direction == 'X':
+        # Extend the END along X. Bar goes from smaller to larger x.
+        if xe >= xs:
+            bar['x_end_mm'] = round(xe + lap, 1)
+        else:
+            bar['x_end_mm'] = round(xe - lap, 1)
+    elif direction == 'Y':
+        if ye >= ys:
+            bar['y_end_mm'] = round(ye + lap, 1)
+        else:
+            bar['y_end_mm'] = round(ye - lap, 1)
+    else:
+        # Diagonal: extend along actual beam direction
+        dx = xe - xs
+        dy = ye - ys
+        blen = math.sqrt(dx**2 + dy**2)
+        if blen > 1:
+            ux, uy = dx / blen, dy / blen
+            bar['x_end_mm'] = round(xe + ux * lap, 1)
+            bar['y_end_mm'] = round(ye + uy * lap, 1)
+
+    return bar
+
+
 # ── Stock length split ───────────────────────────────────────────────────────
 
 def _split_stock(bar, L_lap, direction):
@@ -2384,6 +2433,11 @@ def calculate_beam_rebar_lengths(
 
     print('[RebarBeam] Computing splice coordinates...')
     _compute_splice_coords(all_results, adapter)
+
+    print('[RebarBeam] Extending LAP bar coordinates...')
+    for bar in all_results:
+        if bar.get('bar_type') == 'MAIN':
+            _extend_lap_coords(bar, bar.get('direction', 'X'))
 
     print('[RebarBeam] Applying diagonal beam bend points...')
     _apply_diagonal_bends(all_results, beams_df, lookup=lookup, dia_fy_map=dia_fy_map)

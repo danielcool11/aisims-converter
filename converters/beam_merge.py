@@ -642,40 +642,66 @@ def merge_beam_spans(
             pieces = []
             r = row.to_dict()
 
+            # Generate intermediate node names for split points so the
+            # junction graph can detect consecutive span connections.
+            orig_nf = r.get('node_from', '')
+            orig_nt = r.get('node_to', '')
+            mid = r.get('member_id', '')
+
             if direction == 'X':
                 prev_x = min(r['x_from_mm'], r['x_to_mm'])
                 end_x = max(r['x_from_mm'], r['x_to_mm'])
-                y_val = r['y_from_mm']
-                for cx in cross_positions:
-                    if prev_x + SUPPORT_XY_TOL < cx < end_x - SUPPORT_XY_TOL:
-                        piece = dict(r)
-                        piece['x_from_mm'] = prev_x
-                        piece['x_to_mm'] = cx
-                        piece['length_mm'] = abs(cx - prev_x)
-                        pieces.append(piece)
-                        prev_x = cx
+                # Collect valid crossing positions
+                valid_cx = [cx for cx in cross_positions
+                            if prev_x + SUPPORT_XY_TOL < cx < end_x - SUPPORT_XY_TOL]
+                # Build node chain: orig_from → split_1 → split_2 → ... → orig_to
+                nodes = [orig_nf]
+                for cx in valid_cx:
+                    nodes.append(f'N_SPLIT_{mid}_{level}_X{int(cx)}')
+                nodes.append(orig_nt)
+
+                for si, cx in enumerate(valid_cx):
+                    piece = dict(r)
+                    piece['x_from_mm'] = prev_x
+                    piece['x_to_mm'] = cx
+                    piece['length_mm'] = abs(cx - prev_x)
+                    piece['node_from'] = nodes[si]
+                    piece['node_to'] = nodes[si + 1]
+                    pieces.append(piece)
+                    prev_x = cx
                 # Last piece
                 piece = dict(r)
                 piece['x_from_mm'] = prev_x
                 piece['x_to_mm'] = end_x
                 piece['length_mm'] = abs(end_x - prev_x)
+                piece['node_from'] = nodes[-2]
+                piece['node_to'] = nodes[-1]
                 pieces.append(piece)
             else:
                 prev_y = min(r['y_from_mm'], r['y_to_mm'])
                 end_y = max(r['y_from_mm'], r['y_to_mm'])
-                x_val = r['x_from_mm']
-                for cy in cross_positions:
-                    if prev_y + SUPPORT_XY_TOL < cy < end_y - SUPPORT_XY_TOL:
-                        piece = dict(r)
-                        piece['y_from_mm'] = prev_y
-                        piece['y_to_mm'] = cy
-                        piece['length_mm'] = abs(cy - prev_y)
-                        pieces.append(piece)
-                        prev_y = cy
+                valid_cy = [cy for cy in cross_positions
+                            if prev_y + SUPPORT_XY_TOL < cy < end_y - SUPPORT_XY_TOL]
+                nodes = [orig_nf]
+                for cy in valid_cy:
+                    nodes.append(f'N_SPLIT_{mid}_{level}_Y{int(cy)}')
+                nodes.append(orig_nt)
+
+                for si, cy in enumerate(valid_cy):
+                    piece = dict(r)
+                    piece['y_from_mm'] = prev_y
+                    piece['y_to_mm'] = cy
+                    piece['length_mm'] = abs(cy - prev_y)
+                    piece['node_from'] = nodes[si]
+                    piece['node_to'] = nodes[si + 1]
+                    pieces.append(piece)
+                    prev_y = cy
                 piece = dict(r)
                 piece['y_from_mm'] = prev_y
                 piece['y_to_mm'] = end_y
                 piece['length_mm'] = abs(end_y - prev_y)
+                piece['node_from'] = nodes[-2]
+                piece['node_to'] = nodes[-1]
                 pieces.append(piece)
 
             if len(pieces) > 1:
