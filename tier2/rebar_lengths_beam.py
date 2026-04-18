@@ -1718,8 +1718,15 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
                     else:
                         cont_type = 'PARTIAL_CHAIN'
                     gap_layer, gap_min_b = _get_lw(lw_map, cont_type)
-                    z_s_gap = _bar_z(zs, h_mm, cover, pos_label, gap_layer, dia_pos)
-                    z_e_gap = _bar_z(ze, h_mm, cover, pos_label, gap_layer, dia_pos)
+                    # Apply splice layer alternation to PARTIAL_CHAIN gap bars
+                    # so their overlap is visible (same even/odd as main bar).
+                    gap_chain_pos = top_chain_pos if pos_label == 'TOP' else bot_chain_pos
+                    if gap_chain_pos >= 0 and cont_type == 'PARTIAL_CHAIN':
+                        gap_layer, gap_is_splice = _splice_layer_for(gap_chain_pos)
+                    else:
+                        gap_is_splice = False
+                    z_s_gap = _bar_z(zs, h_mm, cover, pos_label, gap_layer, dia_pos, splice_layer=gap_is_splice)
+                    z_e_gap = _bar_z(ze, h_mm, cover, pos_label, gap_layer, dia_pos, splice_layer=gap_is_splice)
                     L_gap = _main_length(gap_role, lap_len)
                     seg_gap = f"{member_id}-GAP{span_idx:03d}"
                     gap_bar = {
