@@ -2387,6 +2387,84 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
     if count:
         print(f'[RebarBeam] Diagonal bend points applied to {count} bars')
 
+    # 5. Second pass: straight beams connected to diagonal beams at junctions.
+    #    These bars need LAP anchorage + bend into the diagonal axis.
+    count2 = 0
+    for ds in diag_segs:
+        level = ds['level']
+        diag_mid = ds['member_id']
+        diag_mx = (ds['xf'] + ds['xt']) / 2
+        diag_my = (ds['yf'] + ds['yt']) / 2
+
+        for jx, jy in [(ds['xf'], ds['yf']), (ds['xt'], ds['yt'])]:
+            # Direction from junction INTO the diagonal beam
+            dx_into = diag_mx - jx
+            dy_into = diag_my - jy
+            d_into = math.sqrt(dx_into**2 + dy_into**2)
+            if d_into < 1:
+                continue
+            ux_into, uy_into = dx_into / d_into, dy_into / d_into
+
+            for bar in results:
+                if bar.get('bar_type') != 'MAIN':
+                    continue
+                if bar.get('level', '') != level:
+                    continue
+                if bar.get('member_id', '') == diag_mid:
+                    continue
+
+                bxs = float(bar.get('x_start_mm', 0) or 0)
+                bys = float(bar.get('y_start_mm', 0) or 0)
+                bxe = float(bar.get('x_end_mm', 0) or 0)
+                bye = float(bar.get('y_end_mm', 0) or 0)
+                bzs = float(bar.get('z_start_mm', 0) or 0)
+                bze = float(bar.get('z_end_mm', 0) or 0)
+
+                lap = bar.get('lap_length_mm')
+                if not lap and lookup:
+                    dia = bar.get('dia_mm', 25)
+                    fy = (dia_fy_map or {}).get(int(dia), 400)
+                    fc = _parse_fc(bar.get('material_id', 'C35'))
+                    _, _, _, Lpt, Lpb = lookup.get(fy, dia, fc)
+                    lap = Lpt if bar.get('bar_position') == 'TOP' else Lpb
+                lap = lap or 0
+                half_lap = lap / 2.0
+
+                # Check if bar START is near junction
+                if (math.sqrt((bxs - jx)**2 + (bys - jy)**2) < _DIAG_XY_TOL
+                        and bar.get('anchorage_start') != 'LAP'):
+                    bar['anchorage_start'] = 'LAP'
+                    if not bar.get('lap_length_mm'):
+                        bar['lap_length_mm'] = lap
+                    bar['bend1_x_mm'] = round(jx, 1)
+                    bar['bend1_y_mm'] = round(jy, 1)
+                    bar['bend1_z_mm'] = round(bzs, 1)
+                    bar['bend1_end_x_mm'] = round(jx + ux_into * half_lap, 1)
+                    bar['bend1_end_y_mm'] = round(jy + uy_into * half_lap, 1)
+                    bar['bend1_end_z_mm'] = round(bzs, 1)
+                    bar['x_start_mm'] = round(jx + ux_into * half_lap, 1)
+                    bar['y_start_mm'] = round(jy + uy_into * half_lap, 1)
+                    count2 += 1
+
+                # Check if bar END is near junction
+                if (math.sqrt((bxe - jx)**2 + (bye - jy)**2) < _DIAG_XY_TOL
+                        and bar.get('anchorage_end') != 'LAP'):
+                    bar['anchorage_end'] = 'LAP'
+                    if not bar.get('lap_length_mm'):
+                        bar['lap_length_mm'] = lap
+                    bar['bend2_x_mm'] = round(jx, 1)
+                    bar['bend2_y_mm'] = round(jy, 1)
+                    bar['bend2_z_mm'] = round(bze, 1)
+                    bar['bend2_end_x_mm'] = round(jx + ux_into * half_lap, 1)
+                    bar['bend2_end_y_mm'] = round(jy + uy_into * half_lap, 1)
+                    bar['bend2_end_z_mm'] = round(bze, 1)
+                    bar['x_end_mm'] = round(jx + ux_into * half_lap, 1)
+                    bar['y_end_mm'] = round(jy + uy_into * half_lap, 1)
+                    count2 += 1
+
+    if count2:
+        print(f'[RebarBeam] Diagonal junction LAP applied to {count2} straight beam bars')
+
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
