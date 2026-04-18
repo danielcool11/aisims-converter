@@ -2211,6 +2211,47 @@ def _is_diagonal_beam(row):
     return dx > 100 and dy > 100
 
 
+def _build_bar_count_index(results):
+    """Build a lookup of MAIN bar counts per member near each endpoint.
+
+    Returns dict keyed by (level, member_id, bar_position, round_x, round_y) → total n_bars.
+    Multiple bar records at the same location are summed (FULL_CHAIN + PARTIAL_CHAIN).
+    """
+    from collections import defaultdict
+    idx = defaultdict(int)
+    for bar in results:
+        if bar.get('bar_type') != 'MAIN':
+            continue
+        level = bar.get('level', '')
+        mid = bar.get('member_id', '')
+        pos = bar.get('bar_position', '')
+        n = int(bar.get('n_bars', 0) or 0)
+        xs = float(bar.get('x_start_mm', 0) or 0)
+        ys = float(bar.get('y_start_mm', 0) or 0)
+        xe = float(bar.get('x_end_mm', 0) or 0)
+        ye = float(bar.get('y_end_mm', 0) or 0)
+        idx[(level, mid, pos, round(xs), round(ys))] += n
+        idx[(level, mid, pos, round(xe), round(ye))] += n
+    return idx
+
+
+def _lookup_neighbor_bars(bar_idx, level, neighbor_mid, pos, jx, jy, tol=500):
+    """Find total bar count for a specific neighbor member near a junction point."""
+    best = 0
+    rjx, rjy = round(jx), round(jy)
+    # Direct hit
+    key = (level, neighbor_mid, pos, rjx, rjy)
+    if key in bar_idx:
+        return bar_idx[key]
+    # Search nearby (coordinates may not match exactly)
+    for (lv, mid, p, rx, ry), n in bar_idx.items():
+        if lv != level or mid != neighbor_mid or p != pos:
+            continue
+        if abs(rx - rjx) < tol and abs(ry - rjy) < tol:
+            best = max(best, n)
+    return best
+
+
 def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
     """Post-process: for main bars on diagonal beams, detect non-coaxial
     neighbor beams at each end and add LAP anchorage with bend points.
@@ -2218,6 +2259,10 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
     Bend rule (per supervisor): at the junction face, the bar transitions
     from its own beam's axis to the neighbor's axis. Half the lap is straight
     (along source), half follows the neighbor direction.
+
+    Lap count rule: only min(n_bars_this, n_bars_neighbor) bars get the
+    diagonal bend. Excess bars keep HOOK anchorage and are split into a
+    separate record.
 
     Uses L_lap (Lpt for TOP, Lpb for BOT) — not Ldh — because the
     anchorage is changed from HOOK to LAP.
@@ -2244,6 +2289,9 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
     diag_segs = [s for s in all_segments if s['is_diag']]
     if not diag_segs:
         return
+
+    # Build bar count index from existing results (before any bend modification)
+    bar_count_idx = _build_bar_count_index(results)
 
     def _find_neighbor_at(level, px, py, exclude_seg):
         """Find a beam segment endpoint near (px, py), excluding the diagonal segment itself."""
@@ -2296,8 +2344,21 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
             return nux, nuy
         return -nux, -nuy
 
+    def _get_lap(bar, lookup, dia_fy_map):
+        """Get lap splice length for a bar."""
+        lap = bar.get('lap_length_mm')
+        if not lap and lookup:
+            dia = bar.get('dia_mm', 25)
+            fy = (dia_fy_map or {}).get(int(dia), 400)
+            fc = _parse_fc(bar.get('material_id', 'C35'))
+            _, _, _, Lpt, Lpb = lookup.get(fy, dia, fc)
+            lap = Lpt if bar.get('bar_position') == 'TOP' else Lpb
+        return lap or 0
+
     # 4. Match rebar results to diagonal segments by coordinate proximity
+    #    When n_bars > neighbor count, split into lapped + hooked records.
     count = 0
+    new_bars = []  # remainder bars to append after iteration
     for bar in results:
         if bar.get('bar_type') != 'MAIN':
             continue
@@ -2335,26 +2396,60 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
         if not matched:
             continue
 
-        # Use L_lap (Lpt for TOP, Lpb for BOT) — the proper lap splice length.
-        # If bar already has lap_length_mm (e.g. from chain), use it.
-        # Otherwise compute from lookup.
-        lap = bar.get('lap_length_mm')
-        if not lap and lookup:
-            dia = bar.get('dia_mm', 25)
-            fy = (dia_fy_map or {}).get(int(dia), 400)
-            fc = _parse_fc(bar.get('material_id', 'C35'))
-            _, _, _, Lpt, Lpb = lookup.get(fy, dia, fc)
-            lap = Lpt if bar.get('bar_position') == 'TOP' else Lpb
-        lap = lap or 0
+        lap = _get_lap(bar, lookup, dia_fy_map)
         half_lap = lap / 2.0
         mid_x = (matched['xf'] + matched['xt']) / 2
         mid_y = (matched['yf'] + matched['yt']) / 2
+        bar_pos = bar.get('bar_position', '')
+        n_bars = int(bar.get('n_bars', 0) or 0)
+
+        # Determine neighbor bar count at each end for lap limiting
+        nb_start = matched['nb_start']
+        nb_end = matched['nb_end']
+        nb_n_start = 0
+        nb_n_end = 0
+        if nb_start:
+            nb_n_start = _lookup_neighbor_bars(
+                bar_count_idx, level, nb_start['member_id'], bar_pos,
+                matched['xf'], matched['yf'])
+        if nb_end:
+            nb_n_end = _lookup_neighbor_bars(
+                bar_count_idx, level, nb_end['member_id'], bar_pos,
+                matched['xt'], matched['yt'])
+
+        # Effective lap count = min(this bar count, neighbor bar count)
+        # Use the smaller neighbor if both ends have neighbors
+        if nb_start and nb_end:
+            lap_n = min(n_bars, nb_n_start, nb_n_end) if nb_n_start and nb_n_end else n_bars
+        elif nb_start:
+            lap_n = min(n_bars, nb_n_start) if nb_n_start else n_bars
+        elif nb_end:
+            lap_n = min(n_bars, nb_n_end) if nb_n_end else n_bars
+        else:
+            continue  # no neighbors at all
+
+        lap_n = max(lap_n, 0)
+        remainder = n_bars - lap_n
+
+        # Split: if remainder > 0, create a separate HOOK record
+        if remainder > 0 and lap_n > 0:
+            hook_bar = {**bar}
+            hook_bar['n_bars'] = remainder
+            hook_bar['anchorage_start'] = 'HOOK'
+            hook_bar['anchorage_end'] = 'HOOK'
+            new_bars.append(hook_bar)
+            bar['n_bars'] = lap_n
+            print(f'[RebarBeam]   Diagonal split: {bar.get("member_id")} {bar_pos} '
+                  f'{n_bars} → {lap_n} LAP + {remainder} HOOK')
+
+        if lap_n == 0:
+            continue
+
         applied = False
 
-        # Start end
-        nb = matched['nb_start']
-        if nb:
-            ndir = _neighbor_direction(nb, matched['xf'], matched['yf'], mid_x, mid_y)
+        # Start end — don't modify bar_start/bar_end coords
+        if nb_start:
+            ndir = _neighbor_direction(nb_start, matched['xf'], matched['yf'], mid_x, mid_y)
             if ndir:
                 nux, nuy = ndir
                 bar['anchorage_start'] = 'LAP'
@@ -2366,14 +2461,11 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
                 bar['bend1_end_x_mm'] = round(matched['xf'] + nux * half_lap, 1)
                 bar['bend1_end_y_mm'] = round(matched['yf'] + nuy * half_lap, 1)
                 bar['bend1_end_z_mm'] = round(bzs, 1)
-                bar['x_start_mm'] = round(matched['xf'] + nux * half_lap, 1)
-                bar['y_start_mm'] = round(matched['yf'] + nuy * half_lap, 1)
                 applied = True
 
-        # End end
-        nb = matched['nb_end']
-        if nb:
-            ndir = _neighbor_direction(nb, matched['xt'], matched['yt'], mid_x, mid_y)
+        # End end — don't modify bar_start/bar_end coords
+        if nb_end:
+            ndir = _neighbor_direction(nb_end, matched['xt'], matched['yt'], mid_x, mid_y)
             if ndir:
                 nux, nuy = ndir
                 bar['anchorage_end'] = 'LAP'
@@ -2385,19 +2477,23 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
                 bar['bend2_end_x_mm'] = round(matched['xt'] + nux * half_lap, 1)
                 bar['bend2_end_y_mm'] = round(matched['yt'] + nuy * half_lap, 1)
                 bar['bend2_end_z_mm'] = round(bze, 1)
-                bar['x_end_mm'] = round(matched['xt'] + nux * half_lap, 1)
-                bar['y_end_mm'] = round(matched['yt'] + nuy * half_lap, 1)
                 applied = True
 
         if applied:
             count += 1
 
+    # Append split remainder bars
+    results.extend(new_bars)
+
     if count:
-        print(f'[RebarBeam] Diagonal bend points applied to {count} bars')
+        print(f'[RebarBeam] Diagonal bend points applied to {count} bars '
+              f'({len(new_bars)} remainder HOOK records created)')
 
     # 5. Second pass: straight beams connected to diagonal beams at junctions.
     #    These bars need LAP anchorage + bend into the diagonal axis.
+    #    Lap count limited to min(n_bars_this, n_bars_diagonal_neighbor).
     count2 = 0
+    new_bars2 = []
     for ds in diag_segs:
         level = ds['level']
         diag_mid = ds['member_id']
@@ -2428,49 +2524,88 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
                 bzs = float(bar.get('z_start_mm', 0) or 0)
                 bze = float(bar.get('z_end_mm', 0) or 0)
 
-                lap = bar.get('lap_length_mm')
-                if not lap and lookup:
-                    dia = bar.get('dia_mm', 25)
-                    fy = (dia_fy_map or {}).get(int(dia), 400)
-                    fc = _parse_fc(bar.get('material_id', 'C35'))
-                    _, _, _, Lpt, Lpb = lookup.get(fy, dia, fc)
-                    lap = Lpt if bar.get('bar_position') == 'TOP' else Lpb
-                lap = lap or 0
+                lap = _get_lap(bar, lookup, dia_fy_map)
                 half_lap = lap / 2.0
+
+                bar_pos = bar.get('bar_position', '')
+                n_bars = int(bar.get('n_bars', 0) or 0)
+                # Diagonal bar count at THIS junction (not all segments)
+                diag_count = _lookup_neighbor_bars(
+                    bar_count_idx, level, diag_mid, bar_pos, jx, jy)
 
                 # Check if bar START is near junction
                 if (math.sqrt((bxs - jx)**2 + (bys - jy)**2) < _DIAG_XY_TOL
                         and bar.get('anchorage_start') != 'LAP'):
-                    bar['anchorage_start'] = 'LAP'
-                    if not bar.get('lap_length_mm'):
-                        bar['lap_length_mm'] = lap
-                    bar['bend1_x_mm'] = round(jx, 1)
-                    bar['bend1_y_mm'] = round(jy, 1)
-                    bar['bend1_z_mm'] = round(bzs, 1)
-                    bar['bend1_end_x_mm'] = round(jx + ux_into * half_lap, 1)
-                    bar['bend1_end_y_mm'] = round(jy + uy_into * half_lap, 1)
-                    bar['bend1_end_z_mm'] = round(bzs, 1)
-                    # Don't modify x_start/y_start — the bend point fields
-                    # provide the visual extension. Bar body stays at span.
-                    count2 += 1
+                    lap_n = min(n_bars, diag_count) if diag_count else n_bars
+                    remainder = n_bars - lap_n
+
+                    if remainder > 0 and lap_n > 0:
+                        hook_bar = {**bar}
+                        hook_bar['n_bars'] = remainder
+                        new_bars2.append(hook_bar)
+                        bar['n_bars'] = lap_n
+                        print(f'[RebarBeam]   Straight split at start: {bar.get("member_id")} {bar_pos} '
+                              f'{n_bars} → {lap_n} LAP + {remainder} HOOK')
+
+                    if lap_n > 0:
+                        bar['anchorage_start'] = 'LAP'
+                        if not bar.get('lap_length_mm'):
+                            bar['lap_length_mm'] = lap
+                        bar['bend1_x_mm'] = round(jx, 1)
+                        bar['bend1_y_mm'] = round(jy, 1)
+                        bar['bend1_z_mm'] = round(bzs, 1)
+                        bar['bend1_end_x_mm'] = round(jx + ux_into * half_lap, 1)
+                        bar['bend1_end_y_mm'] = round(jy + uy_into * half_lap, 1)
+                        bar['bend1_end_z_mm'] = round(bzs, 1)
+                        count2 += 1
 
                 # Check if bar END is near junction
                 if (math.sqrt((bxe - jx)**2 + (bye - jy)**2) < _DIAG_XY_TOL
                         and bar.get('anchorage_end') != 'LAP'):
-                    bar['anchorage_end'] = 'LAP'
-                    if not bar.get('lap_length_mm'):
-                        bar['lap_length_mm'] = lap
-                    bar['bend2_x_mm'] = round(jx, 1)
-                    bar['bend2_y_mm'] = round(jy, 1)
-                    bar['bend2_z_mm'] = round(bze, 1)
-                    bar['bend2_end_x_mm'] = round(jx + ux_into * half_lap, 1)
-                    bar['bend2_end_y_mm'] = round(jy + uy_into * half_lap, 1)
-                    bar['bend2_end_z_mm'] = round(bze, 1)
-                    # Don't modify x_end/y_end — same reason.
-                    count2 += 1
+                    n_bars = int(bar.get('n_bars', 0) or 0)  # re-read (may have been split above)
+                    lap_n = min(n_bars, diag_count) if diag_count else n_bars
+                    remainder = n_bars - lap_n
+
+                    if remainder > 0 and lap_n > 0:
+                        hook_bar = {**bar}
+                        hook_bar['n_bars'] = remainder
+                        # The hook bar keeps original anchorage at both ends
+                        hook_bar['anchorage_start'] = bar.get('anchorage_start', 'HOOK')
+                        hook_bar['bend1_x_mm'] = bar.get('bend1_x_mm')
+                        hook_bar['bend1_y_mm'] = bar.get('bend1_y_mm')
+                        hook_bar['bend1_z_mm'] = bar.get('bend1_z_mm')
+                        hook_bar['bend1_end_x_mm'] = bar.get('bend1_end_x_mm')
+                        hook_bar['bend1_end_y_mm'] = bar.get('bend1_end_y_mm')
+                        hook_bar['bend1_end_z_mm'] = bar.get('bend1_end_z_mm')
+                        hook_bar['anchorage_end'] = 'HOOK'
+                        hook_bar['bend2_x_mm'] = None
+                        hook_bar['bend2_y_mm'] = None
+                        hook_bar['bend2_z_mm'] = None
+                        hook_bar['bend2_end_x_mm'] = None
+                        hook_bar['bend2_end_y_mm'] = None
+                        hook_bar['bend2_end_z_mm'] = None
+                        new_bars2.append(hook_bar)
+                        bar['n_bars'] = lap_n
+                        print(f'[RebarBeam]   Straight split at end: {bar.get("member_id")} {bar_pos} '
+                              f'{n_bars} → {lap_n} LAP + {remainder} HOOK')
+
+                    if lap_n > 0:
+                        bar['anchorage_end'] = 'LAP'
+                        if not bar.get('lap_length_mm'):
+                            bar['lap_length_mm'] = lap
+                        bar['bend2_x_mm'] = round(jx, 1)
+                        bar['bend2_y_mm'] = round(jy, 1)
+                        bar['bend2_z_mm'] = round(bze, 1)
+                        bar['bend2_end_x_mm'] = round(jx + ux_into * half_lap, 1)
+                        bar['bend2_end_y_mm'] = round(jy + uy_into * half_lap, 1)
+                        bar['bend2_end_z_mm'] = round(bze, 1)
+                        count2 += 1
+
+    results.extend(new_bars2)
 
     if count2:
-        print(f'[RebarBeam] Diagonal junction LAP applied to {count2} straight beam bars')
+        print(f'[RebarBeam] Diagonal junction LAP applied to {count2} straight beam bars '
+              f'({len(new_bars2)} remainder HOOK records created)')
 
 
 # ── Public API ───────────────────────────────────────────────────────────────

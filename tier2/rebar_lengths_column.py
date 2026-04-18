@@ -1010,6 +1010,7 @@ def calculate_column_rebar_lengths(
         'bend2_x_mm', 'bend2_y_mm', 'bend2_z_mm',
         'bend2_end_x_mm', 'bend2_end_y_mm', 'bend2_end_z_mm',
         'segment_id', 'b_mm', 'h_mm', 'shape',
+        'splice_layer',
     ]
     avail = [c for c in column_order if c in df.columns]
     df = df[avail]
