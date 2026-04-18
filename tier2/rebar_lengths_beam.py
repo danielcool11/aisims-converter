@@ -2450,8 +2450,8 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
                     bar['bend1_end_x_mm'] = round(jx + ux_into * half_lap, 1)
                     bar['bend1_end_y_mm'] = round(jy + uy_into * half_lap, 1)
                     bar['bend1_end_z_mm'] = round(bzs, 1)
-                    bar['x_start_mm'] = round(jx + ux_into * half_lap, 1)
-                    bar['y_start_mm'] = round(jy + uy_into * half_lap, 1)
+                    # Don't modify x_start/y_start — the bend point fields
+                    # provide the visual extension. Bar body stays at span.
                     count2 += 1
 
                 # Check if bar END is near junction
@@ -2466,8 +2466,7 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
                     bar['bend2_end_x_mm'] = round(jx + ux_into * half_lap, 1)
                     bar['bend2_end_y_mm'] = round(jy + uy_into * half_lap, 1)
                     bar['bend2_end_z_mm'] = round(bze, 1)
-                    bar['x_end_mm'] = round(jx + ux_into * half_lap, 1)
-                    bar['y_end_mm'] = round(jy + uy_into * half_lap, 1)
+                    # Don't modify x_end/y_end — same reason.
                     count2 += 1
 
     if count2:
