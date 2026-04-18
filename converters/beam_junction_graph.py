@@ -534,12 +534,29 @@ def compute_runs(
     case1_edges: Dict[frozenset, int] = defaultdict(int)
     case2_edges: Dict[frozenset, int] = defaultdict(int)
 
+    _PERP_TOL = 100.0  # mm — gridline tolerance for perpendicular coord
+
+    def _perp_coord(idx: int) -> float:
+        """Perpendicular coordinate: Y for X-beams, X for Y-beams."""
+        row = beams_df.loc[idx]
+        b = idx_to_ref[idx]
+        if abs(b.dx) >= abs(b.dy):
+            # X-direction beam → perpendicular is Y
+            return float(row.get('y_from_mm', 0) or 0)
+        # Y-direction beam → perpendicular is X
+        return float(row.get('x_from_mm', 0) or 0)
+
     for f in findings:
         if f.position != position:
             continue
         if f.case in (1, 2):
             a_idx = f.beam_a_idx
             b_idx = f.beam_b_idx
+            # Only connect beams on the same gridline (same perpendicular coord).
+            # This prevents runs from spanning across different gridlines
+            # that happen to share a column node.
+            if abs(_perp_coord(a_idx) - _perp_coord(b_idx)) > _PERP_TOL:
+                continue
             adj[a_idx].add(b_idx)
             adj[b_idx].add(a_idx)
             key = frozenset((a_idx, b_idx))
