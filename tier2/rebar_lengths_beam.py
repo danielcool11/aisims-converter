@@ -2280,6 +2280,7 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
         all_segments.append({
             'level': rd.get('level', ''),
             'member_id': rd.get('member_id', ''),
+            'b_mm': float(rd.get('b_mm', 0) or 0),
             'xf': xf, 'yf': yf, 'xt': xt, 'yt': yt,
             'dx': xt - xf, 'dy': yt - yf,
             'is_diag': abs(xt - xf) > 100 and abs(yt - yf) > 100,
@@ -2461,6 +2462,7 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
                 bar['bend1_end_x_mm'] = round(matched['xf'] + nux * half_lap, 1)
                 bar['bend1_end_y_mm'] = round(matched['yf'] + nuy * half_lap, 1)
                 bar['bend1_end_z_mm'] = round(bzs, 1)
+                bar['bend1_b_mm'] = nb_start['b_mm']
                 applied = True
 
         # End end — don't modify bar_start/bar_end coords
@@ -2477,6 +2479,7 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
                 bar['bend2_end_x_mm'] = round(matched['xt'] + nux * half_lap, 1)
                 bar['bend2_end_y_mm'] = round(matched['yt'] + nuy * half_lap, 1)
                 bar['bend2_end_z_mm'] = round(bze, 1)
+                bar['bend2_b_mm'] = nb_end['b_mm']
                 applied = True
 
         if applied:
@@ -2557,6 +2560,7 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
                         bar['bend1_end_x_mm'] = round(jx + ux_into * half_lap, 1)
                         bar['bend1_end_y_mm'] = round(jy + uy_into * half_lap, 1)
                         bar['bend1_end_z_mm'] = round(bzs, 1)
+                        bar['bend1_b_mm'] = ds['b_mm']
                         count2 += 1
 
                 # Check if bar END is near junction
@@ -2599,6 +2603,7 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
                         bar['bend2_end_x_mm'] = round(jx + ux_into * half_lap, 1)
                         bar['bend2_end_y_mm'] = round(jy + uy_into * half_lap, 1)
                         bar['bend2_end_z_mm'] = round(bze, 1)
+                        bar['bend2_b_mm'] = ds['b_mm']
                         count2 += 1
 
     results.extend(new_bars2)
@@ -2689,6 +2694,8 @@ def calculate_beam_rebar_lengths(
         'bend1_end_x_mm', 'bend1_end_y_mm', 'bend1_end_z_mm',
         'bend2_x_mm', 'bend2_y_mm', 'bend2_z_mm',
         'bend2_end_x_mm', 'bend2_end_y_mm', 'bend2_end_z_mm',
+        # Neighbor beam width at each bend (for renderer bar distribution)
+        'bend1_b_mm', 'bend2_b_mm',
         'b_mm', 'h_mm', 'shape',
         'col_width_start_mm', 'col_width_end_mm',
         'support_extends_below_start', 'support_extends_below_end',
