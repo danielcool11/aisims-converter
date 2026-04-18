@@ -1516,12 +1516,17 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
                 l_lcl = l_span - 0.5 * (l_cw1 + l_cw2)
                 left_ok = (0.5 * max(0, l_lcl) >= my_llap)
 
-            # Also check: can THIS beam receive a lap from its neighbors?
-            my_lcl = sd['l_cl']
-            self_ok = (0.5 * max(0, my_lcl) >= my_llap)
-            if not self_ok:
-                left_ok = False
-                right_ok = False
+            # Also check: can THIS span accommodate the previous bar's
+            # forward extension into it? Only relevant when pos > 0
+            # (there IS a left bar extending into this span).
+            # Does NOT affect right_ok — right_ok is about whether the
+            # NEXT span can accommodate THIS bar's extension, independent
+            # of this span's own length.
+            if pos > 0:
+                my_lcl = sd['l_cl']
+                self_ok = (0.5 * max(0, my_lcl) >= my_llap)
+                if not self_ok:
+                    left_ok = False
 
             return left_ok, right_ok
 
