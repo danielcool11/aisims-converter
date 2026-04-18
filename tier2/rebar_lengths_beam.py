@@ -1494,39 +1494,30 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
             sd = span_data[sub_i]
             my_llap = sd['L_lap']
 
-            # Check right neighbor: can it receive a lap from this beam?
+            # Bars only extend FORWARD (START/INTERMEDIATE send L_lap
+            # into the next span). Only one check per bar: can the NEXT
+            # span accommodate this bar's extension?
+            #
+            # 50% rule (0.5 * l_cl >= L_lap) only applies at COLUMN
+            # supports (col_width > 0). At beam-beam crossings
+            # (col_width=0 on both sides), the splice zone is
+            # unconstrained — no column face to restrict placement.
+            left_ok = True
+
             right_ok = True
             if pos < len(ordered) - 1:
+                # Column at boundary: this span's end OR next span's start
+                my_cw_end = sd.get('Wc2', 0) or 0
                 right_idx = ordered[pos + 1]
                 right_row = adapter.beams_df.loc[right_idx]
-                r_span = float(right_row.get('length_mm', 0) or 0)
-                r_cw1 = float(right_row.get('col_width_start_mm', 0) or 0)
-                r_cw2 = float(right_row.get('col_width_end_mm', 0) or 0)
-                r_lcl = r_span - 0.5 * (r_cw1 + r_cw2)
-                right_ok = (0.5 * max(0, r_lcl) >= my_llap)
-
-            # Check left neighbor: can it receive a lap from this beam?
-            left_ok = True
-            if pos > 0:
-                left_idx = ordered[pos - 1]
-                left_row = adapter.beams_df.loc[left_idx]
-                l_span = float(left_row.get('length_mm', 0) or 0)
-                l_cw1 = float(left_row.get('col_width_start_mm', 0) or 0)
-                l_cw2 = float(left_row.get('col_width_end_mm', 0) or 0)
-                l_lcl = l_span - 0.5 * (l_cw1 + l_cw2)
-                left_ok = (0.5 * max(0, l_lcl) >= my_llap)
-
-            # Also check: can THIS span accommodate the previous bar's
-            # forward extension into it? Only relevant when pos > 0
-            # (there IS a left bar extending into this span).
-            # Does NOT affect right_ok — right_ok is about whether the
-            # NEXT span can accommodate THIS bar's extension, independent
-            # of this span's own length.
-            if pos > 0:
-                my_lcl = sd['l_cl']
-                self_ok = (0.5 * max(0, my_lcl) >= my_llap)
-                if not self_ok:
-                    left_ok = False
+                r_cw_start = float(right_row.get('col_width_start_mm', 0) or 0)
+                has_column = (my_cw_end > 0 or r_cw_start > 0)
+                if has_column:
+                    r_span = float(right_row.get('length_mm', 0) or 0)
+                    r_cw1 = r_cw_start
+                    r_cw2 = float(right_row.get('col_width_end_mm', 0) or 0)
+                    r_lcl = r_span - 0.5 * (r_cw1 + r_cw2)
+                    right_ok = (0.5 * max(0, r_lcl) >= my_llap)
 
             return left_ok, right_ok
 
