@@ -808,8 +808,11 @@ def _extend_lap_coords(bar, direction):
     lap = bar.get('lap_length_mm')
     if not lap or lap <= 0:
         return bar
-    # Only extend for roles that include L_lap in their length formula
+    # Only extend for roles that include L_lap in their length formula,
+    # AND only when the end actually has LAP anchorage.
     if role not in ('MAIN_START', 'MAIN_INTERMEDIATE'):
+        return bar
+    if bar.get('anchorage_end') != 'LAP':
         return bar
 
     xs = float(bar.get('x_start_mm', 0) or 0)
@@ -2246,12 +2249,21 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
     if not diag_segs:
         return
 
-    def _find_neighbor_at(level, px, py, exclude_mid):
-        """Find a beam segment endpoint near (px, py) from a different member."""
+    def _find_neighbor_at(level, px, py, exclude_seg):
+        """Find a beam segment endpoint near (px, py), excluding the diagonal segment itself."""
         best = None
         best_dist = _DIAG_XY_TOL
         for seg in all_segments:
-            if seg['level'] != level or seg['member_id'] == exclude_mid:
+            if seg['level'] != level:
+                continue
+            # Skip the diagonal segment itself (same coords), but allow
+            # same-member straight segments (e.g. TG8 straight ↔ TG8 diagonal)
+            if (seg is exclude_seg or
+                (seg['xf'] == exclude_seg['xf'] and seg['yf'] == exclude_seg['yf']
+                 and seg['xt'] == exclude_seg['xt'] and seg['yt'] == exclude_seg['yt'])):
+                continue
+            # Skip other diagonal segments (only match straight neighbors)
+            if seg['is_diag']:
                 continue
             for ex, ey in [(seg['xf'], seg['yf']), (seg['xt'], seg['yt'])]:
                 dist = math.sqrt((ex - px)**2 + (ey - py)**2)
@@ -2264,8 +2276,8 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
     #    Key: (level, member_id, round_xf, round_yf, round_xt, round_yt)
     diag_info = {}  # (level, member_id, xf, yf, xt, yt) → {start_nb, end_nb}
     for ds in diag_segs:
-        nb_start = _find_neighbor_at(ds['level'], ds['xf'], ds['yf'], ds['member_id'])
-        nb_end = _find_neighbor_at(ds['level'], ds['xt'], ds['yt'], ds['member_id'])
+        nb_start = _find_neighbor_at(ds['level'], ds['xf'], ds['yf'], ds)
+        nb_end = _find_neighbor_at(ds['level'], ds['xt'], ds['yt'], ds)
         diag_info[(ds['level'], ds['member_id'],
                    round(ds['xf']), round(ds['yf']),
                    round(ds['xt']), round(ds['yt']))] = {
