@@ -2341,7 +2341,7 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
         # Pick direction that goes away from diagonal beam center
         d_pos = (junction_x + nux * 100 - diag_mid_x)**2 + (junction_y + nuy * 100 - diag_mid_y)**2
         d_neg = (junction_x - nux * 100 - diag_mid_x)**2 + (junction_y - nuy * 100 - diag_mid_y)**2
-        if d_neg > d_pos:
+        if d_pos > d_neg:
             return nux, nuy
         return -nux, -nuy
 
