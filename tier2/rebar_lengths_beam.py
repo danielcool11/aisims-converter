@@ -1535,9 +1535,12 @@ def _process_subgroup(span_list, gm_top, gm_bot, adapter, lookup, direction,
                 if not left_ok and not right_ok:
                     return 'MAIN_SINGLE', fb_n
                 if not right_ok:
-                    return 'MAIN_END', fb_n
+                    # Bar still in chain (LAPs from left), keep run.min_count
+                    # Gap bars provide the excess (cfg['main'] - min_count)
+                    return 'MAIN_END', n_bars
                 if not left_ok:
-                    return 'MAIN_START', fb_n
+                    # Bar still in chain (LAPs to right), keep run.min_count
+                    return 'MAIN_START', n_bars
             return role, n_bars
 
         top_role, main_top = _gate_feasibility(top_role, main_top, 'TOP', fb_top)
