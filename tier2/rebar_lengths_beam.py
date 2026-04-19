@@ -950,6 +950,7 @@ class RunIndex:
         )
 
         diag_adj = build_diagonal_adjacent_set(refs)
+        self.diagonal_adjacent = diag_adj
         findings = classify_junctions(refs, counts, supported, diag_adj)
         self.runs_top: List[BeamRun] = compute_runs(
             refs, findings, counts, adapter.beams_df, 'TOP'
@@ -1299,6 +1300,9 @@ def _resolve_role_from_run(
     """
     if run_index is None:
         return fallback_role, fallback_n, -1
+    # Diagonal-adjacent beams are excluded from chains — force MAIN_SINGLE
+    if span_row_idx in run_index.diagonal_adjacent:
+        return 'MAIN_SINGLE', fallback_n, -1
     run = run_index.get_run(span_row_idx, position)
     if run is None:
         return fallback_role, fallback_n, -1
