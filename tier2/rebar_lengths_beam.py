@@ -2561,6 +2561,11 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
                 half_lap = lap / 2.0
 
                 bar_pos = bar.get('bar_position', '')
+                dia = float(bar.get('dia_mm', 25) or 25)
+                # Z-offset for inner layer: straight bars bending into
+                # diagonal get 1d offset so both lap layers are visible.
+                # TOP: shift down (-dia), BOT: shift up (+dia)
+                z_layer_offset = -dia if bar_pos == 'TOP' else dia
                 n_bars = int(bar.get('n_bars', 0) or 0)
                 # Diagonal bar count at THIS junction (not all segments)
                 diag_count = _lookup_neighbor_bars(
@@ -2586,10 +2591,10 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
                             bar['lap_length_mm'] = lap
                         bar['bend1_x_mm'] = round(jx, 1)
                         bar['bend1_y_mm'] = round(jy, 1)
-                        bar['bend1_z_mm'] = round(bzs, 1)
+                        bar['bend1_z_mm'] = round(bzs + z_layer_offset, 1)
                         bar['bend1_end_x_mm'] = round(jx + ux_into * half_lap, 1)
                         bar['bend1_end_y_mm'] = round(jy + uy_into * half_lap, 1)
-                        bar['bend1_end_z_mm'] = round(bzs, 1)
+                        bar['bend1_end_z_mm'] = round(bzs + z_layer_offset, 1)
                         bar['bend1_b_mm'] = ds['b_mm']
                         count2 += 1
 
@@ -2629,10 +2634,10 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
                             bar['lap_length_mm'] = lap
                         bar['bend2_x_mm'] = round(jx, 1)
                         bar['bend2_y_mm'] = round(jy, 1)
-                        bar['bend2_z_mm'] = round(bze, 1)
+                        bar['bend2_z_mm'] = round(bze + z_layer_offset, 1)
                         bar['bend2_end_x_mm'] = round(jx + ux_into * half_lap, 1)
                         bar['bend2_end_y_mm'] = round(jy + uy_into * half_lap, 1)
-                        bar['bend2_end_z_mm'] = round(bze, 1)
+                        bar['bend2_end_z_mm'] = round(bze + z_layer_offset, 1)
                         bar['bend2_b_mm'] = ds['b_mm']
                         count2 += 1
 
