@@ -71,7 +71,10 @@ def _steel_grade(dia_mm, dia_fy_map=None, fy_override=None):
     Priority: fy_override (per-element) > dia_fy_map (project-level) > hardcoded fallback.
     """
     if fy_override is not None:
-        return int(fy_override)
+        try:
+            return int(fy_override)
+        except (ValueError, TypeError):
+            pass  # NaN or non-numeric — fall through to other methods
     if dia_fy_map and int(dia_mm) in dia_fy_map:
         return dia_fy_map[int(dia_mm)]
     return 400 if int(dia_mm) in (10, 13) else 600
