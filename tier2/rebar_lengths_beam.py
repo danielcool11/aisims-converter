@@ -2295,27 +2295,50 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
     bar_count_idx = _build_bar_count_index(results)
 
     def _find_neighbor_at(level, px, py, exclude_seg):
-        """Find a beam segment endpoint near (px, py), excluding the diagonal segment itself."""
-        best = None
-        best_dist = _DIAG_XY_TOL
+        """Find the best neighbor beam at (px, py).
+
+        When multiple neighbors share the same junction, prefer the one
+        most aligned with the diagonal direction (smallest direction change)
+        so the bend goes into the natural continuation beam.
+        """
+        candidates = []
         for seg in all_segments:
             if seg['level'] != level:
                 continue
-            # Skip the diagonal segment itself (same coords), but allow
-            # same-member straight segments (e.g. TG8 straight ↔ TG8 diagonal)
             if (seg is exclude_seg or
                 (seg['xf'] == exclude_seg['xf'] and seg['yf'] == exclude_seg['yf']
                  and seg['xt'] == exclude_seg['xt'] and seg['yt'] == exclude_seg['yt'])):
                 continue
-            # Skip other diagonal segments (only match straight neighbors)
             if seg['is_diag']:
                 continue
             for ex, ey in [(seg['xf'], seg['yf']), (seg['xt'], seg['yt'])]:
                 dist = math.sqrt((ex - px)**2 + (ey - py)**2)
-                if dist < best_dist:
-                    best = seg
-                    best_dist = dist
-        return best
+                if dist < _DIAG_XY_TOL:
+                    candidates.append((dist, seg))
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0][1]
+        # Multiple neighbors at same junction: pick most aligned with diagonal
+        diag_dx = exclude_seg['dx']
+        diag_dy = exclude_seg['dy']
+        diag_len = math.sqrt(diag_dx**2 + diag_dy**2)
+        if diag_len < 1:
+            return candidates[0][1]
+        dux, duy = diag_dx / diag_len, diag_dy / diag_len
+        best = None
+        best_align = -2  # cosine similarity, higher = more aligned
+        for _, seg in candidates:
+            sdx, sdy = seg['dx'], seg['dy']
+            slen = math.sqrt(sdx**2 + sdy**2)
+            if slen < 1:
+                continue
+            # Use absolute cosine — either parallel or anti-parallel is OK
+            cos_val = abs((dux * sdx + duy * sdy) / slen)
+            if cos_val > best_align:
+                best_align = cos_val
+                best = seg
+        return best or candidates[0][1]
 
     # 3. Build a map: for each diagonal segment, find neighbors at start & end
     #    Key: (level, member_id, round_xf, round_yf, round_xt, round_yt)
@@ -2332,18 +2355,25 @@ def _apply_diagonal_bends(results, beams_df, lookup=None, dia_fy_map=None):
         }
 
     def _neighbor_direction(nb, junction_x, junction_y, diag_mid_x, diag_mid_y):
-        """Get unit vector along neighbor beam, pointing AWAY from diagonal body."""
-        ndx, ndy = nb['dx'], nb['dy']
-        nlen = math.sqrt(ndx**2 + ndy**2)
-        if nlen < 1:
+        """Get unit vector along neighbor beam, pointing AWAY from junction
+        (i.e., into the neighbor beam body)."""
+        # Neighbor beam endpoints
+        nxf, nyf = nb['xf'], nb['yf']
+        nxt, nyt = nb['xt'], nb['yt']
+        # Find which endpoint is farther from junction = the "far end"
+        df = (nxf - junction_x)**2 + (nyf - junction_y)**2
+        dt = (nxt - junction_x)**2 + (nyt - junction_y)**2
+        if dt > df:
+            far_x, far_y = nxt, nyt
+        else:
+            far_x, far_y = nxf, nyf
+        # Direction from junction toward far end of neighbor
+        dx = far_x - junction_x
+        dy = far_y - junction_y
+        d = math.sqrt(dx**2 + dy**2)
+        if d < 1:
             return None
-        nux, nuy = ndx / nlen, ndy / nlen
-        # Pick direction that goes away from diagonal beam center
-        d_pos = (junction_x + nux * 100 - diag_mid_x)**2 + (junction_y + nuy * 100 - diag_mid_y)**2
-        d_neg = (junction_x - nux * 100 - diag_mid_x)**2 + (junction_y - nuy * 100 - diag_mid_y)**2
-        if d_pos > d_neg:
-            return nux, nuy
-        return -nux, -nuy
+        return dx / d, dy / d
 
     def _get_lap(bar, lookup, dia_fy_map):
         """Get lap splice length for a bar."""
