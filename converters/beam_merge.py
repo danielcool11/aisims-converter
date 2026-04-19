@@ -458,6 +458,7 @@ def merge_beam_spans(
     if beams_df is None or beams_df.empty:
         return beams_df
 
+
     # Build support index for intermediate support detection.
     # Chains break at column nodes and perpendicular beams of equal/greater
     # depth. Uses the RAW (pre-merge) beams_df for beam support detection.
@@ -565,9 +566,12 @@ def merge_beam_spans(
     result = pd.DataFrame(merged_spans)
     pass1_count = len(result)
 
-    # ── Pass 2: split at perpendicular MERGED beam supports ──
+    # ── Pass 2: split at perpendicular MERGED beam + wall supports ──
     # Now that beams are merged, perpendicular beams are structural spans
     # (7-10m), not raw FEM elements (500-1500mm). Safe to check crossings.
+    # For narrow beams (b ≤ 250mm, wall beams / lintels), also check
+    # perpendicular wall edges as support points — these beams sit on
+    # walls at upper floors where columns don't exist.
     # Only re-split beams that are still long (> 15m) — short beams are
     # already at correct span boundaries from Pass 1.
     if not result.empty:
@@ -586,6 +590,92 @@ def merge_beam_spans(
                 'dir': d,
             })
 
+        # Build wall support index: perpendicular wall edges per level.
+        # A wall running perpendicular to a beam provides support where
+        # its edge meets the beam path. Uses centroid + width (available
+        # before junction_polygon adds poly_ columns).
+        wall_perp_supports = []
+        if walls_df is not None and not walls_df.empty:
+            for _, w in walls_df.iterrows():
+                lv = str(w.get('level', '')).strip()
+                cx = w.get('centroid_x_mm')
+                cy = w.get('centroid_y_mm')
+                width = w.get('width_mm')
+                thickness = w.get('thickness_mm')
+                if pd.isna(cx) or pd.isna(cy) or pd.isna(width) or width == 0:
+                    continue
+                cx, cy = float(cx), float(cy)
+                width = float(width)
+                thick = float(thickness) if pd.notna(thickness) else 200.0
+                # Determine wall direction from width vs thickness extent
+                # Wall "width" is along its long axis, "thickness" is the short axis
+                # Use node positions if available, otherwise estimate from centroid
+                # A wall with width >> thickness is elongated along one axis
+                # Check node_i and node_j to determine actual direction
+                ni = str(w.get('node_i', '')).strip()
+                nj = str(w.get('node_j', '')).strip()
+                # Fallback: if width > 2*thickness, assume wall is elongated
+                # Use the node pairs to determine direction from elements converter
+                # The width_mm IS the wall's length (long dimension)
+                half_w = width / 2.0
+                # Try to determine direction from polygon if available
+                has_poly = pd.notna(w.get('poly_0x_mm'))
+                if has_poly:
+                    corners_x = [float(w[f'poly_{i}x_mm']) for i in range(4) if pd.notna(w.get(f'poly_{i}x_mm'))]
+                    corners_y = [float(w[f'poly_{i}y_mm']) for i in range(4) if pd.notna(w.get(f'poly_{i}y_mm'))]
+                    if len(corners_x) >= 4:
+                        wdx = max(corners_x) - min(corners_x)
+                        wdy = max(corners_y) - min(corners_y)
+                        if wdy > wdx * 2:
+                            wall_perp_supports.append({
+                                'dir': 'Y', 'x': cx,
+                                'y_min': min(corners_y), 'y_max': max(corners_y), 'level': lv,
+                            })
+                        elif wdx > wdy * 2:
+                            wall_perp_supports.append({
+                                'dir': 'X', 'y': cy,
+                                'x_min': min(corners_x), 'x_max': max(corners_x), 'level': lv,
+                            })
+                        continue
+                # No polygon — estimate from centroid + width
+                # Cannot determine direction from centroid alone, so add both
+                # orientations and let the proximity check filter
+                wall_perp_supports.append({
+                    'dir': 'Y', 'x': cx,
+                    'y_min': cy - half_w, 'y_max': cy + half_w, 'level': lv,
+                })
+                wall_perp_supports.append({
+                    'dir': 'X', 'y': cy,
+                    'x_min': cx - half_w, 'x_max': cx + half_w, 'level': lv,
+                })
+
+        # Build level adjacency: beam level → set of wall levels to check.
+        # Beams sit on walls from the same level or the level below.
+        # E.g., Roof beams sit on 15F walls.
+        # Use actual z values from beams to determine level ordering.
+        level_z = {}
+        for _, mb in result.iterrows():
+            lv = str(mb.get('level', '')).strip()
+            z = float(mb.get('z_mm', 0) or 0)
+            if lv and z > 0:
+                level_z[lv] = max(level_z.get(lv, 0), z)
+        # Sort levels by z ascending
+        sorted_levels = sorted(level_z.keys(), key=lambda l: level_z.get(l, 0))
+
+        wall_levels = sorted(set(ws['level'] for ws in wall_perp_supports)) if wall_perp_supports else []
+        level_to_wall_levels = {}
+        for bl in sorted_levels:
+            matching = {bl}  # same level always matches
+            # Find the level just below in the sorted order
+            idx = sorted_levels.index(bl)
+            if idx > 0:
+                below = sorted_levels[idx - 1]
+                # Include wall level that matches the below beam level
+                matching.add(below)
+            level_to_wall_levels[bl] = matching
+
+        NARROW_BEAM_WIDTH = 250  # mm — wall beams / lintels threshold
+
         pass2_splits = 0
         pass2_results = []
         for _, row in result.iterrows():
@@ -597,6 +687,7 @@ def merge_beam_spans(
                                         row['x_to_mm'], row['y_to_mm'])
             level = str(row.get('level', '')).strip()
             h_mm = float(row.get('h_mm', 700) or 700)
+            b_mm = float(row.get('b_mm', 300) or 300)
 
             # Find perpendicular MERGED beams that cross this beam
             perp_dir = 'Y' if direction == 'X' else 'X'
@@ -617,6 +708,19 @@ def merge_beam_spans(
                         by_max = max(bs['y_from'], bs['y_to'])
                         if by_min - SUPPORT_XY_TOL <= y_mid <= by_max + SUPPORT_XY_TOL:
                             cross_positions.append(bx)
+
+                # Wall supports for narrow beams (wall beams / lintels)
+                # Check walls at same level AND level below (walls span up
+                # to the beam level, e.g. 15F walls support Roof beams)
+                if b_mm <= NARROW_BEAM_WIDTH:
+                    match_levels = level_to_wall_levels.get(level, {level})
+                    for ws in wall_perp_supports:
+                        if ws['level'] not in match_levels or ws['dir'] != perp_dir:
+                            continue
+                        wx = ws['x']
+                        if x_min + SUPPORT_XY_TOL < wx < x_max - SUPPORT_XY_TOL:
+                            if ws['y_min'] - SUPPORT_XY_TOL <= y_mid <= ws['y_max'] + SUPPORT_XY_TOL:
+                                cross_positions.append(wx)
             else:
                 y_min = min(row['y_from_mm'], row['y_to_mm'])
                 y_max = max(row['y_from_mm'], row['y_to_mm'])
@@ -632,6 +736,17 @@ def merge_beam_spans(
                         bx_max = max(bs['x_from'], bs['x_to'])
                         if bx_min - SUPPORT_XY_TOL <= x_mid <= bx_max + SUPPORT_XY_TOL:
                             cross_positions.append(by)
+
+                # Wall supports for narrow beams
+                if b_mm <= NARROW_BEAM_WIDTH:
+                    match_levels = level_to_wall_levels.get(level, {level})
+                    for ws in wall_perp_supports:
+                        if ws['level'] not in match_levels or ws['dir'] != perp_dir:
+                            continue
+                        wy = ws['y']
+                        if y_min + SUPPORT_XY_TOL < wy < y_max - SUPPORT_XY_TOL:
+                            if ws['x_min'] - SUPPORT_XY_TOL <= x_mid <= ws['x_max'] + SUPPORT_XY_TOL:
+                                cross_positions.append(wy)
 
             if not cross_positions:
                 pass2_results.append(row.to_dict())
