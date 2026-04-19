@@ -28,6 +28,7 @@ from converters.beam_junction_graph import (
     BeamRebarCount,
     BeamRun,
     build_beam_refs,
+    build_diagonal_adjacent_set,
     build_support_node_set,
     classify_junctions,
     compute_runs,
@@ -948,7 +949,8 @@ class RunIndex:
             adapter.walls_df if not adapter.walls_df.empty else None,
         )
 
-        findings = classify_junctions(refs, counts, supported)
+        diag_adj = build_diagonal_adjacent_set(refs)
+        findings = classify_junctions(refs, counts, supported, diag_adj)
         self.runs_top: List[BeamRun] = compute_runs(
             refs, findings, counts, adapter.beams_df, 'TOP'
         )

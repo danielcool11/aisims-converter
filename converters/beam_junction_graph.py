@@ -248,6 +248,61 @@ def index_beams_by_node(refs: List[BeamRef]) -> Dict[str, List[BeamRef]]:
     return by_node
 
 
+def build_diagonal_adjacent_set(refs: List[BeamRef]) -> Set[int]:
+    """Find beam row_idxs that should be excluded from chain runs because
+    they are adjacent to diagonal beam junctions.
+
+    A diagonal beam has both significant dx AND dy (> 100mm each).
+    Beams within 2 hops of a diagonal junction node are excluded:
+      hop 0: the diagonal beam itself
+      hop 1: beams sharing a node with the diagonal (short transition pieces)
+      hop 2: beams sharing a node with hop-1 beams (first full spans)
+
+    These beams have bent LAP into the diagonal — not normal chain splices.
+    """
+    by_node = index_beams_by_node(refs)
+
+    # Find diagonal beams and their junction nodes
+    diag_nodes: Set[str] = set()
+    diag_idxs: Set[int] = set()
+    for b in refs:
+        if abs(b.dx) > 100 and abs(b.dy) > 100:
+            diag_idxs.add(b.row_idx)
+            if b.node_from:
+                diag_nodes.add(b.node_from)
+            if b.node_to:
+                diag_nodes.add(b.node_to)
+
+    if not diag_nodes:
+        return set()
+
+    # Hop 1: beams sharing a node with the diagonal
+    hop1: Set[int] = set()
+    hop1_nodes: Set[str] = set()
+    for node in diag_nodes:
+        for b in by_node.get(node, []):
+            if b.row_idx not in diag_idxs:
+                hop1.add(b.row_idx)
+                # Collect the OTHER node of hop-1 beams (for hop 2)
+                if b.node_from and b.node_from not in diag_nodes:
+                    hop1_nodes.add(b.node_from)
+                if b.node_to and b.node_to not in diag_nodes:
+                    hop1_nodes.add(b.node_to)
+
+    # Hop 2: beams sharing a node with hop-1 beams (at the non-diagonal end)
+    hop2: Set[int] = set()
+    for node in hop1_nodes:
+        for b in by_node.get(node, []):
+            if b.row_idx not in diag_idxs and b.row_idx not in hop1:
+                hop2.add(b.row_idx)
+
+    result = diag_idxs | hop1 | hop2
+    if result:
+        print(f'[JunctionGraph] Diagonal adjacent: {len(diag_idxs)} diagonal + '
+              f'{len(hop1)} hop1 + {len(hop2)} hop2 = {len(result)} beams excluded from chains')
+    return result
+
+
 # ── Classification ──────────────────────────────────────────────────────────
 
 def _classify_pair_at_node(
@@ -257,6 +312,7 @@ def _classify_pair_at_node(
     counts: Dict[int, BeamRebarCount],
     supported_nodes: Set[str],
     position: str,
+    diagonal_adjacent: Optional[Set[int]] = None,
 ) -> JunctionFinding:
     """Classify one (beam_a, beam_b) pair at one node for one bar position."""
     has_support = node_id in supported_nodes
@@ -291,6 +347,13 @@ def _classify_pair_at_node(
     # Gate 2: not coaxial (any non-zero angle)
     if not _is_coaxial(a, b):
         finding.reason = 'not coaxial'
+        return finding
+    # Gate 2b: either beam is adjacent to a diagonal junction.
+    # These beams have bent LAP splices (not normal chain splices) and
+    # should not participate in continuous chain runs.
+    diag_adj = diagonal_adjacent or set()
+    if a.row_idx in diag_adj or b.row_idx in diag_adj:
+        finding.reason = 'diagonal adjacent (bent LAP, excluded from chain)'
         return finding
     # Gate 3: different depth (different h_mm breaks the chain; different
     # b_mm is allowed — bars can lap across different widths)
@@ -330,10 +393,12 @@ def classify_junctions(
     refs: List[BeamRef],
     counts: Dict[int, BeamRebarCount],
     supported_nodes: Set[str],
+    diagonal_adjacent: Optional[Set[int]] = None,
 ) -> List[JunctionFinding]:
     """Walk every node shared by 2+ beam endpoints and classify each pair at
     TOP and BOT independently.
     """
+    diag_adj = diagonal_adjacent or set()
     by_node = index_beams_by_node(refs)
     findings: List[JunctionFinding] = []
     for node_id, beams_at_node in by_node.items():
@@ -356,7 +421,8 @@ def classify_junctions(
                     continue  # skip actual self-pair (same beam at both endpoints)
                 for position in ('TOP', 'BOT'):
                     findings.append(_classify_pair_at_node(
-                        node_id, a, b, counts, supported_nodes, position
+                        node_id, a, b, counts, supported_nodes, position,
+                        diag_adj,
                     ))
     return findings
 
