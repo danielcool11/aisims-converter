@@ -183,7 +183,7 @@ def convert_slabs(
             ys = [c['y_mm'] for c in coords]
             zs = [c['z_mm'] for c in coords]
             node_ids = [node_lookup[nn]['node_id'] for nn in node_nums if nn in node_lookup]
-            stair_boundary_data[stair_id] = {
+            entry = {
                 'node_nums': node_nums,
                 'centroid_x_mm': round(sum(xs) / len(xs), 1),
                 'centroid_y_mm': round(sum(ys) / len(ys), 1),
@@ -193,6 +193,13 @@ def convert_slabs(
                 'level': coords[0]['level'],
                 'boundary_nodes': ';'.join(node_ids),
             }
+            stair_boundary_data[stair_id] = entry
+            # Also store with SS-normalized key (ST→SS) so the stair
+            # converter can match after its own ST→SS rename.
+            import re as _re
+            ss_id = _re.sub(r'ST(\d)', r'SS\1', stair_id)
+            if ss_id != stair_id:
+                stair_boundary_data[ss_id] = entry
 
     # Log summary
     print(f'[Slabs] {len(result_df)} slab members from '
