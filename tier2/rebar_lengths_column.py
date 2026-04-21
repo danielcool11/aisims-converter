@@ -775,6 +775,12 @@ def calculate_column_rebar_lengths(
                 group, COVER_MM, hoop_dia_0, main_dia_0)
 
             # ── MAIN BARS (story by story within group) ──
+            # Pre-collect n_bars per segment for transition detection
+            _seg_n_bars = []
+            for s in group:
+                _mc = adapter.get_main_cfg(member_id, s['level_from'])
+                _seg_n_bars.append(_mc['n_bars'] if _mc else 0)
+
             for j, s in enumerate(group):
                 is_first = (j == 0)
                 is_top = (j == len(group) - 1)
@@ -788,6 +794,7 @@ def calculate_column_rebar_lengths(
                     continue
                 dia_main = main_s['dia']
                 n_bars = main_s['n_bars']
+                prev_n_bars = _seg_n_bars[j - 1] if j > 0 else n_bars
                 fy = _steel_grade(dia_main)
                 Ldh, Lpc = lookup.get(fy, dia_main, fc)
 
@@ -904,7 +911,75 @@ def calculate_column_rebar_lengths(
                     record['bend2_end_y_mm'] = round(bp['bp2'][1], 1)
                     record['bend2_end_z_mm'] = round(bp['bp2'][2], 1)
 
-                results.append(record)
+                # ── n_bars transition: split continuous vs new/terminating bars ──
+                if n_bars != prev_n_bars and not is_first:
+                    cont_n = min(n_bars, prev_n_bars)
+                    extra_n = abs(n_bars - prev_n_bars)
+
+                    if n_bars > prev_n_bars:
+                        # Bars ADDED at this level — cont_n continue, extra_n start here
+                        # Record 1: continuous bars (lap from below)
+                        record['n_bars'] = cont_n
+                        results.append(record)
+
+                        # Record 2: new starter bars
+                        starter = dict(record)
+                        starter['n_bars'] = extra_n
+                        if is_top:
+                            # New bars start AND end at same segment — MAIN_FULL
+                            starter['bar_role'] = 'MAIN_FULL'
+                            starter['anchorage_start'] = 'HOOK'
+                            starter['anchorage_end'] = 'HOOK'
+                        else:
+                            starter['bar_role'] = 'MAIN_BOTTOM'
+                            starter['anchorage_start'] = 'LAP'  # laps with dowel below
+                            starter['anchorage_end'] = 'LAP'
+                        results.append(starter)
+
+                        # DOWEL for the extra bars at the transition level
+                        # Same pattern as the bottom-of-column dowel
+                        dowel_len = Lpc + Ldh
+                        col_z_bottom = z_start
+                        d_z_start = col_z_bottom - Ldh + COVER_MM
+                        d_z_end = col_z_bottom + Lpc
+                        results.append({
+                            'member_id': member_id, 'start_grid': grid,
+                            'level_from': s['level_from'], 'level_to': s['level_from'],
+                            'bar_position': 'MAIN', 'bar_role': 'DOWEL', 'bar_type': 'MAIN',
+                            'dia_mm': dia_main, 'n_bars': extra_n,
+                            'length_mm': int(round(dowel_len)),
+                            'anchorage_start': 'HOOK', 'anchorage_end': 'LAP',
+                            'development_length_mm': Ldh, 'lap_length_mm': Lpc,
+                            'splice_start_mm': None, 'splice_start_end_mm': None,
+                            'splice_end_mm': round(col_z_bottom, 1),
+                            'splice_end_end_mm': round(col_z_bottom + Lpc, 1),
+                            'x_start_mm': round(x_start, 1), 'y_start_mm': round(y_start, 1),
+                            'z_start_mm': round(d_z_start, 1),
+                            'x_end_mm': round(x_start, 1), 'y_end_mm': round(y_start, 1),
+                            'z_end_mm': round(d_z_end, 1),
+                            'segment_id': s['segment_id'],
+                            'b_mm': s['b_mm'], 'h_mm': s['h_mm'],
+                            'shape': s['shape'],
+                        })
+                    else:
+                        # Bars REMOVED — fewer bars at this level than previous.
+                        # Current segment uses current n_bars as-is.
+                        results.append(record)
+
+                        # The excess bars from below terminate here with hooks.
+                        # Emit a short MAIN_TOP for them at this transition.
+                        term = dict(record)
+                        term['n_bars'] = extra_n
+                        term['bar_role'] = 'MAIN_TOP'
+                        term['anchorage_start'] = 'LAP'
+                        term['anchorage_end'] = 'HOOK'
+                        term['length_mm'] = int(round(Ldh))
+                        term['z_end_mm'] = round(z_start + Ldh, 1)
+                        term['splice_end_mm'] = None
+                        term['splice_end_end_mm'] = None
+                        results.append(term)
+                else:
+                    results.append(record)
 
             # ── HOOPS (3 zones per story within group) ──
             for s in group:
