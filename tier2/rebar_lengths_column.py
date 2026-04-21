@@ -922,9 +922,10 @@ def calculate_column_rebar_lengths(
                         record['n_bars'] = cont_n
                         results.append(record)
 
-                        # Record 2: new starter bars
+                        # Record 2: new starter bars (opposite splice_layer from continuous)
                         starter = dict(record)
                         starter['n_bars'] = extra_n
+                        starter['splice_layer'] = 2 if splice_layer == 1 else 1
                         if is_top:
                             # New bars start AND end at same segment — MAIN_FULL
                             starter['bar_role'] = 'MAIN_FULL'
