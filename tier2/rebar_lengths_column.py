@@ -781,6 +781,10 @@ def calculate_column_rebar_lengths(
                 _mc = adapter.get_main_cfg(member_id, s['level_from'])
                 _seg_n_bars.append(_mc['n_bars'] if _mc else 0)
 
+            # Track active bar groups: list of (n_bars, start_j) for split records
+            # above transition levels. Starts with just the initial group.
+            _active_groups: list[tuple[int, int]] = []  # (n_bars, started_at_j)
+
             for j, s in enumerate(group):
                 is_first = (j == 0)
                 is_top = (j == len(group) - 1)
@@ -911,34 +915,16 @@ def calculate_column_rebar_lengths(
                     record['bend2_end_y_mm'] = round(bp['bp2'][1], 1)
                     record['bend2_end_z_mm'] = round(bp['bp2'][2], 1)
 
-                # ── n_bars transition: split continuous vs new/terminating bars ──
+                # ── n_bars transition handling ──
+                # Detect new transitions AND continue splitting at levels above
                 if n_bars != prev_n_bars and not is_first:
-                    cont_n = min(n_bars, prev_n_bars)
-                    extra_n = abs(n_bars - prev_n_bars)
-
+                    # New transition detected
                     if n_bars > prev_n_bars:
-                        # Bars ADDED at this level — cont_n continue, extra_n start here
-                        # Record 1: continuous bars (lap from below)
-                        record['n_bars'] = cont_n
-                        results.append(record)
+                        # Bars ADDED — record the new sub-group
+                        extra_n = n_bars - prev_n_bars
+                        _active_groups.append((extra_n, j))
 
-                        # Record 2: new starter bars (opposite splice_layer from continuous)
-                        starter = dict(record)
-                        starter['n_bars'] = extra_n
-                        starter['splice_layer'] = 2 if splice_layer == 1 else 1
-                        if is_top:
-                            # New bars start AND end at same segment — MAIN_FULL
-                            starter['bar_role'] = 'MAIN_FULL'
-                            starter['anchorage_start'] = 'HOOK'
-                            starter['anchorage_end'] = 'HOOK'
-                        else:
-                            starter['bar_role'] = 'MAIN_BOTTOM'
-                            starter['anchorage_start'] = 'LAP'  # laps with dowel below
-                            starter['anchorage_end'] = 'LAP'
-                        results.append(starter)
-
-                        # DOWEL for the extra bars at the transition level
-                        # Same pattern as the bottom-of-column dowel
+                        # Emit DOWEL for the extra bars at the transition level
                         dowel_len = Lpc + Ldh
                         col_z_bottom = z_start
                         d_z_start = col_z_bottom - Ldh + COVER_MM
@@ -963,22 +949,53 @@ def calculate_column_rebar_lengths(
                             'shape': s['shape'],
                         })
                     else:
-                        # Bars REMOVED — fewer bars at this level than previous.
-                        # Current segment uses current n_bars as-is.
-                        results.append(record)
+                        # Bars REMOVED — find which sub-group terminates
+                        removed_n = prev_n_bars - n_bars
+                        # Remove from active groups (largest first)
+                        _active_groups.sort(key=lambda x: -x[0])
+                        remaining_to_remove = removed_n
+                        new_active = []
+                        for gn, gj in _active_groups:
+                            if remaining_to_remove >= gn:
+                                # This entire sub-group terminates
+                                remaining_to_remove -= gn
+                                # Emit MAIN_TOP for terminated bars
+                                term = dict(record)
+                                term['n_bars'] = gn
+                                term['bar_role'] = 'MAIN_TOP'
+                                term['anchorage_start'] = 'LAP'
+                                term['anchorage_end'] = 'HOOK'
+                                term['length_mm'] = int(round(Ldh))
+                                term['z_end_mm'] = round(z_start + Ldh, 1)
+                                term['splice_end_mm'] = None
+                                term['splice_end_end_mm'] = None
+                                results.append(term)
+                            else:
+                                new_active.append((gn, gj))
+                        _active_groups = new_active
 
-                        # The excess bars from below terminate here with hooks.
-                        # Emit a short MAIN_TOP for them at this transition.
-                        term = dict(record)
-                        term['n_bars'] = extra_n
-                        term['bar_role'] = 'MAIN_TOP'
-                        term['anchorage_start'] = 'LAP'
-                        term['anchorage_end'] = 'HOOK'
-                        term['length_mm'] = int(round(Ldh))
-                        term['z_end_mm'] = round(z_start + Ldh, 1)
-                        term['splice_end_mm'] = None
-                        term['splice_end_end_mm'] = None
-                        results.append(term)
+                # Emit split records: one per active group + the base continuous bars
+                if _active_groups:
+                    # Base continuous bars (original n minus all active extras)
+                    base_n = n_bars - sum(gn for gn, _ in _active_groups)
+                    if base_n > 0:
+                        rec_base = dict(record)
+                        rec_base['n_bars'] = base_n
+                        results.append(rec_base)
+
+                    # Each active sub-group gets its own record
+                    for gi, (gn, gj) in enumerate(_active_groups):
+                        rec_extra = dict(record)
+                        rec_extra['n_bars'] = gn
+                        rec_extra['splice_layer'] = 2 if splice_layer == 1 else 1
+                        # First segment of this group = MAIN_BOTTOM, rest = INTERMEDIATE/TOP
+                        if j == gj:
+                            rec_extra['bar_role'] = 'MAIN_BOTTOM'
+                            rec_extra['anchorage_start'] = 'LAP'
+                        elif is_top:
+                            rec_extra['bar_role'] = 'MAIN_TOP'
+                            rec_extra['anchorage_end'] = 'HOOK'
+                        results.append(rec_extra)
                 else:
                     results.append(record)
 
