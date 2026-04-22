@@ -1113,6 +1113,17 @@ def calculate_column_rebar_lengths(
     print(f'[RebarColumn] {main_count} main bar records + '
           f'{hoop_count} hoop records = {len(df)} total')
 
+    # Log n_bars transitions
+    main_df = df[df['bar_type'] == 'MAIN']
+    for mid in main_df['member_id'].unique():
+        mb = main_df[main_df['member_id'] == mid]
+        n_vals = sorted(mb['n_bars'].dropna().unique())
+        if len(n_vals) > 1:
+            dowels = len(mb[mb['bar_role'] == 'DOWEL'])
+            bottoms = len(mb[mb['bar_role'] == 'MAIN_BOTTOM'])
+            print(f'[RebarColumn] {mid}: n_bars transition {n_vals} '
+                  f'({dowels} DOWELs, {bottoms} MAIN_BOTTOMs at transitions)')
+
     # Add split columns for schema consistency (columns don't exceed 12m)
     if not df.empty:
         for col in ('split_piece', 'split_total', 'original_length_mm'):

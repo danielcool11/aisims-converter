@@ -361,6 +361,91 @@ def validate_outputs(outputs: dict) -> list:
                 'detail': f'All sections classified: {types}',
             })
 
+    # 10. Tier 2 cross-check: Members with geometry but no rebar lengths
+    rebar_beams = outputs.get('rebar_beam')
+    rebar_columns = outputs.get('rebar_column')
+    rebar_slabs = outputs.get('rebar_slab')
+    rebar_walls = outputs.get('rebar_wall')
+    rebar_stairs = outputs.get('rebar_stair')
+
+    for member_key, rebar_key, label in [
+        ('beams', rebar_beams, 'Beam'),
+        ('columns', rebar_columns, 'Column'),
+        ('slabs', rebar_slabs, 'Slab'),
+        ('walls', rebar_walls, 'Wall'),
+        ('stairs', rebar_stairs, 'Stair'),
+    ]:
+        members = outputs.get(member_key)
+        rebar = rebar_key
+        if members is None or members.empty:
+            continue
+        mid_col = 'wall_mark' if member_key == 'walls' else 'member_id'
+        if mid_col not in members.columns:
+            continue
+        member_ids = set(members[mid_col].unique())
+
+        if rebar is not None and not rebar.empty:
+            rebar_mid_col = 'wall_mark' if member_key == 'walls' else 'member_id'
+            if rebar_mid_col in rebar.columns:
+                rebar_ids = set(rebar[rebar_mid_col].unique())
+                # Members with geometry but no rebar
+                no_rebar = member_ids - rebar_ids
+                if no_rebar:
+                    results.append({
+                        'check': f'Tier 2: {label} members without rebar lengths',
+                        'status': 'WARN',
+                        'detail': f'{len(no_rebar)} {label.lower()}(s) have geometry but no rebar: '
+                                  f'{sorted(no_rebar)[:10]}',
+                    })
+                # Rebar with no geometry
+                no_geom = rebar_ids - member_ids
+                if no_geom:
+                    results.append({
+                        'check': f'Tier 2: {label} rebar without member geometry',
+                        'status': 'WARN',
+                        'detail': f'{len(no_geom)} rebar group(s) have no matching member: '
+                                  f'{sorted(no_geom)[:10]}',
+                    })
+        else:
+            if len(member_ids) > 0:
+                results.append({
+                    'check': f'Tier 2: {label} rebar lengths missing entirely',
+                    'status': 'WARN',
+                    'detail': f'{len(member_ids)} {label.lower()} members exist but no RebarLengths{label}.csv',
+                })
+
+    # 11. Column n_bars transition detection
+    rebar_columns = outputs.get('rebar_column')  # refresh ref after loop
+    if rebar_columns is not None and not rebar_columns.empty:
+        if 'n_bars' in rebar_columns.columns and 'member_id' in rebar_columns.columns:
+            main_bars = rebar_columns[rebar_columns['bar_type'] == 'MAIN'] if 'bar_type' in rebar_columns.columns else rebar_columns
+            transitions = []
+            for mid in main_bars['member_id'].unique():
+                mb = main_bars[main_bars['member_id'] == mid]
+                n_vals = sorted(mb['n_bars'].dropna().unique())
+                if len(n_vals) > 1:
+                    transitions.append(f'{mid}({",".join(str(int(v)) for v in n_vals)})')
+            if transitions:
+                results.append({
+                    'check': 'Tier 2: column n_bars transitions (split bars)',
+                    'status': 'PASS',
+                    'detail': f'{len(transitions)} columns with bar count changes: '
+                              f'{", ".join(transitions[:10])}',
+                })
+
+    # 12. Stair name traceability (ST→SS rename)
+    if stairs is not None and not stairs.empty and 'member_id' in stairs.columns:
+        ss_names = [mid for mid in stairs['member_id'].unique() if 'SS' in str(mid).upper()]
+        if ss_names:
+            original_names = [re.sub(r'SS(\d)', r'ST\1', mid) for mid in ss_names]
+            pairs = [f'{ss}(orig:{st})' for ss, st in zip(ss_names, original_names) if ss != st]
+            if pairs:
+                results.append({
+                    'check': 'Traceability: stair ST→SS rename',
+                    'status': 'PASS',
+                    'detail': f'{len(pairs)} stairs renamed: {", ".join(pairs[:5])}',
+                })
+
     return results
 
 
