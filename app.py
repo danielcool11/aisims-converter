@@ -381,6 +381,9 @@ elif grid_mode == "Upload CSV":
 # ══════════════════════════════════════════════════════════════
 st.header("Step 3: Convert")
 
+building_code = st.text_input("Building Code (Bar ID prefix)", value="BD01", max_chars=4,
+                               help="4-char building code for Bar ID format (e.g., BD01, BD02)")
+
 if st.button("CONVERT", type="primary", use_container_width=True):
     st.session_state.log = []
     st.session_state.outputs = None
@@ -419,7 +422,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 f"{len(mgt_data.get('rebar_grades', {}))} rebar grades, "
                 f"{len(mgt_data.get('wall_marks', {}))} wall marks")
 
-        # ── Phase 1: Foundation ──
+        # ── Phase 1: Foundation (Nodes, Materials, Sections) ──
         progress.progress(15, text="Phase 1: Nodes...")
 
         # Convert nodes (initially without grid or with manual grid)
@@ -470,9 +473,9 @@ if st.button("CONVERT", type="primary", use_container_width=True):
             f"{len(elem_result['columns'])} columns, "
             f"{len(elem_result['walls'])} walls")
 
-        # ── Phase 2.5: Grid auto-detection ──
+        # ── Phase 2a: Grid auto-detection ──
         if grid_mode == "Auto-detect from columns" and not elem_result['columns'].empty:
-            progress.progress(50, text="Phase 2.5: Auto-detecting grid...")
+            progress.progress(50, text="Phase 2a: Auto-detecting grid...")
             col_df = elem_result['columns']
             col_positions = list(zip(col_df['x_mm'].tolist(), col_df['y_mm'].tolist()))
             grid_result = detect_grid_from_columns(col_positions)
@@ -495,9 +498,9 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 outputs['columns'] = elem_result['columns']
                 outputs['walls'] = elem_result['walls']
 
-        # ── Phase 2.6: Beam merge ──
+        # ── Phase 2b: Beam merge ──
         if 'beams' in outputs and not outputs['beams'].empty:
-            progress.progress(52, text="Phase 2.6: Merging beam spans...")
+            progress.progress(52, text="Phase 2b: Merging beam spans...")
             try:
                 beams_before = len(outputs['beams'])
                 outputs['beams'] = merge_beam_spans(
@@ -508,7 +511,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
             except Exception as e:
                 log(f"Beam merge FAILED (keeping original): {e}")
 
-        # ── Phase 2.7: Add column width at beam supports ──
+        # ── Phase 2c: Add column width at beam supports ──
         # Use coordinate matching (not grid labels) to avoid false positives
         # from beam merge borrowing grid labels at beam-beam junctions.
         if 'beams' in outputs and 'columns' in outputs:
@@ -751,12 +754,12 @@ if st.button("CONVERT", type="primary", use_container_width=True):
             except Exception as e:
                 log(f"Column width on beams FAILED: {e}")
 
-        # ── Phase 2.8: Reference line detection ──
+        # ── Phase 2d: Reference line detection ──
         if 'beams' in outputs and 'columns' in outputs:
             try:
                 from converters.grid_detect import detect_reference_lines, assign_member_refs
 
-                # Get grid lines from Phase 2.5
+                # Get grid lines from Phase 2a
                 gx = grid_result.get('grid_x', []) if 'grid_result' in locals() and grid_result else []
                 gy = grid_result.get('grid_y', []) if 'grid_result' in locals() and grid_result else []
                 # Manual grid input fallback
@@ -886,8 +889,8 @@ if st.button("CONVERT", type="primary", use_container_width=True):
             except Exception as e:
                 log(f"Basement wall element processing: {e}")
 
-        # ── Phase 2.7b: Fill missing beam col_width from basement wall polygons ──
-        # Phase 2.7 ran before basement walls were available. Now that
+        # ── Phase 2e: Fill missing beam col_width from basement wall polygons ──
+        # Phase 2c ran before basement walls were available. Now that
         # bwall_members exists, scan beams with col_width=0 and check if
         # their endpoints fall within a basement wall panel polygon.
         # Level-aware: only match the wall level directly below the beam
@@ -920,7 +923,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
 
                     def _level_below_2_7b(beam_level):
                         """Level directly below beam_level, using _level_order
-                        from Phase 2.7. Returns None if unavailable."""
+                        from Phase 2c. Returns None if unavailable."""
                         try:
                             i = _level_index.get(beam_level)
                             if i is None or i == 0:
@@ -955,9 +958,9 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                                     break
                     if fixed > 0:
                         outputs['beams'] = beams_df
-                        log(f"Phase 2.7b: {fixed} beam endpoints matched basement wall polygons")
+                        log(f"Phase 2e: {fixed} beam endpoints matched basement wall polygons")
             except Exception as e:
-                log(f"Phase 2.7b basement wall polygon check: {e}")
+                log(f"Phase 2e: basement wall polygon check: {e}")
 
         # ── Phase 3: Reinforcement ──
         if design_beam_file:
@@ -1132,14 +1135,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
             except Exception as e:
                 log(f"Junction detection FAILED: {e}")
 
-        # ── Phase 5: Validation ──
-        progress.progress(85, text="Phase 5: Validation...")
-        validation_results = validate_outputs(outputs)
-        report_text = format_report(validation_results)
-        outputs['validation_report'] = report_text
-        log("Validation complete")
-
-        # ── Phase 5.5: Build project-level fc/fy maps from beam materials ──
+        # ── Phase 4: Build project-level fc/fy maps ──
         fc_by_level = {}
         all_fc_values = []
         if 'beams' in outputs and not outputs['beams'].empty:
@@ -1156,7 +1152,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
         log(f"Material maps: fc_by_level has {len(fc_by_level)} levels, "
             f"default_fc={default_fc}, dia_fy_map D10={dia_fy_map.get(10)}/D16={dia_fy_map.get(16)}")
 
-        # ── Phase 6: Tier 2 Rebar Lengths ──
+        # ── Phase 5: Rebar Lengths (Tier 2) ──
         dev_path = os.path.join(os.path.dirname(__file__), 'config', 'development_lengths.csv')
         lap_path = os.path.join(os.path.dirname(__file__), 'config', 'lap_splice.csv')
         cover_path = os.path.join(os.path.dirname(__file__), 'config', 'cover_requirements.csv')
@@ -1166,7 +1162,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
 
             # Beam
             if all(k in outputs for k in ('beams', 'columns', 'sections', 'reinf_beam', 'nodes')):
-                progress.progress(87, text="Phase 6: Rebar lengths - Beam...")
+                progress.progress(87, text="Phase 5: Rebar lengths - Beam...")
                 try:
                     rebar_beam = calculate_beam_rebar_lengths(
                         outputs['beams'], outputs['columns'], outputs['sections'],
@@ -1182,7 +1178,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
 
             # Column
             if all(k in outputs for k in ('columns', 'reinf_column', 'sections', 'nodes')):
-                progress.progress(89, text="Phase 6: Rebar lengths - Column...")
+                progress.progress(89, text="Phase 5: Rebar lengths - Column...")
                 try:
                     rebar_col = calculate_column_rebar_lengths(
                         outputs['columns'], outputs['reinf_column'], outputs['sections'],
@@ -1196,7 +1192,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
 
             # Slab
             if all(k in outputs for k in ('slabs', 'reinf_slab', 'beams', 'nodes')):
-                progress.progress(91, text="Phase 6: Rebar lengths - Slab...")
+                progress.progress(91, text="Phase 5: Rebar lengths - Slab...")
                 try:
                     rebar_slab = calculate_slab_rebar_lengths(
                         outputs['slabs'], outputs['reinf_slab'], outputs['beams'],
@@ -1210,7 +1206,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
 
             # Stair
             if all(k in outputs for k in ('stairs', 'reinf_stair')):
-                progress.progress(93, text="Phase 6: Rebar lengths - Stair...")
+                progress.progress(93, text="Phase 5: Rebar lengths - Stair...")
                 try:
                     rebar_stair = calculate_stair_rebar_lengths(
                         outputs['stairs'], outputs['reinf_stair'],
@@ -1224,7 +1220,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
 
             # Wall
             if all(k in outputs for k in ('walls', 'reinf_wall', 'nodes')):
-                progress.progress(95, text="Phase 6: Rebar lengths - Wall...")
+                progress.progress(95, text="Phase 5: Rebar lengths - Wall...")
                 try:
                     rebar_wall = calculate_wall_rebar_lengths(
                         outputs['walls'], outputs['reinf_wall'], outputs['nodes'],
@@ -1238,7 +1234,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
 
             # Footing
             if all(k in outputs for k in ('footings', 'reinf_footing')):
-                progress.progress(97, text="Phase 6: Rebar lengths - Footing...")
+                progress.progress(97, text="Phase 5: Rebar lengths - Footing...")
                 try:
                     rebar_footing = calculate_footing_rebar_lengths(
                         outputs['footings'], outputs['reinf_footing'],
@@ -1252,7 +1248,7 @@ if st.button("CONVERT", type="primary", use_container_width=True):
 
             # Basement Wall
             if all(k in outputs for k in ('bwall_members', 'reinf_bwall', 'nodes')):
-                progress.progress(99, text="Phase 6: Rebar lengths - Basement Wall...")
+                progress.progress(99, text="Phase 5: Rebar lengths - Basement Wall...")
                 try:
                     rebar_bwall = calculate_basement_wall_rebar_lengths(
                         outputs['bwall_members'], outputs['reinf_bwall'], outputs['nodes'],
@@ -1267,6 +1263,22 @@ if st.button("CONVERT", type="primary", use_container_width=True):
             log(f"Tier 2 complete: {tier2_count} calculators ran")
         else:
             log("Tier 2 skipped: development_lengths.csv or lap_splice.csv not found")
+
+        # ── Phase 6: Bar ID & Member Instance ID ──
+        progress.progress(96, text="Phase 6: Bar ID assignment...")
+        try:
+            from converters.bar_id import assign_bar_ids
+            assign_bar_ids(outputs, building=building_code, log_fn=log)
+            log("Phase 6: Bar ID assignment complete")
+        except Exception as e:
+            log(f"Phase 6: Bar ID assignment FAILED: {e}")
+
+        # ── Phase 7: Validation ──
+        progress.progress(98, text="Phase 7: Validation...")
+        validation_results = validate_outputs(outputs)
+        report_text = format_report(validation_results)
+        outputs['validation_report'] = report_text
+        log("Validation complete")
 
         progress.progress(100, text="Done!")
         st.session_state.outputs = outputs
@@ -1358,3 +1370,4 @@ if st.session_state.outputs:
         mime="application/zip",
         use_container_width=True,
     )
+# force reload 1776558291
