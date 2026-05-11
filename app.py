@@ -35,6 +35,7 @@ from converters.validation import validate_outputs, format_report
 from converters.wall_dedup import deduplicate_walls
 from converters.junction_polygon import run_junction_detection
 from converters.beam_merge import merge_beam_spans
+from converters.wall_merge import merge_wall_panels
 from converters.concrete_below import build_has_concrete_below
 from tier2.rebar_lengths_beam import calculate_beam_rebar_lengths
 from tier2.rebar_lengths_column import calculate_column_rebar_lengths
@@ -497,6 +498,18 @@ if st.button("CONVERT", type="primary", use_container_width=True):
                 outputs['beams'] = elem_result['beams']
                 outputs['columns'] = elem_result['columns']
                 outputs['walls'] = elem_result['walls']
+
+        # ── Phase 2a-wall: Wall merge (#402) ──
+        if 'walls' in outputs and not outputs['walls'].empty:
+            progress.progress(51, text="Phase 2a: Merging wall panels...")
+            try:
+                walls_before = len(outputs['walls'])
+                outputs['walls'] = merge_wall_panels(
+                    outputs['walls'], outputs.get('nodes'),
+                )
+                log(f"Wall merge: {walls_before} panels → {len(outputs['walls'])} walls")
+            except Exception as e:
+                log(f"Wall merge FAILED (keeping original): {e}")
 
         # ── Phase 2b: Beam merge ──
         if 'beams' in outputs and not outputs['beams'].empty:
