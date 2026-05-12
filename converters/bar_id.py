@@ -347,12 +347,35 @@ def assign_bar_ids(outputs: dict, building: str = 'BD01', log_fn=None):
     # Slab
     slabs_df = outputs.get('slabs')
     if slabs_df is not None and not slabs_df.empty:
+        # Detect symbol collisions: different member_ids that produce the same
+        # (floor, symbol) after floor-prefix stripping.
+        # e.g. RS12 → S012, PH2S12 → S012 at Roof → collision.
+        symbol_to_mids = defaultdict(set)
+        for _, r in slabs_df.iterrows():
+            floor = _format_floor(str(r.get('level', '')))
+            raw_mid = str(r.get('member_id', ''))
+            symbol = _format_symbol(raw_mid, str(r.get('level', '')), 'SLAB')
+            symbol_to_mids[(floor, symbol)].add(raw_mid)
+        colliding_keys = {k for k, v in symbol_to_mids.items() if len(v) > 1}
+        if colliding_keys:
+            bad_mids = set()
+            for v in (symbol_to_mids[k] for k in colliding_keys):
+                bad_mids.update(v)
+            log(f"Bar ID: Slab symbol collision — {len(bad_mids)} marks use unstripped ID: {sorted(bad_mids)}")
+
+        def _slab_symbol(raw_mid: str, level: str) -> str:
+            floor = _format_floor(level)
+            symbol = _format_symbol(raw_mid, level, 'SLAB')
+            if (floor, symbol) in colliding_keys:
+                return _pad_symbol(raw_mid)
+            return symbol
+
         has_seg = 'segment_id' in slabs_df.columns and slabs_df['segment_id'].notna().any()
         if has_seg:
             for i, r in slabs_df.iterrows():
                 floor = _format_floor(str(r.get('level', '')))
                 raw_mid = str(r.get('member_id', ''))
-                symbol = _format_symbol(raw_mid, str(r.get('level', '')), 'SLAB')
+                symbol = _slab_symbol(raw_mid, str(r.get('level', '')))
                 instance = _extract_seg_instance(str(r.get('segment_id', ''))) or '000'
                 slabs_df.at[i, 'member_instance_id'] = f'{building}-{floor}-{symbol}-{instance}'
         else:
@@ -369,7 +392,7 @@ def assign_bar_ids(outputs: dict, building: str = 'BD01', log_fn=None):
             for i, r in slabs_df.iterrows():
                 floor = _format_floor(str(r.get('level', '')))
                 raw_mid = str(r.get('member_id', ''))
-                symbol = _format_symbol(raw_mid, str(r.get('level', '')), 'SLAB')
+                symbol = _slab_symbol(raw_mid, str(r.get('level', '')))
                 px = round(float(r.get('centroid_x_mm', 0) or 0), 0)
                 py = round(float(r.get('centroid_y_mm', 0) or 0), 0)
                 instance = pos_ids.get((raw_mid, px, py), '000')
