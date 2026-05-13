@@ -600,6 +600,8 @@ def _emit_dowel(results, wid, wall_mark, level, dia, width, spacing,
 
     # Use first story's XY coordinates for dowel mesh
     mesh_dowel = {}
+    wall_dir_x_mm = None
+    wall_dir_y_mm = None
     if seg:
         mesh_dowel = {
             'mesh_origin_x_mm': round(seg['x_min'] + cover, 1),
@@ -610,6 +612,14 @@ def _emit_dowel(results, wid, wall_mark, level, dia, width, spacing,
             'mesh_terminus_z_mm': round(z_start + dowel_len, 1),
             'mesh_distribution_axis': 'ALONG_WALL_LENGTH',
         }
+        # Wall plan direction for distribution (same logic as V-bars)
+        runs_along_y = seg['y_max'] - seg['y_min'] > seg['x_max'] - seg['x_min']
+        if runs_along_y:
+            wall_dir_x_mm = 0.0
+            wall_dir_y_mm = round(seg['y_max'] - seg['y_min'], 1)
+        else:
+            wall_dir_x_mm = round(seg['x_max'] - seg['x_min'], 1)
+            wall_dir_y_mm = 0.0
 
     results.append({
         'wall_id': wid, 'wall_mark': wall_mark, 'level': level,
@@ -623,5 +633,7 @@ def _emit_dowel(results, wid, wall_mark, level, dia, width, spacing,
         'splice_end_mm': round(z_bottom, 1),
         'splice_end_end_mm': round(z_bottom + Lpc, 1),
         'cover_mm': cover,
+        'wall_dir_x_mm': wall_dir_x_mm,
+        'wall_dir_y_mm': wall_dir_y_mm,
         **mesh_dowel,
     })
