@@ -590,19 +590,21 @@ def _assign_rebar_ids(outputs: dict, building: str, log):
             mid_instance = ''
 
             if match_type == 'bbox':
-                # Beam: bbox containment — pick longest span when boundary ties
+                # Beam: bbox containment — pick closest center when multiple match
                 try:
                     rx = float(r.get('x_start_mm', 0) or 0)
                     ry = float(r.get('y_start_mm', 0) or 0)
                 except (ValueError, TypeError):
                     rx, ry = 0, 0
                 tol = 500
-                best_span = -1
+                best_dist = float('inf')
                 for (x_min, x_max, y_min, y_max, inst) in lookup.get((raw_mid, level), []):
                     if x_min - tol <= rx <= x_max + tol and y_min - tol <= ry <= y_max + tol:
-                        span = (x_max - x_min) + (y_max - y_min)
-                        if span > best_span:
-                            best_span = span
+                        cx = (x_min + x_max) / 2
+                        cy = (y_min + y_max) / 2
+                        dist = (rx - cx) ** 2 + (ry - cy) ** 2
+                        if dist < best_dist:
+                            best_dist = dist
                             mid_instance = inst
 
             elif match_type == 'closest':
