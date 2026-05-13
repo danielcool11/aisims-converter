@@ -590,22 +590,22 @@ def _assign_rebar_ids(outputs: dict, building: str, log):
             mid_instance = ''
 
             if match_type == 'bbox':
-                # Beam: bbox containment — pick closest center when multiple match
+                # Beam: bbox containment using bar midpoint for matching
                 try:
                     rx = float(r.get('x_start_mm', 0) or 0)
                     ry = float(r.get('y_start_mm', 0) or 0)
+                    rx2 = float(r.get('x_end_mm', 0) or 0)
+                    ry2 = float(r.get('y_end_mm', 0) or 0)
                 except (ValueError, TypeError):
-                    rx, ry = 0, 0
+                    rx, ry, rx2, ry2 = 0, 0, 0, 0
+                # Use bar midpoint — start is at support (boundary), mid is inside the span
+                rmx = (rx + rx2) / 2 if rx2 != 0 else rx
+                rmy = (ry + ry2) / 2 if ry2 != 0 else ry
                 tol = 500
-                best_dist = float('inf')
                 for (x_min, x_max, y_min, y_max, inst) in lookup.get((raw_mid, level), []):
-                    if x_min - tol <= rx <= x_max + tol and y_min - tol <= ry <= y_max + tol:
-                        cx = (x_min + x_max) / 2
-                        cy = (y_min + y_max) / 2
-                        dist = (rx - cx) ** 2 + (ry - cy) ** 2
-                        if dist < best_dist:
-                            best_dist = dist
-                            mid_instance = inst
+                    if x_min - tol <= rmx <= x_max + tol and y_min - tol <= rmy <= y_max + tol:
+                        mid_instance = inst
+                        break
 
             elif match_type == 'closest':
                 # Closest centroid
