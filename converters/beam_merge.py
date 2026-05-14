@@ -23,6 +23,13 @@ from typing import Dict
 
 CONTIGUITY_TOL = 100.0  # mm — max gap between consecutive element endpoints
 SUPPORT_XY_TOL = 500.0  # mm — proximity tolerance for column/beam support matching
+MIN_SPAN_LENGTH = 1000.0  # mm — minimum structural beam span. Pass 2 crossings
+                          # within this distance of each other are clustered into
+                          # one support (column preferred over wall). Prevents
+                          # 170mm/400mm artifact pieces from wall-edge splits
+                          # near column lines. Matches anchorage length floor
+                          # (~40d for D22 = 880mm) — below this, a beam cannot
+                          # physically be reinforced.
 
 
 def _beam_direction(x_from, y_from, x_to, y_to):
@@ -689,9 +696,11 @@ def merge_beam_spans(
             h_mm = float(row.get('h_mm', 700) or 700)
             b_mm = float(row.get('b_mm', 300) or 300)
 
-            # Find perpendicular MERGED beams that cross this beam
+            # Find perpendicular MERGED beams that cross this beam.
+            # Tag each crossing with origin ('beam' or 'wall') so we can
+            # prefer structural supports over wall edges when clustering.
             perp_dir = 'Y' if direction == 'X' else 'X'
-            cross_positions = []
+            cross_tagged = []  # list of (position, origin)
 
             if direction == 'X':
                 x_min = min(row['x_from_mm'], row['x_to_mm'])
@@ -707,7 +716,7 @@ def merge_beam_spans(
                         by_min = min(bs['y_from'], bs['y_to'])
                         by_max = max(bs['y_from'], bs['y_to'])
                         if by_min - SUPPORT_XY_TOL <= y_mid <= by_max + SUPPORT_XY_TOL:
-                            cross_positions.append(bx)
+                            cross_tagged.append((bx, 'beam'))
 
                 # Wall supports for narrow beams (wall beams / lintels)
                 # Check walls at same level AND level below (walls span up
@@ -720,7 +729,7 @@ def merge_beam_spans(
                         wx = ws['x']
                         if x_min + SUPPORT_XY_TOL < wx < x_max - SUPPORT_XY_TOL:
                             if ws['y_min'] - SUPPORT_XY_TOL <= y_mid <= ws['y_max'] + SUPPORT_XY_TOL:
-                                cross_positions.append(wx)
+                                cross_tagged.append((wx, 'wall'))
             else:
                 y_min = min(row['y_from_mm'], row['y_to_mm'])
                 y_max = max(row['y_from_mm'], row['y_to_mm'])
@@ -735,7 +744,7 @@ def merge_beam_spans(
                         bx_min = min(bs['x_from'], bs['x_to'])
                         bx_max = max(bs['x_from'], bs['x_to'])
                         if bx_min - SUPPORT_XY_TOL <= x_mid <= bx_max + SUPPORT_XY_TOL:
-                            cross_positions.append(by)
+                            cross_tagged.append((by, 'beam'))
 
                 # Wall supports for narrow beams
                 if b_mm <= NARROW_BEAM_WIDTH:
@@ -746,7 +755,24 @@ def merge_beam_spans(
                         wy = ws['y']
                         if y_min + SUPPORT_XY_TOL < wy < y_max - SUPPORT_XY_TOL:
                             if ws['x_min'] - SUPPORT_XY_TOL <= x_mid <= ws['x_max'] + SUPPORT_XY_TOL:
-                                cross_positions.append(wy)
+                                cross_tagged.append((wy, 'wall'))
+
+            # Cluster crossings within MIN_SPAN_LENGTH. Prefer 'beam' over 'wall'
+            # when two crossings collide (real perpendicular beam is a stronger
+            # support signal than a wall edge that might be parallel to this beam).
+            # This eliminates 170mm/400mm artifact pieces caused by wall edges
+            # near column/beam lines (KDS anchorage floor ~40d ≈ 880mm for D22).
+            cross_tagged.sort(key=lambda c: c[0])
+            clustered = []
+            for pos, origin in cross_tagged:
+                if not clustered or pos - clustered[-1][0] >= MIN_SPAN_LENGTH:
+                    clustered.append((pos, origin))
+                elif origin == 'beam' and clustered[-1][1] == 'wall':
+                    # Real beam support beats a nearby wall edge — replace
+                    clustered[-1] = (pos, origin)
+                # else: discard this crossing (too close, weaker or equal origin)
+
+            cross_positions = [pos for pos, _ in clustered]
 
             if not cross_positions:
                 pass2_results.append(row.to_dict())
